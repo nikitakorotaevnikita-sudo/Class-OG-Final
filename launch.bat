@@ -23,7 +23,7 @@ echo ================================================
 echo   Citizens Appeals Classification Agent
 echo ================================================
 echo   [1] Run tests
-echo   [2] Classify manually (Python interactive)
+echo   [2] Classify manually (type appeal text)
 echo   [3] Start API server (port 8000)
 echo   [4] Operator mode  (verify + fine-tuning)
 echo ================================================
@@ -36,11 +36,7 @@ if "%CHOICE%"=="1" (
     goto :end
 )
 if "%CHOICE%"=="2" (
-    echo Use: result = agent.classify("text")
-    echo      print(agent.format_for_operator(result))
-    echo Exit: exit()
-    echo.
-    venv\Scripts\python.exe -i -c "import sys; sys.path.insert(0, 'src'); from classifier_agent import ClassifierAgent; agent = ClassifierAgent(); print('Agent ready.')"
+    venv\Scripts\python.exe src/classify_manual.py
     goto :end
 )
 if "%CHOICE%"=="3" (
