@@ -1,5 +1,85 @@
 <!doctype html>
 <html lang="ru">
-<head><meta charset="utf-8"><title>OG Demo</title></head>
-<body><p>Загрузка...</p></body>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Классификация обращений граждан</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 text-gray-900 min-h-screen">
+  <div class="max-w-3xl mx-auto p-6">
+
+    <header class="mb-6 flex items-end justify-between">
+      <h1 class="text-2xl font-semibold">Классификация обращений граждан</h1>
+      <span class="text-sm text-gray-500">v.1 · MVP demo</span>
+    </header>
+
+    <!-- Форма ввода -->
+    <section class="bg-white rounded-lg shadow p-5 mb-6">
+      <label class="block mb-2 font-medium">Примеры обращений:</label>
+      <select id="examples-select" class="w-full border rounded px-3 py-2 mb-4">
+        <option value="">— Выберите пример —</option>
+      </select>
+
+      <label class="block mb-2 font-medium">Текст обращения:</label>
+      <textarea
+        id="appeal-text"
+        rows="8"
+        class="w-full border rounded px-3 py-2 mb-4 font-mono text-sm"
+        placeholder="Вставьте или введите текст обращения..."></textarea>
+
+      <button
+        id="classify-btn"
+        class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 rounded">
+        Классифицировать
+      </button>
+
+      <div id="loading" class="hidden mt-4 text-center text-gray-500">
+        <span class="inline-block animate-spin">⏳</span> Классификация...
+      </div>
+    </section>
+
+    <!-- Результат -->
+    <section id="result" class="hidden bg-white rounded-lg shadow p-5 mb-6">
+      <div id="result-header" class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-semibold">Результат</h2>
+        <span id="overall-confidence" class="text-sm font-medium"></span>
+      </div>
+
+      <div id="result-meta" class="grid grid-cols-2 gap-3 text-sm mb-4"></div>
+
+      <div id="needs-verification" class="hidden bg-amber-50 border border-amber-200 text-amber-900 rounded px-3 py-2 mb-4 text-sm">
+        ⚠️ Требует верификации оператором
+      </div>
+
+      <div id="questions" class="space-y-3 mb-4"></div>
+
+      <div class="flex gap-2 mb-3">
+        <button id="btn-confirm" class="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded">✓ Подтвердить</button>
+        <button id="btn-correct" class="flex-1 bg-amber-500 hover:bg-amber-600 text-white py-2 rounded">✎ Исправить</button>
+        <button id="btn-reject" class="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 rounded">✗ Отклонить</button>
+      </div>
+
+      <div id="correct-form" class="hidden border-t pt-3 mt-3">
+        <label class="block text-sm font-medium mb-1">Введите правильный код вопроса:</label>
+        <div class="flex gap-2">
+          <input id="correct-code" type="text" placeholder="0005.0005.0051.1103"
+                 class="flex-1 border rounded px-3 py-2 font-mono text-sm">
+          <button id="btn-correct-save" class="bg-amber-500 hover:bg-amber-600 text-white px-4 rounded">Сохранить</button>
+        </div>
+      </div>
+
+      <details class="mt-4 text-sm">
+        <summary class="cursor-pointer text-gray-600 hover:text-gray-900">▸ Показать JSON ответа</summary>
+        <pre id="json-pre" class="mt-2 bg-gray-100 rounded p-3 overflow-x-auto text-xs"></pre>
+      </details>
+    </section>
+
+    <!-- Toast -->
+    <div id="toast" class="hidden fixed bottom-4 right-4 bg-gray-900 text-white px-4 py-2 rounded shadow-lg"></div>
+
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
 </html>
