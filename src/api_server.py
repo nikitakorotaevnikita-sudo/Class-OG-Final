@@ -60,6 +60,7 @@ class QuestionResult(BaseModel):
 
 class ClassifyResponse(BaseModel):
     appeal_id: Optional[str]
+    log_id: Optional[str]            # Для последующего /verify
     vid_obrascheniya: str
     tip_obrascheniya: str
     is_ustnoe: bool
@@ -122,6 +123,7 @@ async def classify_appeal(request: ClassifyRequest):
 
         return ClassifyResponse(
             appeal_id=request.appeal_id,
+            log_id=result.log_id,
             vid_obrascheniya=result.vid_obrascheniya,
             tip_obrascheniya=result.tip_obrascheniya,
             is_ustnoe=result.is_ustное,
