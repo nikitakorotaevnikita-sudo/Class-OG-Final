@@ -79,30 +79,46 @@ if %errorlevel% neq 0 (
 echo    OK: Dependencies installed
 
 :: =============================================================
-:: STEP 4: Check .env
+:: STEP 4: Configure .env
 :: =============================================================
 echo.
 echo [4/5] Checking .env configuration...
 
-if exist ".env" (
-    findstr /C:"gsk_" ".env" >nul 2>&1
-    if !errorlevel! == 0 (
-        echo    OK: .env found with GROQ_API_KEY
-    ) else (
-        echo    WARN: .env found but GROQ_API_KEY may be missing
-        echo    Edit .env and set GROQ_API_KEY=gsk_...
-    )
-) else (
-    echo    .env not found -- copying from .env.example
+set NEED_KEY=0
+
+if not exist ".env" (
     copy ".env.example" ".env" >nul
+    set NEED_KEY=1
+) else (
+    :: Real key = contains GROQ_API_KEY=gsk_ AND does NOT contain PASTE
+    findstr /C:"GROQ_API_KEY=gsk_" ".env" >nul 2>&1
+    if !errorlevel! neq 0 set NEED_KEY=1
+    findstr /C:"PASTE_YOUR_GROQ_API_KEY_HERE" ".env" >nul 2>&1
+    if !errorlevel! == 0 set NEED_KEY=1
+)
+
+if !NEED_KEY! == 1 (
+    echo    GROQ_API_KEY not configured.
     echo.
-    echo    !! ACTION REQUIRED !!
-    echo    Open .env and replace PASTE_YOUR_GROQ_API_KEY_HERE
-    echo    with your actual key from: https://console.groq.com/keys
+    echo    Get your free key at: https://console.groq.com/keys
+    echo    Sign up via Google or email -- no credit card needed.
+    echo    The key looks like: gsk_xxxxxxxxxxxxxxxxxxxx
     echo.
-    echo    Then run install.bat again to build the vector DB.
-    pause
-    exit /b 0
+    set /p USER_KEY=   Enter GROQ_API_KEY:
+    echo.
+
+    echo !USER_KEY! | findstr /C:"gsk_" >nul 2>&1
+    if !errorlevel! neq 0 (
+        echo    ERROR: Key must start with gsk_
+        echo    Get a free key at: https://console.groq.com/keys
+        pause
+        exit /b 1
+    )
+
+    powershell -Command "(Get-Content '.env') -replace 'GROQ_API_KEY=.*', 'GROQ_API_KEY=!USER_KEY!' | Set-Content '.env' -Encoding UTF8"
+    echo    OK: GROQ_API_KEY saved to .env
+) else (
+    echo    OK: .env found with GROQ_API_KEY
 )
 
 :: =============================================================

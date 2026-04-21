@@ -148,23 +148,53 @@ similarities = embeddings_matrix @ query_vector   # одна строка код
 
 ## Быстрый старт
 
-### Установка (один раз)
+### Шаг 1 — Получить бесплатный ключ Groq
 
-Двойной клик по **`install.bat`** → всё установится автоматически.
+Groq — это облачный сервис для запуска языковых моделей. Ключ бесплатный и не требует банковской карты.
+
+1. Перейди на https://console.groq.com/keys
+2. Зарегистрируйся (через Google или email)
+3. Нажми **«Create API Key»** → задай любое имя
+4. Скопируй ключ — он начинается с `gsk_...`
+
+> ⚠️ Ключ показывается только один раз. Сохрани его сразу.
+
+### Шаг 2 — Установка (один раз)
+
+Двойной клик по **`install.bat`** — скрипт сам проведёт по всем шагам:
+
+1. Проверит Python 3.11
+2. Создаст виртуальное окружение (`venv`)
+3. Установит зависимости
+4. **Запросит `GROQ_API_KEY`** и сохранит его в `.env` автоматически
+5. Построит векторную базу (~5–15 минут при первом запуске)
+
+```
+[4/5] Checking .env configuration...
+   GROQ_API_KEY not configured.
+
+   Get your free key at: https://console.groq.com/keys
+   Sign up via Google or email -- no credit card needed.
+   The key looks like: gsk_xxxxxxxxxxxxxxxxxxxx
+
+   Enter GROQ_API_KEY: █
+```
+
+> Если `.env` уже содержит валидный ключ — шаг с запросом пропускается автоматически.
 
 Или через PowerShell:
 ```powershell
-cd "C:\Users\Администратор\Desktop\Class OG Final"
+cd "C:\путь\до\папки\Class OG Final"
 .\setup.ps1
 ```
 
-### Запуск
+### Шаг 3 — Запуск
 
 Двойной клик по **`launch.bat`** → выбрать режим:
 
 ```
 [1] Run tests          — проверить что агент работает
-[2] Classify manually  — Python-консоль с агентом
+[2] Classify manually  — ввести текст обращения вручную
 [3] Start API server   — REST API на порту 8000
 [4] Operator mode      — верификация + дообучение
 ```
