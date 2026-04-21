@@ -131,50 +131,21 @@ async def health_check():
     "/classify",
     response_model=ClassifyResponse,
     summary="Классифицировать обращение",
-    description="""Классифицирует обращение гражданина. Принимает JSON или form-data с текстом/файлом.""",
+    description="Классифицирует обращение гражданина (JSON)",
     tags=["Классификация"],
 )
-async def classify_appeal(
-    appeal_text: Optional[str] = Form(None, description="Текст обращения"),
-    file: Optional[UploadFile] = File(None, description="TXT или PDF файл"),
-    appeal_id: Optional[str] = Form(None),
+async def classify_appeal_json(
+    request: ClassifyRequest,
 ) -> ClassifyResponse:
-    """Классифицирует обращение — поддерживает JSON и form-data"""
+    """Классифицирует обращение — JSON тело"""
     if not agent:
         raise HTTPException(status_code=503, detail="Агент не инициализирован")
 
-    text = appeal_text
-    was_truncated = False
-
-    if file:
-        file_content = await file.read()
-        file_size = len(file_content)
-        
-        validate_file_size(file_size)
-        
-        filename = file.filename or "unknown.txt"
-        
-        try:
-            text, was_truncated = extract_text(file_content, filename)
-        except ScanNotSupportedError as e:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Не удалось извлечь текст из файла. Файл является сканом (изображением).",
-            )
-        except TextExtractionError as e:
-            raise HTTPException(
-                status_code=400,
-                detail=str(e),
-            )
-
-    if not text or not text.strip():
-        raise HTTPException(
-            status_code=400,
-            detail="Текст обращения пустой",
-        )
+    if not request.appeal_text:
+        raise HTTPException(status_code=400, detail="Текст обращения пустой")
 
     try:
-        result: ClassificationResult = agent.classify(text)
+        result: ClassificationResult = agent.classify(request.appeal_text)
         operator_card = agent.format_for_operator(result)
 
         questions_out = [
@@ -193,7 +164,7 @@ async def classify_appeal(
         ]
 
         return ClassifyResponse(
-            appeal_id=appeal_id,
+            appeal_id=request.appeal_id,
             log_id=result.log_id,
             vid_obrascheniya=result.vid_obrascheniya,
             tip_obrascheniya=result.tip_obrascheniya,
@@ -202,7 +173,7 @@ async def classify_appeal(
             overall_confidence=result.overall_confidence,
             needs_verification=result.needs_verification,
             operator_card=operator_card,
-            was_truncated=was_truncated,
+            was_truncated=False,
         )
 
     except Exception as e:
