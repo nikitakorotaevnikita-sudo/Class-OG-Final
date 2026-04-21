@@ -128,22 +128,36 @@ function renderResult(data) {
 
 // ── Обработчик "Классифицировать" ────────────────────────────────────────────
 $("classify-btn").addEventListener("click", async () => {
-  const text = $("appeal-text").value.trim();
-  if (text.length < 10) {
-    toast("Введите текст обращения (минимум 10 символов)", "error");
-    return;
-  }
+  const fileInput = $("file-input");
+  const textInput = $("appeal-text");
 
   $("classify-btn").disabled = true;
   $("loading").classList.remove("hidden");
   $("result").classList.add("hidden");
 
   try {
-    const res = await fetch("/classify", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ appeal_text: text }),
-    });
+    let res;
+    if (fileInput.files.length > 0) {
+      // File upload
+      const formData = new FormData();
+      formData.append("file", fileInput.files[0]);
+      res = await fetch("/classify", {
+        method: "POST",
+        body: formData,
+      });
+    } else {
+      // Text input
+      const text = textInput.value;
+      if (!text || !text.trim()) {
+        throw new Error("Введите текст обращения или загрузите файл");
+      }
+      res = await fetch("/classify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ appeal_text: text }),
+      });
+    }
+
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || `HTTP ${res.status}`);

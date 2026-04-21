@@ -15,7 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from typing import Literal
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -23,6 +23,13 @@ from typing import Optional
 from dataclasses import asdict
 from classifier_agent import ClassifierAgent, ClassificationResult
 from appeals_logger import AppealsLogger, get_logger
+from text_extractor import (
+    extract_text,
+    TextExtractionError,
+    ScanNotSupportedError,
+    validate_file_size,
+    MAX_TEXT_LENGTH,
+)
 
 app = FastAPI(
     title="Агент классификации обращений граждан",
@@ -52,9 +59,11 @@ async def startup():
 # ── Схемы запросов/ответов ─────────────────────────────────────────────────────
 
 class ClassifyRequest(BaseModel):
-    appeal_text: str
-    appeal_id: Optional[str] = None        # ID обращения в Directum RX (опционально)
-    operator_comment: Optional[str] = None # Дополнительный контекст от оператора
+    appeal_text: Optional[str] = None
+    appeal_id: Optional[str] = None
+
+
+
 
 class AlternativeItem(BaseModel):
     code: str
@@ -82,6 +91,7 @@ class ClassifyResponse(BaseModel):
     overall_confidence: float
     needs_verification: bool
     operator_card: str              # Текст карточки верификации для оператора
+    was_truncated: bool = False       # Был ли текст обрезан до 5000 символов
 
 
 # ── Dependency injection (для тестируемости) ──────────────────────────────────
@@ -117,27 +127,54 @@ async def health_check():
     }
 
 
-@app.post("/classify", response_model=ClassifyResponse)
-async def classify_appeal(request: ClassifyRequest):
-    """
-    Классифицировать обращение гражданина.
-
-    Возвращает:
-    - Вид и тип обращения (по 59-ФЗ)
-    - Классификацию по классификатору обращений (код, наименование, путь)
-    - Предмет ведения
-    - Уровень уверенности
-    - Флаг необходимости верификации оператором
-    - Текст карточки для оператора
-    """
+@app.post(
+    "/classify",
+    response_model=ClassifyResponse,
+    summary="Классифицировать обращение",
+    description="""Классифицирует обращение гражданина. Принимает JSON или form-data с текстом/файлом.""",
+    tags=["Классификация"],
+)
+async def classify_appeal(
+    appeal_text: Optional[str] = Form(None, description="Текст обращения"),
+    file: Optional[UploadFile] = File(None, description="TXT или PDF файл"),
+    appeal_id: Optional[str] = Form(None),
+) -> ClassifyResponse:
+    """Классифицирует обращение — поддерживает JSON и form-data"""
     if not agent:
         raise HTTPException(status_code=503, detail="Агент не инициализирован")
 
-    if not request.appeal_text or len(request.appeal_text.strip()) < 10:
-        raise HTTPException(status_code=400, detail="Текст обращения слишком короткий")
+    text = appeal_text
+    was_truncated = False
+
+    if file:
+        file_content = await file.read()
+        file_size = len(file_content)
+        
+        validate_file_size(file_size)
+        
+        filename = file.filename or "unknown.txt"
+        
+        try:
+            text, was_truncated = extract_text(file_content, filename)
+        except ScanNotSupportedError as e:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Не удалось извлечь текст из файла. Файл является сканом (изображением).",
+            )
+        except TextExtractionError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=str(e),
+            )
+
+    if not text or not text.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Текст обращения пустой",
+        )
 
     try:
-        result: ClassificationResult = agent.classify(request.appeal_text)
+        result: ClassificationResult = agent.classify(text)
         operator_card = agent.format_for_operator(result)
 
         questions_out = [
@@ -156,7 +193,7 @@ async def classify_appeal(request: ClassifyRequest):
         ]
 
         return ClassifyResponse(
-            appeal_id=request.appeal_id,
+            appeal_id=appeal_id,
             log_id=result.log_id,
             vid_obrascheniya=result.vid_obrascheniya,
             tip_obrascheniya=result.tip_obrascheniya,
@@ -165,6 +202,7 @@ async def classify_appeal(request: ClassifyRequest):
             overall_confidence=result.overall_confidence,
             needs_verification=result.needs_verification,
             operator_card=operator_card,
+            was_truncated=was_truncated,
         )
 
     except Exception as e:
