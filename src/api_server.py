@@ -10,14 +10,19 @@ FastAPI-сервер для агента классификации обраще
 """
 
 import sys
+import json
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from fastapi import FastAPI, HTTPException
+from typing import Literal
+from fastapi import FastAPI, HTTPException, Depends
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional
 from dataclasses import asdict
 from classifier_agent import ClassifierAgent, ClassificationResult
+from appeals_logger import AppealsLogger, get_logger
 
 app = FastAPI(
     title="Агент классификации обращений граждан",
@@ -68,6 +73,26 @@ class ClassifyResponse(BaseModel):
     overall_confidence: float
     needs_verification: bool
     operator_card: str              # Текст карточки верификации для оператора
+
+
+# ── Dependency injection (для тестируемости) ──────────────────────────────────
+
+def get_logger_dep() -> AppealsLogger:
+    """FastAPI-зависимость для appeals logger. В тестах подменяется."""
+    return get_logger()
+
+
+def get_examples_path() -> Path:
+    """FastAPI-зависимость для пути к test_appeals.json. В тестах подменяется."""
+    return Path(__file__).parent.parent / "data" / "test_appeals.json"
+
+
+# ── Схема /verify ─────────────────────────────────────────────────────────────
+
+class VerifyRequest(BaseModel):
+    log_id: str
+    action: Literal["confirm", "correct", "reject"]
+    operator_codes: Optional[list[str]] = None
 
 
 # ── Эндпоинты ──────────────────────────────────────────────────────────────────
@@ -148,3 +173,45 @@ async def search_classifier(q: str, top_k: int = 5):
 
     candidates = agent._search_candidates(q)
     return {"query": q, "results": candidates[:top_k]}
+
+
+# ── Новые эндпоинты для MVP-демо ───────────────────────────────────────────────
+
+@app.post("/verify")
+async def verify(
+    request: VerifyRequest,
+    logger: AppealsLogger = Depends(get_logger_dep),
+):
+    """
+    Верификация результата классификации оператором.
+    Действия: confirm | correct | reject.
+    Для action="correct" обязательно передать operator_codes — список правильных
+    кодов классификатора (формата XXXX.XXXX.XXXX.XXXX).
+    """
+    if request.action == "confirm":
+        logger.confirm(request.log_id)
+    elif request.action == "correct":
+        if not request.operator_codes:
+            raise HTTPException(
+                status_code=400,
+                detail="operator_codes обязательно для action='correct'",
+            )
+        logger.correct(request.log_id, operator_codes=request.operator_codes)
+    elif request.action == "reject":
+        logger.reject(request.log_id)
+
+    return {"status": "ok", "log_id": request.log_id, "action": request.action}
+
+
+@app.get("/examples")
+async def get_examples(
+    examples_path: Path = Depends(get_examples_path),
+):
+    """
+    Возвращает 10 заранее подготовленных тестовых обращений для демо.
+    Источник: data/test_appeals.json.
+    """
+    if not examples_path.exists():
+        raise HTTPException(status_code=503, detail="Файл примеров не найден")
+    with open(examples_path, encoding="utf-8") as f:
+        return {"examples": json.load(f)}
