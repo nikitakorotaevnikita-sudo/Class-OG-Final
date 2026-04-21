@@ -4,6 +4,23 @@
 // ── Состояние ───────────────────────────────────────────────────────────────
 let lastResult = null;
 let lastLogId = null;
+let verifiedCount = 0;
+let finetuneThreshold = 50;
+
+// ── Загрузка статистики ───────────────────────────────────────────────────
+async function loadStats() {
+  try {
+    const res = await fetch("/stats");
+    if (res.ok) {
+      const data = await res.json();
+      verifiedCount = data.verified;
+      finetuneThreshold = data.threshold;
+      if (data.verified >= data.threshold) {
+        toast(`Порог дообучения достигнут! Запустите python src/auto_finetune.py`, "success");
+      }
+    }
+  } catch (e) {}
+}
 
 // ── Утилиты ─────────────────────────────────────────────────────────────────
 const $ = (id) => document.getElementById(id);
@@ -212,3 +229,4 @@ $("btn-correct-save").addEventListener("click", async () => {
 
 // ── Старт ───────────────────────────────────────────────────────────────────
 loadExamples();
+loadStats();

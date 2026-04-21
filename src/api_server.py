@@ -224,3 +224,23 @@ async def get_examples(
         raise HTTPException(status_code=503, detail="Файл примеров не найден")
     with open(examples_path, encoding="utf-8") as f:
         return {"examples": json.load(f)}
+
+
+@app.get("/stats")
+async def get_stats(
+    logger: AppealsLogger = Depends(get_logger_dep),
+):
+    """
+    Возвращает статистику верификаций для отображения на фронтенде.
+    """
+    stats = logger.stats()
+    from config import FINETUNE_THRESHOLD
+    return {
+        "verified": stats["verified"],
+        "confirmed": stats["confirmed"],
+        "corrected": stats["corrected"],
+        "rejected": stats["rejected"],
+        "pending": stats["pending"],
+        "threshold": FINETUNE_THRESHOLD,
+        "progress_percent": min(100, int(stats["verified"] / FINETUNE_THRESHOLD * 100)),
+    }
