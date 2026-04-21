@@ -30,6 +30,15 @@ app = FastAPI(
     version="1.0.0",
 )
 
+# Статика и главная страница
+_STATIC_DIR = Path(__file__).parent / "static"
+app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
+
+
+@app.get("/", include_in_schema=False)
+async def index():
+    return FileResponse(_STATIC_DIR / "index.html")
+
 # Инициализация агента при старте сервера
 agent: Optional[ClassifierAgent] = None
 
