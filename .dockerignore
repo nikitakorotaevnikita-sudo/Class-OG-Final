@@ -1,0 +1,10 @@
+venv/
+__pycache__/
+.git/
+*.pyc
+.env
+data/appeals_log.jsonl
+data/request_log.jsonl
+models/
+docs/
+tests/

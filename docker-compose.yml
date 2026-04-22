@@ -1,0 +1,14 @@
+version: "3.9"
+services:
+  classifier:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      # persistent storage for logs and fine-tuned models
+      - ./data/appeals_log.jsonl:/app/data/appeals_log.jsonl
+      - ./data/request_log.jsonl:/app/data/request_log.jsonl
+      - ./models:/app/models
+    env_file:
+      - .env
+    restart: unless-stopped
