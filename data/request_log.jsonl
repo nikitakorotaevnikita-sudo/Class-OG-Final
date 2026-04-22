@@ -109,3 +109,13 @@
 {"timestamp": "2026-04-22T15:01:31.585519", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 1.425, "confidence": null, "candidates_count": 10, "error": null}
 {"timestamp": "2026-04-22T15:01:59.339576", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 0.092, "confidence": null, "candidates_count": 10, "error": null}
 {"timestamp": "2026-04-22T15:02:00.838722", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 1.499, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-04-22T16:01:34.963444", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 0.115, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-04-22T16:01:42.488633", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 7.525, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-04-22T16:17:20.251066", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 0.089, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-04-22T16:17:21.988779", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 1.738, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-04-22T16:17:22.058429", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 0.068, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-04-22T16:17:23.524260", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 1.465, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-04-22T16:17:23.580707", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 0.054, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-04-22T16:17:25.252728", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 1.672, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-04-22T16:17:25.313755", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 0.058, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-04-22T16:17:26.927653", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 1.614, "confidence": null, "candidates_count": 10, "error": null}
