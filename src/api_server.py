@@ -114,6 +114,43 @@ class VerifyRequest(BaseModel):
     operator_codes: Optional[list[str]] = None
 
 
+# ── Вспомогательная функция сборки ответа ─────────────────────────────────────
+
+def _build_classify_response(
+    result: ClassificationResult,
+    appeal_id: Optional[str] = None,
+    was_truncated: bool = False,
+) -> ClassifyResponse:
+    """Собирает ClassifyResponse из ClassificationResult."""
+    operator_card = agent.format_for_operator(result)
+    questions_out = [
+        QuestionResult(
+            question_text=q.question_text,
+            code=q.code,
+            name=q.name,
+            level=q.level,
+            full_path=q.full_path,
+            predmet_vedeniya=q.predmet_vedeniya,
+            confidence=q.confidence,
+            reasoning=q.reasoning,
+            alternatives=[AlternativeItem(**a) for a in q.alternatives],
+        )
+        for q in result.questions
+    ]
+    return ClassifyResponse(
+        appeal_id=appeal_id,
+        log_id=result.log_id,
+        vid_obrascheniya=result.vid_obrascheniya,
+        tip_obrascheniya=result.tip_obrascheniya,
+        is_ustnoe=result.is_ustное,
+        questions=questions_out,
+        overall_confidence=result.overall_confidence,
+        needs_verification=result.needs_verification,
+        operator_card=operator_card,
+        was_truncated=was_truncated,
+    )
+
+
 # ── Эндпоинты ──────────────────────────────────────────────────────────────────
 
 @app.get("/health")
@@ -130,52 +167,59 @@ async def health_check():
 @app.post(
     "/classify",
     response_model=ClassifyResponse,
-    summary="Классифицировать обращение",
-    description="Классифицирует обращение гражданина (JSON)",
+    summary="Классифицировать обращение (текст)",
+    description="Принимает текст обращения в JSON. Для загрузки файла используйте POST /classify/file.",
     tags=["Классификация"],
 )
-async def classify_appeal_json(
-    request: ClassifyRequest,
-) -> ClassifyResponse:
+async def classify_appeal_json(request: ClassifyRequest) -> ClassifyResponse:
     """Классифицирует обращение — JSON тело"""
     if not agent:
         raise HTTPException(status_code=503, detail="Агент не инициализирован")
-
-    if not request.appeal_text:
+    if not request.appeal_text or not request.appeal_text.strip():
         raise HTTPException(status_code=400, detail="Текст обращения пустой")
 
     try:
-        result: ClassificationResult = agent.classify(request.appeal_text)
-        operator_card = agent.format_for_operator(result)
+        result = agent.classify(request.appeal_text)
+        return _build_classify_response(result, appeal_id=request.appeal_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка классификации: {str(e)}")
 
-        questions_out = [
-            QuestionResult(
-                question_text=q.question_text,
-                code=q.code,
-                name=q.name,
-                level=q.level,
-                full_path=q.full_path,
-                predmet_vedeniya=q.predmet_vedeniya,
-                confidence=q.confidence,
-                reasoning=q.reasoning,
-                alternatives=[AlternativeItem(**a) for a in q.alternatives],
-            )
-            for q in result.questions
-        ]
 
-        return ClassifyResponse(
-            appeal_id=request.appeal_id,
-            log_id=result.log_id,
-            vid_obrascheniya=result.vid_obrascheniya,
-            tip_obrascheniya=result.tip_obrascheniya,
-            is_ustnoe=result.is_ustное,
-            questions=questions_out,
-            overall_confidence=result.overall_confidence,
-            needs_verification=result.needs_verification,
-            operator_card=operator_card,
-            was_truncated=False,
+@app.post(
+    "/classify/file",
+    response_model=ClassifyResponse,
+    summary="Классифицировать обращение (файл)",
+    description="Принимает TXT или PDF файл (макс. 5 МБ). Текст извлекается автоматически.",
+    tags=["Классификация"],
+)
+async def classify_appeal_file(file: UploadFile = File(...)) -> ClassifyResponse:
+    """Классифицирует обращение из загруженного файла TXT или PDF."""
+    if not agent:
+        raise HTTPException(status_code=503, detail="Агент не инициализирован")
+
+    content = await file.read()
+
+    try:
+        validate_file_size(len(content))
+    except TextExtractionError as e:
+        raise HTTPException(status_code=413, detail=str(e))
+
+    try:
+        text, truncated = extract_text(content, file.filename or "upload.txt")
+    except ScanNotSupportedError as e:
+        raise HTTPException(
+            status_code=422,
+            detail=f"PDF является сканом без текста. Используйте OCR перед загрузкой. ({e})",
         )
+    except TextExtractionError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="Файл не содержит текста")
+
+    try:
+        result = agent.classify(text)
+        return _build_classify_response(result, was_truncated=truncated)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка классификации: {str(e)}")
 

@@ -138,10 +138,10 @@ $("classify-btn").addEventListener("click", async () => {
   try {
     let res;
     if (fileInput.files.length > 0) {
-      // File upload
+      // File upload → отдельный endpoint /classify/file (multipart/form-data)
       const formData = new FormData();
       formData.append("file", fileInput.files[0]);
-      res = await fetch("/classify", {
+      res = await fetch("/classify/file", {
         method: "POST",
         body: formData,
       });
