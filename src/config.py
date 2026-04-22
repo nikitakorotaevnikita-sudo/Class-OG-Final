@@ -10,10 +10,14 @@ from dotenv import load_dotenv
 # Загружаем .env из корня проекта
 load_dotenv(Path(__file__).parent.parent / ".env")
 
-# ── Groq API ───────────────────────────────────────────────────────────────────
-GROQ_API_KEY: str = os.environ["GROQ_API_KEY"]
+# ── LLM Provider ────────────────────────────────────────────────────────────────
+LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "groq")  # "groq" or "gemini"
 
-# ── Модель Groq ────────────────────────────────────────────────────────────────
+# ── Groq API ───────────────────────────────────────────────────────────────────
+GROQ_API_KEY: str = os.environ.get("GROQ_API_KEY", "")
+
+# ── Google Gemini API ─────────────────────────────────────────────────────────
+GEMINI_API_KEY: str = os.environ.get("GEMINI_API_KEY", "")
 # llama-3.3-70b-versatile  — лучший русский язык (рекомендуется)
 # llama-3.1-8b-instant     — быстрее, меньше точность
 GROQ_MODEL: str = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")

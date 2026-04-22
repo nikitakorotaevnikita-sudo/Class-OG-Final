@@ -8,15 +8,19 @@
 
 import json
 import numpy as np
+import time
 from pathlib import Path
-from groq import Groq
+from groq import Groq, RateLimitError, APIError
+from google.genai import client as genai_client
+from google.genai.types import GenerateContentConfig
 from sentence_transformers import SentenceTransformer
 from dataclasses import dataclass, field
 from typing import Optional
 from config import (
     GROQ_API_KEY, GROQ_MODEL,
     VECTOR_DB_DIR, EMBEDDING_MODEL,
-    TOP_K_CANDIDATES, TOP_K_RESULT, MIN_CONFIDENCE
+    TOP_K_CANDIDATES, TOP_K_RESULT, MIN_CONFIDENCE,
+    LLM_PROVIDER, GEMINI_API_KEY,
 )
 from appeals_logger import get_logger
 
@@ -107,9 +111,15 @@ class ClassifierAgent:
     def __init__(self):
         print("Инициализация агента классификации...")
 
-        # Groq client
-        self.groq = Groq(api_key=GROQ_API_KEY)
-        print(f"  Модель LLM: {GROQ_MODEL} (Groq)")
+        # LLM client (Groq или Gemini)
+        if LLM_PROVIDER == "gemini":
+            self.llm = "gemini"
+            self.gemini = genai_client.Client(api_key=GEMINI_API_KEY)
+            print(f"  Модель LLM: gemini-2.5-flash (Google Gemini)")
+        else:
+            self.llm = "groq"
+            self.groq = Groq(api_key=GROQ_API_KEY)
+            print(f"  Модель LLM: {GROQ_MODEL} (Groq)")
 
         # Модель эмбеддингов
         print(f"  Загрузка модели эмбеддингов: {EMBEDDING_MODEL}")
@@ -147,35 +157,140 @@ class ClassifierAgent:
             })
         return candidates
 
-    def _classify_with_groq(self, appeal_text: str, all_candidates: list) -> dict:
-        """Вызов Groq для финальной классификации"""
+    def _classify_with_llm(self, appeal_text: str, all_candidates: list) -> dict:
+        """Вызов LLM для финальной классификации с retry-логикой (Groq или Gemini)"""
         candidates_json = json.dumps(all_candidates, ensure_ascii=False, indent=2)
         user_message = CLASSIFICATION_PROMPT_TEMPLATE.format(
             appeal_text=appeal_text[:4000],
             candidates_json=candidates_json
         )
 
-        response = self.groq.chat.completions.create(
-            model=GROQ_MODEL,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user",   "content": user_message},
-            ],
-            temperature=0.1,
-            response_format={"type": "json_object"},
-        )
+        max_retries = 3
+        last_error = None
 
-        raw = response.choices[0].message.content.strip()
-        return json.loads(raw)
+        for attempt in range(1, max_retries + 1):
+            try:
+                start_time = time.time()
+
+                if self.llm == "gemini":
+                    response = self.gemini.models.generate_content(
+                        model="gemini-2.5-flash",
+                        contents=user_message,
+                        config=GenerateContentConfig(
+                            system_instruction=SYSTEM_PROMPT,
+                            temperature=0.1,
+                        ),
+                    )
+                    raw = response.text.strip()
+                else:
+                    response = self.groq.chat.completions.create(
+                        model=GROQ_MODEL,
+                        messages=[
+                            {"role": "system", "content": SYSTEM_PROMPT},
+                            {"role": "user",   "content": user_message},
+                        ],
+                        temperature=0.1,
+                        response_format={"type": "json_object"},
+                    )
+                    raw = response.choices[0].message.content.strip()
+
+                elapsed = time.time() - start_time
+                result = json.loads(raw)
+
+                self._log_request(
+                    success=True,
+                    attempt=attempt,
+                    elapsed=elapsed,
+                    confidence=None,
+                    error=None,
+                    candidates_count=len(all_candidates)
+                )
+                return result
+
+            except RateLimitError as e:
+                last_error = f"Rate limit: {e}"
+                wait_time = 2 ** attempt
+                print(f"  [Groq] Rate limit, попытка {attempt}/{max_retries}. Ждём {wait_time}с...")
+                time.sleep(wait_time)
+
+            except APIError as e:
+                last_error = f"API error: {e}"
+                if attempt < max_retries:
+                    wait_time = 2 ** attempt
+                    print(f"  [Groq] API error, попытка {attempt}/{max_retries}. Ждём {wait_time}с...")
+                    time.sleep(wait_time)
+
+            except json.JSONDecodeError as e:
+                last_error = f"JSON parse error: {e}"
+                print(f"  [LLM] Ошибка парсинга JSON, попытка {attempt}/{max_retries}.")
+                if attempt < max_retries:
+                    time.sleep(1)
+
+            except Exception as e:
+                last_error = f"Unexpected error: {e}"
+                err_str = str(e)
+                if "gemini" in err_str.lower() or "429" in err_str or "503" in err_str:
+                    wait_time = 2 ** attempt
+                    print(f"  [Gemini] Ошибка {attempt}/{max_retries}: {err_str[:80]}. Ждём {wait_time}с...")
+                    time.sleep(wait_time)
+                else:
+                    print(f"  [LLM] Неизвестная ошибка: {e}")
+                    break
+
+        self._log_request(
+            success=False,
+            attempt=max_retries,
+            elapsed=None,
+            confidence=None,
+            error=last_error,
+            candidates_count=len(all_candidates)
+        )
+        raise RuntimeError(f"LLM ({self.llm}) недоступен после {max_retries} попыток: {last_error}")
+
+    def _log_request(self, success: bool, attempt: int, elapsed: float | None,
+                     confidence: float | None, error: str | None, candidates_count: int):
+        """Логирование каждого запроса к Groq API"""
+        import datetime
+        import json
+
+        log_entry = {
+            "timestamp": datetime.datetime.now().isoformat(),
+            "event": "groq_request",
+            "success": success,
+            "attempt": attempt,
+            "elapsed_seconds": round(elapsed, 3) if elapsed else None,
+            "confidence": confidence,
+            "candidates_count": candidates_count,
+            "error": error,
+        }
+
+        log_path = Path("data/request_log.jsonl")
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
 
     def classify(self, appeal_text: str) -> ClassificationResult:
         """Основной метод классификации обращения."""
 
-        # Шаг 1: Поиск кандидатов
+        # Шаг 1: Поиск кандидатов (с замером времени)
+        search_start = time.time()
         candidates = self._search_candidates(appeal_text)
+        search_elapsed = time.time() - search_start
+
+        # Логируем поиск
+        self._log_request(
+            success=True,
+            attempt=1,
+            elapsed=search_elapsed,
+            confidence=None,
+            error=None,
+            candidates_count=len(candidates)
+        )
+        print(f"  [Поиск] Найдено {len(candidates)} кандидатов за {search_elapsed:.2f}с")
 
         # Шаг 2: Классификация через Groq
-        groq_result = self._classify_with_groq(appeal_text, candidates)
+        groq_result = self._classify_with_llm(appeal_text, candidates)
 
         # Шаг 3: Обогащение результатов
         classified_questions = []
