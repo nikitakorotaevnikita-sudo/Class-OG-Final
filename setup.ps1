@@ -93,39 +93,72 @@ Write-Host "   OK: All dependencies installed" -ForegroundColor Green
 # =============================================================================
 # STEP 4: Configure .env
 # =============================================================================
-Write-Host "`n[STEP 4] Checking configuration (.env)..." -ForegroundColor Yellow
+Write-Host "`n[STEP 4] Configuring .env..." -ForegroundColor Yellow
 
-if (Test-Path ".env") {
-    $envContent = Get-Content ".env" -Raw
-    if ($envContent -match "GROQ_API_KEY\s*=\s*gsk_") {
-        Write-Host "   OK: .env already configured (GROQ_API_KEY found)" -ForegroundColor Green
-    } else {
-        Write-Host "   WARN: .env found but GROQ_API_KEY may be missing" -ForegroundColor Yellow
-    }
+# Ask for LLM provider
+Write-Host ""
+Write-Host "   Select LLM provider:" -ForegroundColor White
+Write-Host "   [1] Groq         - llama-3.3-70b-versatile (recommended)" -ForegroundColor Gray
+Write-Host "   [2] Gemini       - gemini-2.5-flash (20 req/day free)" -ForegroundColor Gray
+Write-Host "   [3] Ollama/Qwen  - qwen2.5-14b (local, no limits)" -ForegroundColor Gray
+Write-Host ""
+
+$providerChoice = Read-Host "   Enter (1/2/3)"
+
+if ($providerChoice -eq "2") {
+    $llmProvider = "gemini"
+    Write-Host "   Selected: Gemini" -ForegroundColor Cyan
+} elseif ($providerChoice -eq "3") {
+    $llmProvider = "ollama"
+    Write-Host "   Selected: Ollama/Qwen" -ForegroundColor Cyan
 } else {
-    Write-Host "   .env not found -- creating new one" -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "   Get your free API key at: https://console.groq.com/keys" -ForegroundColor White
-    Write-Host ""
-    $apiKey = Read-Host "   Enter GROQ_API_KEY (starts with gsk_)"
+    $llmProvider = "groq"
+    Write-Host "   Selected: Groq" -ForegroundColor Cyan
+}
 
+# Ask for API key based on provider
+$apiKey = ""
+$geminiKey = ""
+
+if ($llmProvider -eq "groq") {
+    Write-Host ""
+    Write-Host "   Get your free Groq API key at: https://console.groq.com/keys" -ForegroundColor White
+    $apiKey = Read-Host "   Enter GROQ_API_KEY (starts with gsk_)"
     if (-not $apiKey -or -not $apiKey.StartsWith("gsk_")) {
-        Write-Host "   WARN: Key not entered -- .env created with placeholder" -ForegroundColor Yellow
+        Write-Host "   WARN: Key not entered -- using placeholder" -ForegroundColor Yellow
         $apiKey = "PASTE_YOUR_GROQ_API_KEY_HERE"
     }
+} elseif ($llmProvider -eq "gemini") {
+    Write-Host ""
+    Write-Host "   Get your free Gemini API key at: https://ai.google.dev/" -ForegroundColor White
+    $geminiKey = Read-Host "   Enter GEMINI_API_KEY (starts with AIza)"
+    if (-not $geminiKey -or -not $geminiKey.StartsWith("AIza")) {
+        Write-Host "   WARN: Key not entered -- using placeholder" -ForegroundColor Yellow
+        $geminiKey = "PASTE_YOUR_GEMINI_API_KEY_HERE"
+    }
+} else {
+    Write-Host ""
+    Write-Host "   Ollama selected. Install: https://ollama.com" -ForegroundColor White
+    Write-Host "   Then run: ollama pull qwen2.5-14b" -ForegroundColor White
+}
 
-    @"
+# Write .env file
+$envContent = @"
 GROQ_API_KEY=$apiKey
+LLM_PROVIDER=$llmProvider
 GROQ_MODEL=llama-3.3-70b-versatile
+GEMINI_API_KEY=$geminiKey
+OLLAMA_MODEL=qwen2.5-14b
+OLLAMA_BASE_URL=http://localhost:11434/v1
 TOP_K_CANDIDATES=10
 MIN_CONFIDENCE=0.65
 FINETUNE_THRESHOLD=50
 API_HOST=0.0.0.0
 API_PORT=8000
-"@ | Set-Content ".env" -Encoding UTF8
+"@
 
-    Write-Host "   OK: .env created" -ForegroundColor Green
-}
+$envContent | Set-Content ".env" -Encoding UTF8
+Write-Host "   OK: .env created with provider: $llmProvider" -ForegroundColor Green
 
 # =============================================================================
 # STEP 5: Build vector database

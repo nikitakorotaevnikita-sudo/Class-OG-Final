@@ -165,7 +165,7 @@ class ClassifierAgent:
             candidates_json=candidates_json
         )
 
-        max_retries = 3
+        max_retries = 5
         last_error = None
 
         for attempt in range(1, max_retries + 1):
@@ -209,7 +209,7 @@ class ClassifierAgent:
 
             except RateLimitError as e:
                 last_error = f"Rate limit: {e}"
-                wait_time = 2 ** attempt
+                wait_time = min(2 ** attempt, 60)  # не более 60 секунд
                 print(f"  [Groq] Rate limit, попытка {attempt}/{max_retries}. Ждём {wait_time}с...")
                 time.sleep(wait_time)
 
