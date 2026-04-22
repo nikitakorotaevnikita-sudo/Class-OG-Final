@@ -245,6 +245,8 @@ cd "C:\путь\до\папки\Class OG Final"
 
 ## Запуск MVP-демо (Веб-UI)
 
+[Screenshot: веб-интерфейс с результатом классификации]
+
 Минимальное живое демо для показа оператору. Запускается в 2 команды:
 
 ```powershell
@@ -261,5 +263,26 @@ uvicorn src.api_server:app --host 127.0.0.1 --port 8000
 - Карточку результата с цветовой шкалой уверенности
 - Верификацию: [Подтвердить] [Исправить] [Отклонить]
 - Логирование в `data/appeals_log.jsonl`
+
+### Примеры curl
+
+```bash
+# Классифицировать текст
+curl -X POST http://localhost:8000/classify \
+  -H "Content-Type: application/json" \
+  -d '{"appeal_text": "Прошу провести ремонт дороги по улице Ленина, 15"}'
+
+# Загрузить файл
+curl -X POST http://localhost:8000/classify \
+  -F "file=@ обращение.pdf"
+
+# Проверить здоровье
+curl http://localhost:8000/health
+
+# Верифицировать результат
+curl -X POST http://localhost:8000/verify \
+  -H "Content-Type: application/json" \
+  -d '{"log_id": "uuid-из-ответа", "action": "confirm"}'
+```
 
 Подробнее: [[ИНСТРУКЦИЯ_запуск-MVP-демо]] (в Obsidian vault)
