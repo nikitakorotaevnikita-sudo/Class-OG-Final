@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from sentence_transformers import SentenceTransformer
 from config import EMBEDDING_MODEL, CLASSIFIER_FLAT_PATH, VECTOR_DB_DIR
+from annotations_storage import build_search_text, list_annotated_codes
 
 BATCH_SIZE = 128
 
@@ -34,6 +35,9 @@ def build_database():
         entries = json.load(f)
     print(f"      Загружено записей: {len(entries)}")
 
+    codes_with_ann = list_annotated_codes()
+    print(f"      Кодов с аннотациями: {len(codes_with_ann)}")
+
     # ── Загрузка модели эмбеддингов ───────────────────────────────────
     print(f"\n[2/4] Загрузка модели эмбеддингов: {EMBEDDING_MODEL}...")
     model = SentenceTransformer(EMBEDDING_MODEL)
@@ -47,11 +51,23 @@ def build_database():
 
     for start in range(0, total, BATCH_SIZE):
         batch = entries[start:start + BATCH_SIZE]
-        texts = [f"passage: {e['search_text']}" for e in batch]
+        texts = []
+        for e in batch:
+            search_txt = build_search_text(
+                code=e["code"],
+                base_name=e["name"],
+                base_full_path=e.get("full_path", "")
+            )
+            texts.append(f"passage: {search_txt}")
         embeddings = model.encode(texts, normalize_embeddings=True)
         all_embeddings.append(embeddings)
 
         for e in batch:
+            search_txt = build_search_text(
+                code=e["code"],
+                base_name=e["name"],
+                base_full_path=e.get("full_path", "")
+            )
             metadata.append({
                 "code":           e["code"],
                 "name":           e["name"],
@@ -59,7 +75,7 @@ def build_database():
                 "parent_code":    e.get("parent_code") or "",
                 "full_path":      e["full_path"],
                 "children_count": e.get("children_count", 0),
-                "search_text":    e["search_text"],
+                "search_text":    search_txt,
             })
 
         done = min(start + BATCH_SIZE, total)
