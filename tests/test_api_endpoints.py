@@ -50,7 +50,10 @@ def test_verify_confirm_marks_entry_confirmed(isolated_logger):
         logger=isolated_logger,
     ))
 
-    assert result == {"status": "ok", "log_id": log_id, "action": "confirm"}
+    assert result["status"] == "ok"
+    assert result["log_id"] == log_id
+    assert result["action"] == "confirm"
+    assert "annotation_count" in result
     entries = isolated_logger.read_all()
     assert entries[0]["verification"]["status"] == "confirmed"
 
