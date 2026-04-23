@@ -30,6 +30,7 @@ from sentence_transformers.losses import MultipleNegativesRankingLoss
 from torch.utils.data import DataLoader
 
 from appeals_logger import get_logger
+from annotations_storage import build_search_text, list_annotated_codes
 from config import EMBEDDING_MODEL, MODELS_DIR, VECTOR_DB_DIR, FINETUNE_THRESHOLD
 
 
@@ -64,7 +65,7 @@ def build_training_examples(verified_entries: list, code_index: dict) -> list[In
                 meta = code_index.get(code)
                 if meta:
                     anchor   = f"query: {appeal_text}"
-                    positive = f"passage: {meta['name']}. {meta.get('full_path', '')}"
+                    positive = f"passage: {build_search_text(code, meta['name'], meta.get('full_path', ''))}"
                     examples.append(InputExample(texts=[anchor, positive]))
 
         elif status == "corrected":
@@ -73,7 +74,7 @@ def build_training_examples(verified_entries: list, code_index: dict) -> list[In
                 meta = code_index.get(code)
                 if meta:
                     anchor   = f"query: {appeal_text}"
-                    positive = f"passage: {meta['name']}. {meta.get('full_path', '')}"
+                    positive = f"passage: {build_search_text(code, meta['name'], meta.get('full_path', ''))}"
                     examples.append(InputExample(texts=[anchor, positive]))
 
     return examples
@@ -146,6 +147,9 @@ def main():
     # ── Шаг 3: Построение обучающих пар ──────────────────────────────────────
     all_examples = build_training_examples(verified, code_index)
     print(f"  Обучающих пар: {len(all_examples)}")
+
+    annotated_codes = list_annotated_codes()
+    print(f"  Записей с аннотациями: {len(annotated_codes)}")
 
     if len(all_examples) < 10:
         print("  Слишком мало обучающих пар (< 10). Проверьте качество данных.")
@@ -228,6 +232,7 @@ def main():
         "recall5_before": round(recall_before, 4),
         "recall5_after":  round(recall_after, 4),
         "improved":       improved,
+        "annotated_codes_count": len(annotated_codes),
     }
     report_path = output_path / "training_report.json"
     with open(report_path, "w", encoding="utf-8") as f:
