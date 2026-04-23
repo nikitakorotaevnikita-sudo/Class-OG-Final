@@ -1,0 +1,272 @@
+// Historical data upload and validation UI
+
+(function() {
+  'use strict';
+
+  // DOM Elements
+  var dropZone = document.getElementById('drop-zone');
+  var fileInput = document.getElementById('file-input');
+  var uploadSection = document.getElementById('upload-section');
+  var resultsSection = document.getElementById('results-section');
+  var uploadLoading = document.getElementById('upload-loading');
+  var uploadError = document.getElementById('upload-error');
+  var fileName = document.getElementById('file-name');
+  var fileFormat = document.getElementById('file-format');
+  var validCount = document.getElementById('valid-count');
+  var invalidCount = document.getElementById('invalid-count');
+  var totalCount = document.getElementById('total-count');
+  var errorsList = document.getElementById('errors-list');
+  var errorsUl = document.getElementById('errors-ul');
+  var previewHeader = document.getElementById('preview-header');
+  var previewBody = document.getElementById('preview-body');
+  var btnConfirm = document.getElementById('btn-confirm');
+  var btnCancel = document.getElementById('btn-cancel');
+  var confirmLoading = document.getElementById('confirm-loading');
+  var confirmSuccess = document.getElementById('confirm-success');
+  var historicalCount = document.getElementById('historical-count');
+  var btnFinetune = document.getElementById('btn-finetune');
+  var finetuneLoading = document.getElementById('finetune-loading');
+  var finetuneResult = document.getElementById('finetune-result');
+  var toast = document.getElementById('toast');
+
+  // State
+  var lastResponse = null;
+
+  // Toast notification
+  function showToast(message) {
+    toast.textContent = message;
+    toast.classList.remove('hidden');
+    setTimeout(function() {
+      toast.classList.add('hidden');
+    }, 3000);
+  }
+
+  // Drag & Drop handlers
+  dropZone.addEventListener('click', function() {
+    fileInput.click();
+  });
+
+  dropZone.addEventListener('dragover', function(e) {
+    e.preventDefault();
+    dropZone.classList.add('border-blue-500', 'bg-blue-50');
+  });
+
+  dropZone.addEventListener('dragleave', function(e) {
+    e.preventDefault();
+    dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+  });
+
+  dropZone.addEventListener('drop', function(e) {
+    e.preventDefault();
+    dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+    var files = e.dataTransfer.files;
+    if (files.length > 0) {
+      handleFile(files[0]);
+    }
+  });
+
+  fileInput.addEventListener('change', function() {
+    if (fileInput.files.length > 0) {
+      handleFile(fileInput.files[0]);
+    }
+  });
+
+  // Handle file upload
+  function handleFile(file) {
+    uploadError.classList.add('hidden');
+    uploadLoading.classList.remove('hidden');
+
+    var formData = new FormData();
+    formData.append('file', file);
+
+    fetch('/api/upload-historical', {
+      method: 'POST',
+      body: formData
+    })
+    .then(function(response) {
+      if (!response.ok) {
+        throw new Error('Upload failed: ' + response.status);
+      }
+      return response.json();
+    })
+    .then(function(data) {
+      uploadLoading.classList.add('hidden');
+      lastResponse = data;
+      displayResults(data, file.name);
+    })
+    .catch(function(error) {
+      uploadLoading.classList.add('hidden');
+      uploadError.textContent = 'Ошибка загрузки: ' + error.message;
+      uploadError.classList.remove('hidden');
+    });
+  }
+
+  // Display validation results
+  function displayResults(data, filename) {
+    // Show file info
+    fileName.textContent = filename;
+    var suffix = filename.split('.').pop().toLowerCase();
+    var formatMap = {
+      'xlsx': 'Excel (XLSX)',
+      'xls': 'Excel (XLS)',
+      'csv': 'CSV',
+      'json': 'JSON'
+    };
+    fileFormat.textContent = formatMap[suffix] || suffix.toUpperCase();
+
+    // Update stats
+    validCount.textContent = data.stats.valid;
+    invalidCount.textContent = data.stats.invalid;
+    totalCount.textContent = data.stats.total;
+
+    // Show/hide errors
+    if (data.errors && data.errors.length > 0) {
+      errorsList.classList.remove('hidden');
+      errorsUl.innerHTML = '';
+      data.errors.forEach(function(err) {
+        var li = document.createElement('li');
+        li.textContent = 'Строка ' + err.row + ': ' + err.code + ' — ' + err.error;
+        errorsUl.appendChild(li);
+      });
+    } else {
+      errorsList.classList.add('hidden');
+    }
+
+    // Preview table
+    if (data.preview && data.preview.length > 0) {
+      renderPreviewTable(data.preview);
+    }
+
+    // Show results section
+    uploadSection.classList.add('hidden');
+    resultsSection.classList.remove('hidden');
+  }
+
+  // Render preview table
+  function renderPreviewTable(records) {
+    if (records.length === 0) return;
+
+    // Get headers from first record
+    var headers = Object.keys(records[0]);
+
+    // Render header
+    previewHeader.innerHTML = '';
+    headers.forEach(function(header) {
+      var th = document.createElement('th');
+      th.textContent = header;
+      th.className = 'border border-gray-300 px-3 py-2 text-left font-medium';
+      previewHeader.appendChild(th);
+    });
+
+    // Render body
+    previewBody.innerHTML = '';
+    records.forEach(function(record, idx) {
+      var tr = document.createElement('tr');
+      if (idx % 2 === 1) {
+        tr.className = 'bg-gray-50';
+      }
+      headers.forEach(function(header) {
+        var td = document.createElement('td');
+        td.textContent = record[header] !== null ? record[header] : '';
+        td.className = 'border border-gray-300 px-3 py-2';
+        tr.appendChild(td);
+      });
+      previewBody.appendChild(tr);
+    });
+  }
+
+  // Confirm button handler
+  btnConfirm.addEventListener('click', function() {
+    if (!lastResponse) return;
+
+    confirmLoading.classList.remove('hidden');
+    confirmSuccess.classList.add('hidden');
+
+    fetch('/api/confirm-historical', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        records: lastResponse.records || [],
+        stats: lastResponse.stats
+      })
+    })
+    .then(function(response) {
+      if (!response.ok) {
+        throw new Error('Confirm failed: ' + response.status);
+      }
+      return response.json();
+    })
+    .then(function(data) {
+      confirmLoading.classList.add('hidden');
+      confirmSuccess.classList.remove('hidden');
+      showToast('Файл успешно сохранен');
+      loadHistoricalCount();
+    })
+    .catch(function(error) {
+      confirmLoading.classList.add('hidden');
+      showToast('Ошибка сохранения: ' + error.message);
+    });
+  });
+
+  // Cancel button handler
+  btnCancel.addEventListener('click', function() {
+    resultsSection.classList.add('hidden');
+    uploadSection.classList.remove('hidden');
+    lastResponse = null;
+    fileInput.value = '';
+  });
+
+  // Load historical count
+  function loadHistoricalCount() {
+    fetch('/api/historical-count')
+      .then(function(response) {
+        if (!response.ok) return null;
+        return response.json();
+      })
+      .then(function(data) {
+        if (data && data.count !== undefined) {
+          historicalCount.textContent = data.count;
+        }
+      })
+      .catch(function() {
+        // Silently fail
+      });
+  }
+
+  // Fine-tune button handler
+  btnFinetune.addEventListener('click', function() {
+    if (!confirm('Запустить дообучение модели? Это может занять 10-15 минут.')) {
+      return;
+    }
+
+    finetuneLoading.classList.remove('hidden');
+    finetuneResult.classList.add('hidden');
+
+    fetch('/api/finetune', {
+      method: 'POST'
+    })
+    .then(function(response) {
+      if (!response.ok) {
+        throw new Error('Fine-tune failed: ' + response.status);
+      }
+      return response.json();
+    })
+    .then(function(data) {
+      finetuneLoading.classList.add('hidden');
+      finetuneResult.classList.remove('hidden');
+      finetuneResult.textContent = '✓ Дообучение завершено. Модель обновлена.';
+      showToast('Дообучение модели завершено');
+    })
+    .catch(function(error) {
+      finetuneLoading.classList.add('hidden');
+      finetuneResult.classList.remove('hidden');
+      finetuneResult.textContent = 'Ошибка: ' + error.message;
+    });
+  });
+
+  // Initial load
+  loadHistoricalCount();
+
+})();
