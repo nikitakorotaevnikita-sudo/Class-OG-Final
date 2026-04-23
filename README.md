@@ -272,7 +272,8 @@ cd "C:\путь\до\папки\Class OG Final"
 | Текст из PDF | PyMuPDF |
 | Дообучение | sentence-transformers, MultipleNegativesRankingLoss |
 
-Переключение провайдера: `LLM_PROVIDER=groq` или `gemini` в `.env`.
+Переключение провайдера: `LLM_PROVIDER=groq`, `gemini` или `ollama` в `.env`.
+Ollama (локальный запуск без API-ключей) — реализуется в TICKET-22.
 
 ---
 
@@ -352,9 +353,11 @@ curl -X POST http://localhost:8000/verify \
   -H "Content-Type: application/json" \
   -d '{"log_id": "uuid-из-ответа", "action": "correct", "operator_codes": ["0005.0005.0056.1160"], "annotation": "Жалобы на некачественный ремонт дорог, когда заявитель требует устранить нарушения"}'
 
-# Статистика верификаций
+# Загрузить исторические данные (XLSX/CSV/JSON)
+curl -X POST http://localhost:8000/api/upload-historical \
+  -F "file=@historical_data.xlsx"
 
-# Статистика верификаций
+# Статистика верификаций и прогресс дообучения
 curl http://localhost:8000/stats
 
 # Проверить работоспособность
@@ -362,3 +365,32 @@ curl http://localhost:8000/health
 ```
 
 Полная документация API (Swagger): **http://localhost:8000/docs**
+
+---
+
+## Тесты
+
+```bash
+# Все тесты
+python -m pytest tests/
+
+# Только поиск по классификатору
+python -m pytest tests/test_search.py
+
+# API-эндпоинты (/verify, /examples)
+python -m pytest tests/test_api_endpoints.py
+
+# Парсер исторических данных
+python -m pytest tests/test_historical_loader.py
+```
+
+---
+
+## Документация
+
+| Документ | Назначение |
+|---|---|
+| [QUICKSTART.md](docs/QUICKSTART.md) | Развернуть с нуля за 10 минут (для IT-отдела) |
+| [INTEGRATION.md](docs/INTEGRATION.md) | API-контракт для команды Directum RX |
+| [FINETUNING.md](docs/FINETUNING.md) | Как запустить и интерпретировать дообучение |
+| [accuracy_report_v1.md](docs/accuracy_report_v1.md) | Отчёт оценки точности (10 обращений, 2026-04-22) |

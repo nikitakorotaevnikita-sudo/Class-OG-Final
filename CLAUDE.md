@@ -110,3 +110,27 @@ FINETUNE_THRESHOLD=50    # verified entries needed to trigger fine-tuning
 
 - Repository: https://github.com/nikitakorotaevnikita-sudo/OG
 - Branch: `master`
+
+## Session Start Instructions
+
+At the **beginning of each session**, Claude Code MUST:
+
+1. **Read Obsidian notes** — check for any updates in:
+   - `C:/Users/Администратор/Desktop/Работа/Obsidian vault/Обращения граждан/`
+   - Look for files modified today (`date: today`) and recent planning files
+   - Check `2026-*-статус-проекта*.md` for current state
+
+2. **Sync ticket statuses** — compare Obsidian tickets with actual project state:
+   - Read `Работа по проекту/TICKET-*.md` files
+   - Check which tickets are marked ⚪ "Not started" but have corresponding ✅ completed files in the project
+   - Update ticket statuses in Obsidian when discrepancies are found
+
+3. **Give a brief session summary** — before starting work, output:
+   ```
+   ## Session Summary
+   - Last session: [date]
+   - What was done: [1-2 sentences]
+   - What's next: [next step]
+   - Open issues: [any blockers]
+   ```
+

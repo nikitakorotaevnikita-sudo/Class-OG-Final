@@ -1,0 +1,109 @@
+<h2>UI: Страница загрузки исторических данных</h2>
+<p class="subtitle">src/static/historical.html — отдельная страница веб-интерфейса</p>
+
+<div style="display:flex;flex-direction:column;gap:16px;margin-top:16px">
+
+<!-- Header -->
+<div style="background:#1565c0;color:#fff;padding:16px;border-radius:8px">
+  <div style="font-size:11px;opacity:0.8;text-transform:uppercase;margin-bottom:4px">📂 Исторические данные</div>
+  <h2 style="margin:0;font-size:18px">Загрузка для дообучения модели</h2>
+</div>
+
+<!-- Upload area -->
+<div style="border:2px dashed #1565c0;padding:24px;border-radius:8px;text-align:center;background:#f5f5f5">
+  <div style="font-size:32px;margin-bottom:8px">📁</div>
+  <div style="font-size:14px;font-weight:bold;margin-bottom:4px">Перетащите файл сюда</div>
+  <div style="font-size:12px;color:#666;margin-bottom:12px">или нажмите для выбора</div>
+  <input type="file" accept=".csv,.xlsx,.xls,.json"
+         style="font-size:12px;padding:8px">
+  <div style="font-size:11px;color:#888;margin-top:8px">XLSX, CSV, JSON — до 50 МБ</div>
+</div>
+
+<!-- File info -->
+<div style="border:1px solid #2e7d32;padding:12px;border-radius:8px;background:#e8f5e9">
+  <div style="display:flex;justify-content:space-between;align-items:center">
+    <div>
+      <div style="font-weight:bold;font-size:13px">📄 history_appeals_2025.xlsx</div>
+      <div style="font-size:11px;color:#555">1,247 записей • 3.2 МБ</div>
+    </div>
+    <div style="font-size:11px;color:#4caf50">✓ Файл выбран</div>
+  </div>
+</div>
+
+<!-- Preview -->
+<div style="border:1px solid #ddd;padding:14px;border-radius:8px">
+  <div style="font-size:11px;color:#888;text-transform:uppercase;margin-bottom:8px">👁 Предпросмотр</div>
+  <div style="overflow-x:auto">
+    <table style="width:100%;font-size:11px;border-collapse:collapse">
+      <thead style="background:#f5f5f5">
+        <tr>
+          <th style="padding:6px 8px;text-align:left;border-bottom:1px solid #ddd">appeal_text</th>
+          <th style="padding:6px 8px;text-align:left;border-bottom:1px solid #ddd">assigned_code</th>
+          <th style="padding:6px 8px;text-align:left;border-bottom:1px solid #ddd">specialist</th>
+          <th style="padding:6px 8px;text-align:left;border-bottom:1px solid #ddd">date</th>
+          <th style="padding:6px 8px;text-align:left;border-bottom:1px solid #ddd">#</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td style="padding:6px 8px;border-bottom:1px solid #eee;color:#666;font-style:italic;max-width:200px;overflow:hidden;text-overflow:ellipsis">Не вывозят мусор уже месяц, УК не реагирует...</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #eee;font-family:monospace;font-size:10px">0005.0005.0056.1160</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #eee;font-size:10px">Петрова А.С.</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #eee;font-size:10px">2025-11-03</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #eee;color:#4caf50">✓</td>
+        </tr>
+        <tr style="background:#fff3e0">
+          <td style="padding:6px 8px;border-bottom:1px solid #eee;color:#666;font-style:italic;max-width:200px;overflow:hidden;text-overflow:ellipsis">Прошу отремонтировать дорогу на ул. Гагарина...</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #eee;font-family:monospace;font-size:10px;text-decoration:line-through;color:#f44336">INVALID</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #eee;font-size:10px">Сидоров К.В.</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #eee;font-size:10px">2025-11-05</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #eee;color:#f44336">❌</td>
+        </tr>
+        <tr>
+          <td style="padding:6px 8px;border-bottom:1px solid #eee;color:#666;font-style:italic;max-width:200px;overflow:hidden;text-overflow:ellipsis">Требуют оплатить задолженность, которую я не признаю...</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #eee;font-family:monospace;font-size:10px">0007.0002.0010.0235</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #eee;font-size:10px">Козлова М.И.</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #eee;font-size:10px">2025-11-07</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #eee;color:#4caf50">✓</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Validation summary -->
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+  <div style="background:#e8f5e9;padding:12px;border-radius:6px;text-align:center">
+    <div style="font-size:22px;font-weight:bold;color:#2e7d32">1,240</div>
+    <div style="font-size:11px;color:#555">✓ Валидных</div>
+  </div>
+  <div style="background:#fff3e0;padding:12px;border-radius:6px;text-align:center">
+    <div style="font-size:22px;font-weight:bold;color:#e65100">7</div>
+    <div style="font-size:11px;color:#555">⚠️ Ошибок</div>
+  </div>
+  <div style="background:#f5f5f5;padding:12px;border-radius:6px;text-align:center">
+    <div style="font-size:22px;font-weight:bold;color:#666">1,247</div>
+    <div style="font-size:11px;color:#555">📊 Всего</div>
+  </div>
+</div>
+
+<!-- Actions -->
+<div style="display:flex;gap:10px;margin-top:8px">
+  <button style="flex:1;padding:12px;background:#4caf50;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">
+    ✓ Загрузить валидные записи (1,240)
+  </button>
+  <button style="padding:12px;background:#ff9800;color:#fff;border:none;border-radius:6px;font-size:13px;cursor:pointer">
+    ✎ Исправить ошибки
+  </button>
+  <button style="padding:12px;background:#f5f5f5;color:#666;border:1px solid #ccc;border-radius:6px;font-size:13px;cursor:pointer">
+    ✗ Отмена
+  </button>
+</div>
+
+</div>
+
+<div style="margin-top:16px;padding:12px;background:#f5f5f5;border-radius:8px;font-size:12px">
+  <b>Формат файла:</b> колонки <code>appeal_text</code> (текст), <code>assigned_code</code> (код классификатора) — обязательно; <code>specialist</code>, <code>date</code> — опционально.
+</div>
+
+<p style="margin-top:12px;font-size:12px;color:#666">Обновите http://localhost:56722</p>

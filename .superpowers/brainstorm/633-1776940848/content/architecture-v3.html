@@ -1,0 +1,113 @@
+<h2>Архитектура: полный поток с дообучением</h2>
+<p class="subtitle">От поступления обращения через верификацию к fine-tuning</p>
+
+<div style="display:flex;flex-direction:column;gap:12px;margin-top:16px">
+
+<!-- Row 1: Sources -->
+<div style="display:flex;gap:16px;align-items:stretch">
+  <div style="flex:1;border:1px solid #1565c0;padding:12px;border-radius:8px;background:#e8eaf6">
+    <div style="font-size:10px;color:#1565c0;text-transform:uppercase;margin-bottom:4px">Источники обращений</div>
+    <div style="font-size:12px">Эл. почта • Интернет-приёмная • Почта России • Личный приём • МЭДО</div>
+  </div>
+  <div style="padding-top:20px;font-size:18px;color:#1565c0">→</div>
+  <div style="flex:2;border:1px solid #1565c0;padding:12px;border-radius:8px;background:#e3f2fd">
+    <div style="font-size:10px;color:#1565c0;text-transform:uppercase;margin-bottom:4px">Directum RX 25.3 — Карточка обращения</div>
+    <b>OCR + Извлечение фактов</b>
+    <div style="font-size:11px;color:#555;margin-top:4px">Текстовый слой снят • Метаданные извлечены • Карточка создана</div>
+  </div>
+  <div style="padding-top:20px;font-size:18px;color:#1565c0">→</div>
+  <div style="flex:1.5;border:1px solid #7b1fa2;padding:12px;border-radius:8px;background:#f3e5f5">
+    <div style="font-size:10px;color:#7b1fa2;text-transform:uppercase;margin-bottom:4px">Наш классификатор</div>
+    <b>POST /classify</b>
+    <div style="font-size:11px;color:#555;margin-top:4px">Текст → Коды классификатора • Вид • Уверенность</div>
+  </div>
+</div>
+
+<!-- Row 2: Classification Result + Verification -->
+<div style="border:2px solid #2e7d32;padding:14px;border-radius:10px;background:#fff">
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+
+    <div style="background:#f9f9f9;padding:10px;border-radius:6px">
+      <div style="font-size:10px;color:#888;text-transform:uppercase;margin-bottom:6px">Обращение</div>
+      <div style="font-size:12px;line-height:1.6">
+        <b>Заявитель:</b> Иванов И.И.<br>
+        <b>Дата:</b> 23.04.2026<br>
+        <b>Способ:</b> Эл. почта<br>
+        <b>Рег. №:</b> 1234-ОГ
+      </div>
+    </div>
+
+    <div style="background:#e3f2fd;padding:10px;border-radius:6px">
+      <div style="font-size:10px;color:#1565c0;text-transform:uppercase;margin-bottom:6px">Результат классификации ИИ</div>
+      <div style="font-size:12px;line-height:1.6">
+        <b>Вид:</b> Жалоба <span style="color:#4caf50">(87%)</span><br>
+        <b>Вопрос:</b> 02.13.XX → Неэффективность госимущества<br>
+        <b>Подвопрос:</b> 02.13.01<br>
+        <b>Предмет ведения:</b> Субъект РФ
+      </div>
+    </div>
+
+  </div>
+
+  <div style="margin:12px 0;padding:8px;background:#fff3e0;border-radius:6px;font-size:11px;color:#555">
+    <b>Обоснование ИИ:</b> "Гражданин указывает на неэффективное использование госимущества..."
+  </div>
+
+  <div style="display:flex;gap:8px;justify-content:center">
+    <div style="padding:8px 16px;background:#4caf50;color:#fff;border-radius:6px;font-size:12px;cursor:pointer" onclick="this.style.boxShadow='0 0 0 3px #2e7d32'">✓ Подтвердить</div>
+    <div style="padding:8px 16px;background:#ff9800;color:#fff;border-radius:6px;font-size:12px;cursor:pointer" onclick="this.style.boxShadow='0 0 0 3px #e65100'">✎ Исправить</div>
+    <div style="padding:8px 16px;background:#f44336;color:#fff;border-radius:6px;font-size:12px;cursor:pointer" onclick="this.style.boxShadow='0 0 0 3px #b71c1c'">✗ Отклонить</div>
+  </div>
+</div>
+
+<!-- Row 3: Logging -->
+<div style="text-align:center;color:#2e7d32;font-size:12px;padding:6px">↓ Результат верификации записывается в appeals_log.jsonl ↓</div>
+
+<div style="display:flex;gap:16px;align-items:stretch">
+  <div style="flex:1;border:1px solid #ccc;padding:12px;border-radius:8px;background:#fafafa">
+    <div style="font-size:10px;color:#888;text-transform:uppercase;margin-bottom:4px">confirmed</div>
+    <div style="font-size:12px;margin-top:4px">(appeal_text, agent_code_name) → положительная пара</div>
+  </div>
+  <div style="flex:1;border:1px solid #ccc;padding:12px;border-radius:8px;background:#fafafa">
+    <div style="font-size:10px;color:#888;text-transform:uppercase;margin-bottom:4px">corrected</div>
+    <div style="font-size:12px;margin-top:4px">(appeal_text, operator_code_name) → положительная<br>(appeal_text, agent_code_name) → отрицательная</div>
+  </div>
+  <div style="flex:1;border:1px solid #ccc;padding:12px;border-radius:8px;background:#fafafa">
+    <div style="font-size:10px;color:#888;text-transform:uppercase;margin-bottom:4px">rejected</div>
+    <div style="font-size:12px;margin-top:4px">Не используется для fine-tuning</div>
+  </div>
+</div>
+
+<!-- Row 4: Fine-tuning trigger -->
+<div style="text-align:center;padding:10px;background:#2e7d32;color:#fff;border-radius:8px;font-size:13px">
+  <b>⬤ Счётчик верификаций: <span style="font-size:18px">X</span> / 50</b>
+  <div style="font-size:11px;margin-top:4px;opacity:0.8">Каждая confirmed/corrected = +1 к счётчику. rejected не считается.</div>
+</div>
+
+<div style="border:1px dashed #2e7d32;padding:12px;border-radius:8px;background:#e8f5e9;margin-top:4px">
+  <div style="font-size:10px;color:#2e7d32;text-transform:uppercase;margin-bottom:6px">⬆ fine-tuning срабатывает при достижении порога</div>
+  <div style="display:flex;gap:12px;align-items:center">
+    <div style="flex:1">
+      <b>finetune_model.py</b>
+      <div style="font-size:11px;color:#555;margin-top:4px">Читает appeals_log.jsonl → Строит пары (appeal_text, classifier_entry_name) → MultipleNegativesRankingLoss → Обучение</div>
+    </div>
+    <div style="font-size:16px;color:#2e7d32">→</div>
+    <div style="flex:1">
+      <b>models/e5-finetuned-vN/</b>
+      <div style="font-size:11px;color:#555;margin-top:4px">Новая модель с учётом верификаций оператора</div>
+    </div>
+    <div style="font-size:16px;color:#2e7d32">→</div>
+    <div style="flex:1">
+      <b>build_vectordb.py</b>
+      <div style="font-size:11px;color:#555;margin-top:4px">Пересобирает vector DB с новой моделью → accuracy растёт</div>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<div style="margin-top:16px;padding:12px;background:#f5f5f5;border-radius:8px;font-size:12px">
+  <b>Триггер fine-tuning:</b> после 50-й верификации (confirmed или corrected) → автоматическая рекомендация оператору запустить дообучение. Operator запускает <code>python src/finetune_model.py</code> вручную.
+</div>
+
+<p style="margin-top:12px;font-size:12px;color:#666">Обновите http://localhost:56722 — новая схема.</p>

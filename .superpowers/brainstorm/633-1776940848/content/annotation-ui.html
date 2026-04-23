@@ -1,0 +1,81 @@
+<h2>Пример: UI оператора при верификации "Исправить"</h2>
+<p class="subtitle">Аннотация генерируется естественно из процесса исправления</p>
+
+<div style="display:flex;flex-direction:column;gap:16px;margin-top:16px">
+
+<!-- Operator Card -->
+<div style="border:2px solid #ff9800;padding:16px;border-radius:10px;background:#fff8e1">
+  <div style="font-size:11px;color:#e65100;text-transform:uppercase;margin-bottom:10px">⬇ Верификация обращения — Исправить</div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+    <div style="background:#f5f5f5;padding:10px;border-radius:6px;font-size:12px">
+      <div style="font-size:10px;color:#888;margin-bottom:4px">ТЕКСТ ОБРАЩЕНИЯ</div>
+      <b>От: Петрова А.С.</b><br>
+      "Прошу провести проверку эффективности использования государственного имущества..."
+    </div>
+    <div style="background:#e3f2fd;padding:10px;border-radius:6px;font-size:12px">
+      <div style="font-size:10px;color:#1565c0;margin-bottom:4px">ПРЕДЛОЖЕНИЕ ИИ</div>
+      <b>Код:</b> 02.13.01<br>
+      <b>Название:</b> Эффективность использования государственного имущества<br>
+      <b>Уверенность:</b> 62%
+    </div>
+  </div>
+
+  <!-- Operator Correction -->
+  <div style="background:#fff3e0;padding:12px;border-radius:6px;border:1px solid #ff9800">
+    <div style="font-size:10px;color:#e65100;text-transform:uppercase;margin-bottom:8px">✎ ИСПРАВЛЕНИЕ ОПЕРАТОРА</div>
+
+    <div style="margin-bottom:10px">
+      <label style="font-size:12px;font-weight:bold;display:block;margin-bottom:4px">Правильный код:</label>
+      <select style="padding:6px 10px;font-size:12px;border-radius:4px;border:1px solid #ccc;width:100%">
+        <option>02.13.01 — Эффективность использования госимущества</option>
+        <option selected>02.14.02 — Приватизация госимущества</option>
+        <option>02.01.05 — Имущественные отношения</option>
+      </select>
+    </div>
+
+    <div>
+      <label style="font-size:12px;font-weight:bold;display:block;margin-bottom:4px">Почему выбрали этот код:</label>
+      <textarea style="width:100%;padding:8px;font-size:12px;border-radius:4px;border:1px solid #ccc;min-height:60px" placeholder="Опишите, в каких случаях используется этот код...">Жалобы на приватизацию, когда заявитель оспаривает решение о приватизации или просит отменить результаты приватизации. Не путать с эффективностью госимущества — это про управление, а не про сделки.</textarea>
+    </div>
+
+    <div style="margin-top:10px;display:flex;gap:8px">
+      <button style="padding:8px 16px;background:#4caf50;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px">✓ Сохранить и закрыть</button>
+      <button style="padding:8px 16px;background:#f5f5f5;color:#333;border:1px solid #ccc;border-radius:6px;cursor:pointer;font-size:12px">Отмена</button>
+    </div>
+  </div>
+</div>
+
+<!-- What gets stored -->
+<div style="border:1px solid #2e7d32;padding:14px;border-radius:8px;background:#e8f5e9">
+  <div style="font-size:11px;color:#2e7d32;text-transform:uppercase;margin-bottom:8px">✓ Что сохраняется в classifier_annotations.json</div>
+  <pre style="background:#fafafa;padding:10px;border-radius:4px;font-size:11px;overflow-x:auto">{
+  "02.14.02": [
+    {
+      "text": "Жалобы на приватизацию, когда заявитель оспаривает решение
+или просит отменить результаты приватизации. Не путать с эффективностью
+госимущества — это про управление, а не про сделки.",
+      "case_id": "log-456",
+      "timestamp": "2026-04-23T15:30:00"
+    },
+    <span style="color:#999">...предыдущие аннотации того же кода...</span>
+  ]
+}</pre>
+</div>
+
+<!-- Search text building -->
+<div style="border:1px solid #1565c0;padding:14px;border-radius:8px;background:#e8eaf6">
+  <div style="font-size:11px;color:#1565c0;text-transform:uppercase;margin-bottom:8px">🔍 search_text при пересборке vector DB</div>
+  <pre style="background:#fafafa;padding:10px;border-radius:4px;font-size:11px;overflow-x:auto">02.14.02 | Приватизация государственного имущества |
+02.14 Предметы и объекты гражданских прав |
+02 Гражданское право |
+Российской Федерации
+| Жалобы на приватизацию, когда заявитель оспаривает решение о приватизации...
+| Предыдущая аннотация 1...
+| Предыдущая аннотация 2...
+<span style="color:#999">[обрезано до ~1500 символов]</span></pre>
+</div>
+
+</div>
+
+<p style="margin-top:14px;font-size:12px;color:#666">Обновите http://localhost:56722</p>

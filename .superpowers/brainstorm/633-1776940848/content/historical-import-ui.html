@@ -1,0 +1,91 @@
+<h2>Загрузка исторических данных для дообучения</h2>
+<p class="subtitle">Формат: обращение гражданина + код, присвоенный специалистом</p>
+
+<div style="display:flex;flex-direction:column;gap:16px;margin-top:16px">
+
+<!-- Upload Form -->
+<div style="border:1px solid #1565c0;padding:16px;border-radius:8px;background:#e8eaf6">
+  <div style="font-size:11px;color:#1565c0;text-transform:uppercase;margin-bottom:10px">📂 Загрузка файла</div>
+
+  <div style="background:#f5f5f5;padding:12px;border-radius:6px;margin-bottom:12px">
+    <label class="block text-sm font-medium mb-2">Выберите файл:</label>
+    <input type="file" id="file-upload" accept=".csv,.xlsx,.xls,.json"
+           style="font-size:13px;padding:8px;border:1px dashed #ccc;border-radius:4px;width:100%;background:#fff">
+    <div style="font-size:11px;color:#888;margin-top:4px">Поддерживаемые форматы: CSV, Excel (.xlsx, .xls), JSON</div>
+  </div>
+
+  <!-- Preview table -->
+  <div style="margin-bottom:12px">
+    <div style="font-size:11px;color:#1565c0;text-transform:uppercase;margin-bottom:6px">👁 Предпросмотр (первые 5 строк)</div>
+    <div style="overflow-x:auto;border:1px solid #ddd;border-radius:4px">
+      <table style="width:100%;font-size:11px;border-collapse:collapse">
+        <thead style="background:#e3f2fd">
+          <tr>
+            <th style="padding:6px 8px;text-align:left;border-bottom:1px solid #ddd">appeal_text</th>
+            <th style="padding:6px 8px;text-align:left;border-bottom:1px solid #ddd">assigned_code</th>
+            <th style="padding:6px 8px;text-align:left;border-bottom:1px solid #ddd">specialist</th>
+            <th style="padding:6px 8px;text-align:left;border-bottom:1px solid #ddd">date</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="padding:6px 8px;border-bottom:1px solid #eee;color:#666;font-style:italic">Не вывозят мусор уже месяц...</td>
+            <td style="padding:6px 8px;border-bottom:1px solid #eee;font-family:monospace">0005.0005.0056.1160</td>
+            <td style="padding:6px 8px;border-bottom:1px solid #eee">Петрова А.С.</td>
+            <td style="padding:6px 8px;border-bottom:1px solid #eee">2026-01-15</td>
+          </tr>
+          <tr>
+            <td style="padding:6px 8px;border-bottom:1px solid #eee;color:#666;font-style:italic">Прошу отремонтировать дорогу...</td>
+            <td style="padding:6px 8px;border-bottom:1px solid #eee;font-family:monospace">0003.0001.0003.0025</td>
+            <td style="padding:6px 8px;border-bottom:1px solid #eee">Сидоров К.В.</td>
+            <td style="padding:6px 8px;border-bottom:1px solid #eee">2026-02-03</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div style="font-size:11px;color:#888;margin-top:4px">Всего записей: 1,247</div>
+  </div>
+
+  <button style="width:100%;padding:10px;background:#1565c0;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">
+    📊 Запустить дообучение модели
+  </button>
+</div>
+
+<!-- Stats before/after -->
+<div style="border:1px solid #2e7d32;padding:14px;border-radius:8px;background:#e8f5e9">
+  <div style="font-size:11px;color:#2e7d32;text-transform:uppercase;margin-bottom:8px">📊 Результат дообучения</div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <div style="background:#fff;padding:10px;border-radius:6px;text-align:center">
+      <div style="font-size:11px;color:#888">До дообучения</div>
+      <div style="font-size:24px;font-weight:bold;color:#f44336">40%</div>
+      <div style="font-size:11px;color:#888">Top-1 accuracy</div>
+    </div>
+    <div style="background:#fff;padding:10px;border-radius:6px;text-align:center">
+      <div style="font-size:11px;color:#888">После дообучения</div>
+      <div style="font-size:24px;font-weight:bold;color:#4caf50">72%</div>
+      <div style="font-size:11px;color:#888">Top-1 accuracy</div>
+    </div>
+  </div>
+
+  <div style="margin-top:10px;font-size:12px;color:#555">
+    ✅ Модель сохранена: <code>models/e5-finetuned-v2/</code>
+  </div>
+  <div style="font-size:12px;color:#555">
+    ℹ️ Обновлён <code>EMBEDDING_MODEL</code> в <code>.env</code>
+  </div>
+</div>
+
+</div>
+
+<div style="margin-top:20px;padding:12px;background:#f5f5f5;border-radius:8px;font-size:13px">
+  <b>Ожидаемые поля в файле:</b>
+  <ul style="margin:6px 0 0 20px;line-height:1.8">
+    <li><code>appeal_text</code> — текст обращения (обязательно)</li>
+    <li><code>assigned_code</code> — код из классификатора (обязательно)</li>
+    <li><code>specialist</code> — ФИО специалиста (опционально)</li>
+    <li><code>date</code> — дата регистрации (опционально)</li>
+  </ul>
+</div>
+
+<p style="margin-top:14px;font-size:12px;color:#666">Обновите http://localhost:56722</p>

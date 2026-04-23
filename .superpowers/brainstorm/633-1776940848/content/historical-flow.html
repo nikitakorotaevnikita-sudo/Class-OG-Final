@@ -1,0 +1,109 @@
+<h2>Архитектура: загрузка исторических данных</h2>
+<p class="subtitle">Три источника → валидация → fine-tuning → новая модель</p>
+
+<div style="display:flex;flex-direction:column;gap:12px;margin-top:16px">
+
+<!-- Three sources -->
+<div style="display:flex;gap:12px;align-items:stretch">
+  <div style="flex:1;border:1px solid #1565c0;padding:12px;border-radius:8px;background:#e8eaf6">
+    <div style="font-size:10px;color:#1565c0;text-transform:uppercase;margin-bottom:6px">📂 Источник 1</div>
+    <b>Веб-интерфейс</b>
+    <div style="font-size:11px;color:#555;margin-top:4px">POST /api/upload-historical<br>multipart/form-data</div>
+  </div>
+  <div style="flex:1;border:1px solid #1565c0;padding:12px;border-radius:8px;background:#e8eaf6">
+    <div style="font-size:10px;color:#1565c0;text-transform:uppercase;margin-bottom:6px">📁 Источник 2</div>
+    <b>Папка data/historical/</b>
+    <div style="font-size:11px;color:#555;margin-top:4px">Скрипт парсит при запуске<br>*.xlsx, *.csv, *.json</div>
+  </div>
+  <div style="flex:1;border:1px solid #7b1fa2;padding:12px;border-radius:8px;background:#f3e5f5">
+    <div style="font-size:10px;color:#7b1fa2;text-transform:uppercase;margin-bottom:6px">🔌 Источник 3</div>
+    <b>Directum API</b>
+    <div style="font-size:11px;color:#555;margin-top:4px">REST API выгрузка<br>(future)</div>
+  </div>
+</div>
+
+<!-- Arrow down -->
+<div style="text-align:center;font-size:20px;color:#1565c0">↓</div>
+
+<!-- Parser -->
+<div style="border:1px solid #1565c0;padding:14px;border-radius:8px;background:#e3f2fd">
+  <div style="font-size:11px;color:#1565c0;text-transform:uppercase;margin-bottom:8px">🔧 historical_loader.py — парсинг и валидация</div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;font-size:11px;margin-bottom:8px">
+    <span style="background:#fff;padding:4px 8px;border-radius:4px">📊 pandas.read_excel</span>
+    <span style="background:#fff;padding:4px 8px;border-radius:4px">📊 pandas.read_csv</span>
+    <span style="background:#fff;padding:4px 8px;border-radius:4px">📄 json.load</span>
+    <span style="background:#fff;padding:4px 8px;border-radius:4px">📋 dbf.read (опционально)</span>
+  </div>
+  <div style="font-size:11px;color:#555">
+    → Валидация кодов по classifier_flat.json<br>
+    → Сохранение в historical_verified.jsonl
+  </div>
+</div>
+
+<!-- Arrow down -->
+<div style="text-align:center;font-size:20px;color:#1565c0">↓</div>
+
+<!-- Validation result -->
+<div style="border:1px solid #ff9800;padding:14px;border-radius:8px;background:#fff8e1">
+  <div style="font-size:11px;color:#e65100;text-transform:uppercase;margin-bottom:8px">⚠️ Результат валидации</div>
+
+  <div style="overflow-x:auto;border:1px solid #ddd;border-radius:4px;margin-bottom:8px">
+    <table style="width:100%;font-size:11px;border-collapse:collapse">
+      <thead style="background:#fff3e0">
+        <tr>
+          <th style="padding:6px 8px;text-align:left;border-bottom:1px solid #ddd">appeal_text</th>
+          <th style="padding:6px 8px;text-align:left;border-bottom:1px solid #ddd">assigned_code</th>
+          <th style="padding:6px 8px;text-align:left;border-bottom:1px solid #ddd">Статус</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="background:#e8f5e9">
+          <td style="padding:6px 8px;border-bottom:1px solid #eee;font-style:italic;color:#666">Не вывозят мусор...</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #eee;font-family:monospace">0005.0005.0056.1160</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #eee;color:#4caf50">✓ Найден</td>
+        </tr>
+        <tr style="background:#fff3e0">
+          <td style="padding:6px 8px;border-bottom:1px solid #eee;font-style:italic;color:#666">Яма на дороге...</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #eee;font-family:monospace;text-decoration:line-through;color:#f44336">9999.9999.9999.9999</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #eee;color:#f44336">❌ Не найден</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div style="display:flex;gap:8px">
+    <button style="padding:8px 16px;background:#4caf50;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px">✓ Загрузить валидные (847)</button>
+    <button style="padding:8px 16px;background:#ff9800;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px">✎ Исправить ошибки</button>
+    <button style="padding:8px 16px;background:#f5f5f5;color:#333;border:1px solid #ccc;border-radius:6px;cursor:pointer;font-size:12px">✗ Отмена</button>
+  </div>
+</div>
+
+<!-- Arrow down -->
+<div style="text-align:center;font-size:20px;color:#2e7d32">↓ Подтверждение</div>
+
+<!-- Fine-tuning -->
+<div style="border:2px solid #2e7d32;padding:14px;border-radius:8px;background:#e8f5e9">
+  <div style="font-size:11px;color:#2e7d32;text-transform:uppercase;margin-bottom:8px">🚀 Fine-tuning (запускается после подтверждения)</div>
+  <div style="display:flex;gap:16px;align-items:center">
+    <div style="flex:1;font-size:12px">
+      <div style="margin-bottom:6px">
+        <b>Шаг 1:</b> fine-tuning модели
+      </div>
+      <div style="margin-bottom:6px">
+        <b>Шаг 2:</b> rebuild Vector DB
+      </div>
+      <div style="margin-bottom:6px">
+        <b>Шаг 3:</b> обновление .env
+      </div>
+    </div>
+    <div style="text-align:center;padding:10px;background:#fff;border-radius:6px">
+      <div style="font-size:11px;color:#888">recall@5</div>
+      <div style="font-size:20px;font-weight:bold;color:#4caf50">72%</div>
+      <div style="font-size:10px;color:#888">↑ +32%</div>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<p style="margin-top:14px;font-size:12px;color:#666">Обновите http://localhost:56722</p>
