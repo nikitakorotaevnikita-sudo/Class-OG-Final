@@ -32,6 +32,9 @@ from text_extractor import (
     MAX_TEXT_LENGTH,
 )
 
+# Модуль-level хранилище для последнего аплоада исторических данных
+_last_historical_upload: dict = {}
+
 app = FastAPI(
     title="Агент классификации обращений граждан",
     description="Автоматическая классификация по 59-ФЗ и классификатору обращений граждан РФ",
@@ -356,8 +359,12 @@ async def upload_historical(file: UploadFile = File(...)):
             "filename": file.filename,
             "stats": result.stats,
             "errors": result.errors,
-            "preview": result.valid_records[:5] if result.valid_records else []
+            "preview": result.valid_records[:5] if result.valid_records else [],
+            "valid_count": len(result.valid_records)
         }
+        # Store for confirm
+        global _last_historical_upload
+        _last_historical_upload = {"valid_records": result.valid_records, "filename": file.filename}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"File parsing error: {str(e)}")
     finally:
@@ -369,5 +376,34 @@ async def upload_historical(file: UploadFile = File(...)):
 @app.post("/api/confirm-historical")
 async def confirm_historical(request: dict):
     """Подтвердить и сохранить валидные записи"""
-    # Implementation saves records to historical_verified.jsonl
-    pass
+    global _last_historical_upload
+    if not _last_historical_upload:
+        raise HTTPException(status_code=400, detail="Нет данных для сохранения")
+
+    preview = _last_historical_upload.get("valid_records", [])
+    if not preview:
+        raise HTTPException(status_code=400, detail="Нет валидных записей для сохранения")
+
+    from historical_loader import save_to_historical_jsonl
+    filename = _last_historical_upload.get("filename", "unknown")
+    save_to_historical_jsonl(preview, filename)
+
+    _last_historical_upload = {}
+    return {"status": "ok", "records_saved": len(preview)}
+
+
+@app.get("/api/historical-count")
+async def get_historical_count():
+    """Возвращает количество записей в historical_verified.jsonl"""
+    hist_file = Path("data/historical_verified.jsonl")
+    if not hist_file.exists():
+        return {"count": 0, "status": "no_data"}
+    with open(hist_file, encoding="utf-8") as f:
+        count = sum(1 for _ in f)
+    return {"count": count, "status": "ok"}
+
+
+@app.post("/api/finetune")
+async def start_finetune():
+    """Запускает fine-tuning на исторических данных"""
+    return {"status": "not_implemented", "message": "Fine-tuning endpoint coming in Task 4"}
