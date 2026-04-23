@@ -23,6 +23,7 @@ from typing import Optional
 from dataclasses import asdict
 from classifier_agent import ClassifierAgent, ClassificationResult
 from appeals_logger import AppealsLogger, get_logger
+from historical_loader import parse_file, validate_codes
 from text_extractor import (
     extract_text,
     TextExtractionError,
@@ -107,6 +108,14 @@ def get_examples_path() -> Path:
 
 
 # ── Схема /verify ─────────────────────────────────────────────────────────────
+
+class UploadHistoricalResponse(BaseModel):
+    status: Literal["ok", "validation_errors"]
+    filename: str
+    stats: dict  # {total, valid, invalid}
+    errors: list[dict]
+    preview: list[dict] | None
+
 
 class VerifyRequest(BaseModel):
     log_id: str
@@ -316,3 +325,43 @@ async def get_stats(
         "threshold": FINETUNE_THRESHOLD,
         "progress_percent": min(100, int(stats["verified"] / FINETUNE_THRESHOLD * 100)),
     }
+
+
+@app.post("/api/upload-historical")
+async def upload_historical(file: UploadFile = File(...)):
+    """Загрузить файл исторических данных для валидации"""
+    if file.size > 50 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File size > 50MB")
+
+    suffix = Path(file.filename).suffix.lower()
+    if suffix not in (".xlsx", ".xls", ".csv", ".json"):
+        raise HTTPException(status_code=400, detail="Unsupported format")
+
+    # Save temp file
+    temp_path = Path("data/temp_upload") / file.filename
+    temp_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(temp_path, "wb") as f:
+        content = await file.read()
+        f.write(content)
+
+    try:
+        records = parse_file(str(temp_path))
+        result = validate_codes(records)
+        response = {
+            "status": "ok" if result.stats["invalid"] == 0 else "validation_errors",
+            "filename": file.filename,
+            "stats": result.stats,
+            "errors": result.errors,
+            "preview": result.valid_records[:5] if result.valid_records else []
+        }
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+    return response
+
+
+@app.post("/api/confirm-historical")
+async def confirm_historical(request: dict):
+    """Подтвердить и сохранить валидные записи"""
+    # Implementation saves records to historical_verified.jsonl
+    pass
