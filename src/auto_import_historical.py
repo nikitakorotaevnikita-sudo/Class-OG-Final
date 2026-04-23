@@ -163,10 +163,8 @@ def run_watch(interval: int = 30, verbose: bool = True):
     if verbose:
         print(f"Watching data/historical/ (interval={interval}s). Press Ctrl+C to stop.")
 
-    ensure_dirs()
-    processed_names: set[str] = set()
-
     while True:
+        processed_names: set[str] = set()  # Reset each cycle
         files = scan_historical_dir()
 
         # Пропускаем файлы которые уже обработаны в этом цикле
@@ -213,11 +211,9 @@ def main():
         run_watch(interval=args.interval)
     else:
         results = run_once()
-        if not results:
-            sys.exit(0)
-        # Exit with error code if any file had errors
-        has_errors = any(r["stats"]["invalid"] > 0 for r in results)
-        sys.exit(1 if has_errors else 0)
+        if results:
+            has_errors = any(r["stats"]["invalid"] > 0 for r in results)
+            sys.exit(1 if has_errors else 0)
 
 
 if __name__ == "__main__":
