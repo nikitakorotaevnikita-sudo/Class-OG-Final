@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from classifier_agent import ClassifierAgent
 from appeals_logger import get_logger
 from config import FINETUNE_THRESHOLD
+import annotations_storage
 
 
 # ── Вспомогательные функции ────────────────────────────────────────────────────
@@ -75,6 +76,25 @@ def ask_correct_codes(result) -> list[str]:
         codes = [c.strip() for c in raw.split(",") if c.strip()]
         if codes:
             return codes
+
+
+def ask_annotation() -> str:
+    """
+    Запрашивает у оператора аннотацию (описание случаев применения кода).
+    Минимум 10 символов.
+    """
+    print()
+    print("  В каких случаях применяется этот код?")
+    print("  (минимум 10 символов; Enter — пропустить)")
+
+    while True:
+        text = input("  Аннотация: ").strip()
+        if not text:
+            return ""
+        if len(text) < 10:
+            print("  Аннотация слишком короткая (минимум 10 символов).")
+            continue
+        return text
 
 def check_and_offer_finetuning(logger):
     """
@@ -176,8 +196,18 @@ def main():
 
         elif choice == "2":
             correct_codes = ask_correct_codes(result)
+            annotation_text = ask_annotation()
             logger.correct(result.log_id, operator_codes=correct_codes)
             print(f"  Исправление сохранено. Правильные коды: {', '.join(correct_codes)}")
+
+            if annotation_text:
+                annotated_count = 0
+                for code in correct_codes:
+                    annotations_storage.save_annotation(code, "note", annotation_text)
+                    ann = annotations_storage.get_annotations(code)
+                    if ann:
+                        annotated_count += 1
+                print(f"  Аннотация сохранена для {annotated_count} код(ов).")
 
         elif choice == "3":
             logger.reject(result.log_id)
