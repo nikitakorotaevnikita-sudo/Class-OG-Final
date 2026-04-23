@@ -81,7 +81,7 @@ def build_training_examples(verified_entries: list, code_index: dict) -> list[In
     return examples
 
 
-def load_historical_examples(path: str = "data/historical_verified.jsonl", code_index: dict = None) -> list[InputExample]:
+def load_historical_examples(path: str = "data/historical_verified.jsonl") -> list[InputExample]:
     """
     Load historical data: each line has {appeal_text, assigned_code}
     Build pairs: (query: appeal_text, passage: classifier_entry_name)
@@ -90,12 +90,13 @@ def load_historical_examples(path: str = "data/historical_verified.jsonl", code_
     when combined with verified data.
     """
     examples = []
-    if code_index is None:
-        return examples
 
     p = Path(path)
     if not p.exists():
-        return examples
+        print(f"  ⚠️ Файл исторических данных не найден: {path}")
+        return []
+
+    code_index = load_metadata()
 
     with open(p, encoding="utf-8") as f:
         for line in f:
@@ -194,7 +195,7 @@ def main():
 
     # ── Шаг 3: Построение обучающих пар ──────────────────────────────────────
     verified_examples = build_training_examples(verified, code_index)
-    historical_examples = load_historical_examples(code_index=code_index) if args.source != "verified" else []
+    historical_examples = load_historical_examples() if args.source != "verified" else []
 
     if args.source == "verified":
         all_examples = verified_examples
@@ -293,7 +294,7 @@ def main():
         "recall5_after":  round(recall_after, 4),
         "improved":       improved,
         "annotated_codes_count": len(annotated_codes),
-        "historical_records": len(historical_examples),
+        "historical_pairs": len(historical_examples),
         "verified_records": len(verified_examples),
         "total_training_pairs": len(all_examples),
     }
