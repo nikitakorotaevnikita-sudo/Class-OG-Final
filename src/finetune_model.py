@@ -20,6 +20,7 @@ finetune_model.py — Дообучение эмбеддинговой модел
 import sys
 import json
 import random
+import argparse
 from pathlib import Path
 from datetime import datetime
 
@@ -80,6 +81,42 @@ def build_training_examples(verified_entries: list, code_index: dict) -> list[In
     return examples
 
 
+def load_historical_examples(path: str = "data/historical_verified.jsonl", code_index: dict = None) -> list[InputExample]:
+    """
+    Load historical data: each line has {appeal_text, assigned_code}
+    Build pairs: (query: appeal_text, passage: classifier_entry_name)
+
+    Historical data is expert-labeled by specialists — weight is 3x per pair
+    when combined with verified data.
+    """
+    examples = []
+    if code_index is None:
+        return examples
+
+    p = Path(path)
+    if not p.exists():
+        return examples
+
+    with open(p, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            record = json.loads(line)
+            appeal_text = record.get("appeal_text", "")[:800]
+            assigned_code = record.get("assigned_code", "")
+
+            meta = code_index.get(assigned_code)
+            if not meta:
+                continue
+
+            anchor   = f"query: {appeal_text}"
+            positive = f"passage: {build_search_text(assigned_code, meta['name'], meta.get('full_path', ''))}"
+            examples.append(InputExample(texts=[anchor, positive]))
+
+    return examples
+
+
 def get_next_version(models_dir: Path) -> int:
     """Определяет следующий номер версии модели."""
     existing = sorted(models_dir.glob("e5-finetuned-v*"))
@@ -119,10 +156,21 @@ def evaluate_recall(model: SentenceTransformer, examples: list[InputExample], k:
 
 
 def main():
+    # ── Argparse ─────────────────────────────────────────────────────────────────
+    parser = argparse.ArgumentParser(description="Fine-tune embedding model")
+    parser.add_argument(
+        "--source",
+        choices=["verified", "historical", "combined"],
+        default="verified",
+        help="Data source: verified (operator-log), historical (expert-labeled), combined (3x weight for historical)",
+    )
+    args = parser.parse_args()
+
     print()
     print("═" * 52)
     print("  Fine-tuning эмбеддинговой модели")
     print(f"  Базовая модель: {EMBEDDING_MODEL}")
+    print(f"  Источник данных: {args.source}")
     print("═" * 52)
 
     # ── Шаг 1: Загрузка данных ────────────────────────────────────────────────
@@ -145,8 +193,20 @@ def main():
     code_index = load_metadata()
 
     # ── Шаг 3: Построение обучающих пар ──────────────────────────────────────
-    all_examples = build_training_examples(verified, code_index)
-    print(f"  Обучающих пар: {len(all_examples)}")
+    verified_examples = build_training_examples(verified, code_index)
+    historical_examples = load_historical_examples(code_index=code_index) if args.source != "verified" else []
+
+    if args.source == "verified":
+        all_examples = verified_examples
+    elif args.source == "historical":
+        all_examples = historical_examples
+    else:  # combined
+        # Historical pairs weighted 3x
+        all_examples = historical_examples * 3 + verified_examples
+
+    print(f"\n  Обучающих пар (verified): {len(verified_examples)}")
+    print(f"  Обучающих пар (historical): {len(historical_examples)}")
+    print(f"  Итого: {len(all_examples)}")
 
     annotated_codes = list_annotated_codes()
     print(f"  Записей с аннотациями: {len(annotated_codes)}")
@@ -233,6 +293,9 @@ def main():
         "recall5_after":  round(recall_after, 4),
         "improved":       improved,
         "annotated_codes_count": len(annotated_codes),
+        "historical_records": len(historical_examples),
+        "verified_records": len(verified_examples),
+        "total_training_pairs": len(all_examples),
     }
     report_path = output_path / "training_report.json"
     with open(report_path, "w", encoding="utf-8") as f:
