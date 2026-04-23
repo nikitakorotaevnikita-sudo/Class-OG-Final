@@ -248,6 +248,7 @@ cd "C:\путь\до\папки\Class OG Final"
 [2] Classify manually  — ввести текст обращения вручную
 [3] Start API server   — REST API на порту 8000
 [4] Operator mode      — верификация + дообучение
+[5] Select LLM model   — выбор провайдера LLM (Groq/Gemini/Ollama)
 ```
 
 ---
