@@ -112,6 +112,7 @@ class VerifyRequest(BaseModel):
     log_id: str
     action: Literal["confirm", "correct", "reject"]
     operator_codes: Optional[list[str]] = None
+    annotation: Optional[str] = None
 
 
 # ── Вспомогательная функция сборки ответа ─────────────────────────────────────
@@ -249,7 +250,10 @@ async def verify(
     Действия: confirm | correct | reject.
     Для action="correct" обязательно передать operator_codes — список правильных
     кодов классификатора (формата XXXX.XXXX.XXXX.XXXX).
+    annotation — пояснение оператора (сохраняется в classifier_annotations.json).
     """
+    annotation_count = None
+
     if request.action == "confirm":
         logger.confirm(request.log_id)
     elif request.action == "correct":
@@ -258,11 +262,26 @@ async def verify(
                 status_code=400,
                 detail="operator_codes обязательно для action='correct'",
             )
-        logger.correct(request.log_id, operator_codes=request.operator_codes)
+        logger.correct(request.log_id, operator_codes=request.operator_codes, comment=request.annotation)
+
+        # Получаем количество аннотаций для первого кода
+        try:
+            from annotations_storage import get_annotations
+            if request.operator_codes:
+                anns = get_annotations(request.operator_codes[0])
+                annotation_count = len(anns)
+        except Exception:
+            annotation_count = None
+
     elif request.action == "reject":
         logger.reject(request.log_id)
 
-    return {"status": "ok", "log_id": request.log_id, "action": request.action}
+    return {
+        "status": "ok",
+        "log_id": request.log_id,
+        "action": request.action,
+        "annotation_count": annotation_count
+    }
 
 
 @app.get("/examples")

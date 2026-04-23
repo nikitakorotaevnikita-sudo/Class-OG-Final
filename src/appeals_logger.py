@@ -30,6 +30,12 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
+try:
+    from annotations_storage import add_annotation as _add_annotation, get_annotations as _get_annotations
+except ImportError:
+    _add_annotation = None
+    _get_annotations = None
+
 
 LOG_FILE = Path(__file__).parent.parent / "data" / "appeals_log.jsonl"
 
@@ -97,7 +103,26 @@ class AppealsLogger:
           - (appeal_text, operator_code)  → позитивная пара
           - (appeal_text, agent_code)     → негативная пара
         operator_codes — список правильных кодов классификатора.
+        comment — пояснение оператора (сохраняется в classifier_annotations.json)
         """
+        # Получаем код агента для аннотации
+        agent_code = None
+        for entry in self.read_all():
+            if entry["id"] == log_id:
+                if entry.get("agent_questions") and len(entry["agent_questions"]) > 0:
+                    agent_code = entry["agent_questions"][0].get("selected_code")
+                break
+
+        # Сохраняем аннотации в classifier_annotations.json
+        if _add_annotation and comment:
+            for op_code in operator_codes:
+                _add_annotation(
+                    code=op_code,
+                    text=comment,
+                    case_id=log_id,
+                    operator_code=agent_code or ""
+                )
+
         return self._update_verification(log_id, {
             "status":         "corrected",
             "verified_at":    datetime.now().isoformat(timespec="seconds"),

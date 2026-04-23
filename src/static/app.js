@@ -175,13 +175,14 @@ $("classify-btn").addEventListener("click", async () => {
 });
 
 // ── Верификация: общий хелпер ────────────────────────────────────────────────
-async function postVerify(action, operator_codes) {
+async function postVerify(action, operator_codes, annotation) {
   if (!lastLogId) {
     toast("Сначала выполните классификацию", "error");
     return;
   }
   const body = { log_id: lastLogId, action };
   if (operator_codes) body.operator_codes = operator_codes;
+  if (annotation) body.annotation = annotation;
 
   try {
     const res = await fetch("/verify", {
@@ -229,14 +230,39 @@ $("btn-correct").addEventListener("click", () => {
 // ── Исправить: сохранить ─────────────────────────────────────────────────────
 $("btn-correct-save").addEventListener("click", async () => {
   const code = $("correct-code").value.trim();
+  const annotation = $("correct-annotation").value.trim();
+
   if (!code) {
     toast("Введите код вопроса", "error");
     return;
   }
-  const ok = await postVerify("correct", [code]);
+
+  if (annotation.length > 0 && annotation.length < 10) {
+    $("annotation-hint").classList.remove("hidden");
+    toast("Пояснение должно быть минимум 10 символов", "error");
+    return;
+  }
+  $("annotation-hint").classList.add("hidden");
+
+  const ok = await postVerify("correct", [code], annotation);
   if (ok) {
-    toast("✎ Исправление сохранено — записано в лог", "success");
+    // Get annotation count from response
+    const res = await fetch("/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ log_id: lastLogId, action: "correct", operator_codes: [code], annotation: annotation }),
+    }).catch(() => null);
+
+    let msg = "✎ Исправление сохранено — записано в лог";
+    if (res && res.ok) {
+      const data = await res.json().catch(() => ({}));
+      if (data.annotation_count !== null && data.annotation_count !== undefined) {
+        msg += `. Всего к этому коду: ${data.annotation_count} аннотаций.`;
+      }
+    }
+    toast(msg, "success");
     $("result").classList.add("hidden");
+    $("correct-annotation").value = "";
     lastLogId = null;
   }
 });

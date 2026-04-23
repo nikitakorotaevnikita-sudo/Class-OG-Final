@@ -66,10 +66,23 @@
 
       <div id="correct-form" class="hidden border-t pt-3 mt-3">
         <label class="block text-sm font-medium mb-1">Введите правильный код вопроса:</label>
-        <div class="flex gap-2">
+        <div class="flex gap-2 mb-3">
           <input id="correct-code" type="text" placeholder="0005.0005.0051.1103"
                  class="flex-1 border rounded px-3 py-2 font-mono text-sm">
           <button id="btn-correct-save" class="bg-amber-500 hover:bg-amber-600 text-white px-4 rounded">Сохранить</button>
+        </div>
+
+        <div class="bg-amber-50 border border-amber-200 rounded p-3 mb-3">
+          <label class="block text-sm font-medium mb-1 text-amber-900">
+            Пояснение к коду:
+          </label>
+          <p class="text-xs text-amber-700 mb-2">В каких случаях применяется этот код? Это поможет улучшить модель.</p>
+          <textarea id="correct-annotation" rows="3"
+                    class="w-full border rounded px-3 py-2 text-sm"
+                    placeholder="Опишите, почему выбран этот код..."></textarea>
+          <div id="annotation-hint" class="text-xs text-amber-600 mt-1 hidden">
+            Минимум 10 символов
+          </div>
         </div>
       </div>
 
