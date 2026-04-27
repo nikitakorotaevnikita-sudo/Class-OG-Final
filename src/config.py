@@ -59,3 +59,7 @@ MAX_APPEAL_LENGTH: int = 5000   # символов
 FINETUNE_THRESHOLD: int = int(os.getenv("FINETUNE_THRESHOLD", "50"))
 # Папка для дообученных моделей
 MODELS_DIR: str = os.getenv("MODELS_DIR", str(Path(__file__).parent.parent / "models"))
+
+# ── Бэк-офис (Basic Auth) ───────────────────────────────────────────────────────
+BACKOFFICE_USER:     str = os.getenv("BACKOFFICE_USER", "admin")
+BACKOFFICE_PASSWORD: str = os.getenv("BACKOFFICE_PASSWORD", "password")

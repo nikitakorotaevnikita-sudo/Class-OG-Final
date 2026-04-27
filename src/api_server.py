@@ -11,13 +11,17 @@ FastAPI-сервер для агента классификации обраще
 
 import sys
 import json
+import time
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent))
-
+from datetime import datetime, timedelta
+from collections import Counter
 from typing import Literal
-from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form
+sys.path.insert(0, str(Path(__file__).parent))
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from starlette.status import HTTP_401_UNAUTHORIZED
 from pydantic import BaseModel
 from typing import Optional
 from dataclasses import asdict
@@ -45,10 +49,49 @@ app = FastAPI(
 _STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
 
+# Путь к логу IP-запросов
+_REQUEST_LOG = Path(__file__).parent.parent / "data" / "request_log.jsonl"
+_REQUEST_LOG.parent.mkdir(parents=True, exist_ok=True)
+
+# HTTP Basic Auth для бэк-офиса
+security = HTTPBasic()
+
+
+def get_current_user(credentials: HTTPBasicCredentials = Depends(security)):
+    from config import BACKOFFICE_USER, BACKOFFICE_PASSWORD
+    if credentials.username != BACKOFFICE_USER or credentials.password != BACKOFFICE_PASSWORD:
+        raise HTTPException(
+            status_code=HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return credentials.username
+
 
 @app.get("/", include_in_schema=False)
 async def index():
     return FileResponse(_STATIC_DIR / "index.html")
+
+
+@app.get("/backoffice", include_in_schema=False)
+async def backoffice_page():
+    return FileResponse(_STATIC_DIR / "backoffice.html")
+
+
+# ── IP-логирование запросов к /classify ───────────────────────────────────────
+
+def log_request(ip: str, endpoint: str, elapsed_seconds: float, log_id: str | None):
+    """Appends an entry to data/request_log.jsonl."""
+    entry = {
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "ip": ip,
+        "endpoint": endpoint,
+        "elapsed_seconds": round(elapsed_seconds, 3),
+        "log_id": log_id or "",
+    }
+    with open(_REQUEST_LOG, "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
 
 # Инициализация агента при старте сервера
 agent: Optional[ClassifierAgent] = None
@@ -184,18 +227,25 @@ async def health_check():
     description="Принимает текст обращения в JSON. Для загрузки файла используйте POST /classify/file.",
     tags=["Классификация"],
 )
-async def classify_appeal_json(request: ClassifyRequest) -> ClassifyResponse:
+async def classify_appeal_json(request: ClassifyRequest, req: Request) -> ClassifyResponse:
     """Классифицирует обращение — JSON тело"""
     if not agent:
         raise HTTPException(status_code=503, detail="Агент не инициализирован")
     if not request.appeal_text or not request.appeal_text.strip():
         raise HTTPException(status_code=400, detail="Текст обращения пустой")
 
+    start_ts = time.time()
     try:
         result = agent.classify(request.appeal_text)
-        return _build_classify_response(result, appeal_id=request.appeal_id)
+        resp = _build_classify_response(result, appeal_id=request.appeal_id)
+        return resp
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка классификации: {str(e)}")
+    finally:
+        elapsed = time.time() - start_ts
+        ip = req.client.host if req.client else "unknown"
+        log_id = result.log_id if "result" in dir() else None
+        log_request(ip, "/classify", elapsed, log_id)
 
 
 @app.post(
@@ -205,7 +255,7 @@ async def classify_appeal_json(request: ClassifyRequest) -> ClassifyResponse:
     description="Принимает TXT или PDF файл (макс. 5 МБ). Текст извлекается автоматически.",
     tags=["Классификация"],
 )
-async def classify_appeal_file(file: UploadFile = File(...)) -> ClassifyResponse:
+async def classify_appeal_file(file: UploadFile = File(...), req: Request = None) -> ClassifyResponse:
     """Классифицирует обращение из загруженного файла TXT или PDF."""
     if not agent:
         raise HTTPException(status_code=503, detail="Агент не инициализирован")
@@ -230,11 +280,17 @@ async def classify_appeal_file(file: UploadFile = File(...)) -> ClassifyResponse
     if not text.strip():
         raise HTTPException(status_code=400, detail="Файл не содержит текста")
 
+    start_ts = time.time()
     try:
         result = agent.classify(text)
         return _build_classify_response(result, was_truncated=truncated)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка классификации: {str(e)}")
+    finally:
+        elapsed = time.time() - start_ts
+        ip = req.client.host if req and req.client else "unknown"
+        log_id = result.log_id if "result" in dir() else None
+        log_request(ip, "/classify/file", elapsed, log_id)
 
 
 @app.get("/classifier/search")
@@ -407,3 +463,106 @@ async def get_historical_count():
 async def start_finetune():
     """Запускает fine-tuning на исторических данных"""
     return {"status": "not_implemented", "message": "Fine-tuning endpoint coming in Task 4"}
+
+
+@app.get("/api/backoffice/stats", tags=["Бэк-офис"])
+async def backoffice_stats(
+    _username: str = Depends(get_current_user),
+    logger: AppealsLogger = Depends(get_logger_dep),
+):
+    """
+    Возвращает агрегированную статистику для страницы бэк-офиса.
+    Требует HTTP Basic Auth (BACKOFFICE_USER / BACKOFFICE_PASSWORD).
+    """
+    all_entries = logger.read_all()
+
+    # ── Appeals log stats ─────────────────────────────────────────────────────
+    status_counts = Counter()
+    code_counter = Counter()
+    confidence_sum = 0.0
+    confidence_histogram = {
+        "0.0-0.1": 0, "0.1-0.2": 0, "0.2-0.3": 0, "0.3-0.4": 0, "0.4-0.5": 0,
+        "0.5-0.6": 0, "0.6-0.7": 0, "0.7-0.8": 0, "0.8-0.9": 0, "0.9-1.0": 0,
+    }
+
+    # Build lookup: code → name from agent metadata
+    code_names = {}
+    if agent and agent.metadata:
+        for m in agent.metadata:
+            code_names[m.get("code", "")] = m.get("name", "")
+
+    date_counts = Counter()
+
+    for entry in all_entries:
+        status_counts[entry["verification"]["status"]] += 1
+
+        conf = entry.get("overall_confidence", 0.0)
+        confidence_sum += conf
+
+        # Histogram bin (0.0-0.1, 0.1-0.2, ..., 0.9-1.0)
+        bin_idx = min(int(conf * 10), 9)
+        bin_key = f"{bin_idx * 0.1:.1f}-{bin_idx * 0.1 + 0.1:.1f}"
+        confidence_histogram[bin_key] += 1
+
+        # Selected codes from verified entries only
+        if entry["verification"]["status"] in ("confirmed", "corrected"):
+            for q in entry.get("agent_questions", []):
+                sel = q.get("selected_code", "")
+                if sel:
+                    code_counter[sel] += 1
+
+        # Date for daily usage
+        ts = entry.get("timestamp", "")
+        if ts:
+            date = ts[:10]  # YYYY-MM-DD
+            date_counts[date] += 1
+
+    total = len(all_entries)
+    verified = status_counts["confirmed"] + status_counts["corrected"]
+    avg_conf = (confidence_sum / total) if total > 0 else 0.0
+
+    # Top-10 codes
+    top_codes = [
+        {"code": code, "name": code_names.get(code, ""), "count": cnt}
+        for code, cnt in code_counter.most_common(10)
+    ]
+
+    # Last 30 days daily usage
+    today = datetime.now().date()
+    daily_usage = []
+    for i in range(29, -1, -1):
+        day_obj = today - timedelta(days=i)
+        day_str = day_obj.isoformat()
+        daily_usage.append({"date": day_str, "count": date_counts.get(day_str, 0)})
+
+    # ── IP stats from request log ─────────────────────────────────────────────
+    ip_counter = Counter()
+    if _REQUEST_LOG.exists():
+        with open(_REQUEST_LOG, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        rec = json.loads(line)
+                        ip_counter[rec.get("ip", "unknown")] += 1
+                    except json.JSONDecodeError:
+                        continue
+
+    ip_stats = [
+        {"ip": ip, "count": cnt}
+        for ip, cnt in ip_counter.most_common()
+    ]
+
+    return {
+        "total_classifications": total,
+        "total_verifications": verified,
+        "confirmed": status_counts["confirmed"],
+        "corrected": status_counts["corrected"],
+        "rejected": status_counts["rejected"],
+        "pending": status_counts["pending"],
+        "avg_confidence": round(avg_conf, 2),
+        "confidence_histogram": confidence_histogram,
+        "top_codes": top_codes,
+        "daily_usage": daily_usage,
+        "ip_stats": ip_stats,
+    }

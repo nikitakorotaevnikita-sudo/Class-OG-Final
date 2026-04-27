@@ -116,7 +116,7 @@ FINETUNE_THRESHOLD=50    # verified entries needed to trigger fine-tuning
 At the **beginning of each session**, Claude Code MUST:
 
 1. **Read Obsidian notes** — check for any updates in:
-   - `C:/Users/Администратор/Desktop/Работа/Obsidian vault/Обращения граждан/`
+   - `C:/Users/Администратор/Desktop/Работа/Obsidian vault/Прототипы/ИИ Агенты/`
    - Look for files modified today (`date: today`) and recent planning files
    - Check `2026-*-статус-проекта*.md` for current state
 

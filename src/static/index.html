@@ -4,102 +4,125 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Классификация обращений граждан</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/static/base.css">
 </head>
-<body class="bg-gray-50 text-gray-900 min-h-screen">
-  <div class="max-w-3xl mx-auto p-6">
+<body>
 
-    <header class="mb-6 flex items-end justify-between">
-      <h1 class="text-2xl font-semibold">Классификация обращений граждан</h1>
-      <div class="flex items-center gap-3">
-        <a href="/static/historical.html" class="text-sm text-blue-600 hover:text-blue-800 underline">📂 Загрузка исторических данных</a>
-        <span class="text-sm text-gray-500">v.1 · MVP demo</span>
-      </div>
-    </header>
+  <header class="header">
+    <a href="/" class="header-logo-wrap">
+      <img src="/static/logo.svg" class="header-logo" alt="Directum"
+           onerror="this.style.display='none';this.nextElementSibling.style.display='inline'">
+      <span class="header-logo-text" style="display:none">Directum</span>
+    </a>
+    <div class="header-divider"></div>
+    <span class="header-title">Классификация обращений граждан</span>
+  </header>
+
+  <nav class="sidebar">
+    <a href="/" class="nav-item active">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/>
+        <rect x="9" y="3" width="6" height="4" rx="1"/>
+        <path d="M9 12h6M9 16h6"/>
+      </svg>
+      Классификация
+    </a>
+    <a href="/static/historical.html" class="nav-item">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 8v4l3 3M3 12a9 9 0 1018 0 9 9 0 00-18 0z"/>
+      </svg>
+      Исторические данные
+    </a>
+    <a href="/backoffice" class="nav-item">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>
+      </svg>
+      Бэк-офис
+    </a>
+  </nav>
+
+  <main class="content">
+    <h1 class="page-title">Классификация обращений граждан</h1>
 
     <!-- Форма ввода -->
-    <section class="bg-white rounded-lg shadow p-5 mb-6">
-      <label class="block mb-2 font-medium">Примеры обращений:</label>
-      <select id="examples-select" class="w-full border rounded px-3 py-2 mb-4">
+    <section class="page-section">
+      <div class="section-label">Примеры обращений</div>
+      <select id="examples-select" style="margin-bottom:16px;width:100%">
         <option value="">— Выберите пример —</option>
       </select>
 
-      <label class="block mb-2 font-medium">Текст обращения:</label>
-      <div class="mb-3">
-        <input type="file" id="file-input" accept=".txt,.pdf" class="text-sm">
-        <span class="text-xs text-gray-500 ml-2">(TXT или PDF, макс. 5 МБ)</span>
+      <div class="section-label">Загрузить файл</div>
+      <div style="margin-bottom:16px;display:flex;align-items:center;gap:8px">
+        <input type="file" id="file-input">
+        <span class="text-xs text-muted">(TXT или PDF, макс. 5 МБ)</span>
       </div>
+
+      <div class="section-label">Текст обращения</div>
       <textarea
         id="appeal-text"
         rows="8"
-        class="w-full border rounded px-3 py-2 mb-4 font-mono text-sm"
+        style="width:100%;font-family:monospace;font-size:13px;margin-bottom:16px"
         placeholder="Вставьте или введите текст обращения..."></textarea>
 
-      <button
-        id="classify-btn"
-        class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 rounded">
+      <button id="classify-btn" class="btn btn-blue btn-full" style="font-size:15px;padding:12px">
         Классифицировать
       </button>
 
-      <div id="loading" class="hidden mt-4 text-center text-gray-500">
-        <span class="inline-block animate-spin">⏳</span> Классификация...
+      <div id="loading" class="hidden" style="margin-top:16px;text-align:center;color:var(--muted)">
+        <span class="spinner"></span>&nbsp;Классификация...
       </div>
     </section>
 
     <!-- Результат -->
-    <section id="result" class="hidden bg-white rounded-lg shadow p-5 mb-6">
-      <div id="result-header" class="flex items-center justify-between mb-4">
-        <h2 class="text-lg font-semibold">Результат</h2>
-        <span id="overall-confidence" class="text-sm font-medium"></span>
+    <section id="result" class="hidden page-section">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+        <span style="font-size:16px;font-weight:600;color:var(--navy)">Результат</span>
+        <span id="overall-confidence" style="font-size:13px;font-weight:600;color:var(--muted)"></span>
       </div>
 
-      <div id="result-meta" class="grid grid-cols-2 gap-3 text-sm mb-4"></div>
+      <div id="result-meta" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px;margin-bottom:16px"></div>
 
-      <div id="needs-verification" class="hidden bg-amber-50 border border-amber-200 text-amber-900 rounded px-3 py-2 mb-4 text-sm">
-        ⚠️ Требует верификации оператором
+      <div id="needs-verification" class="hidden alert alert-amber">
+        Требует верификации оператором
       </div>
 
-      <div id="questions" class="space-y-3 mb-4"></div>
+      <div id="questions" style="margin-bottom:16px"></div>
 
-      <div class="flex gap-2 mb-3">
-        <button id="btn-confirm" class="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded">✓ Подтвердить</button>
-        <button id="btn-correct" class="flex-1 bg-amber-500 hover:bg-amber-600 text-white py-2 rounded">✎ Исправить</button>
-        <button id="btn-reject" class="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 rounded">✗ Отклонить</button>
+      <div class="verify-row">
+        <button id="btn-confirm" class="btn btn-green">Подтвердить</button>
+        <button id="btn-correct" class="btn btn-amber">Исправить</button>
+        <button id="btn-reject" class="btn btn-red">Отклонить</button>
       </div>
 
-      <div id="correct-form" class="hidden border-t pt-3 mt-3">
-        <label class="block text-sm font-medium mb-1">Введите правильный код вопроса:</label>
-        <div class="flex gap-2 mb-3">
+      <div id="correct-form" class="hidden edit-form">
+        <div class="edit-form-label">Введите правильный код вопроса:</div>
+        <div style="display:flex;gap:8px;margin-bottom:12px">
           <input id="correct-code" type="text" placeholder="0005.0005.0051.1103"
-                 class="flex-1 border rounded px-3 py-2 font-mono text-sm">
-          <button id="btn-correct-save" class="bg-amber-500 hover:bg-amber-600 text-white px-4 rounded">Сохранить</button>
+                 style="flex:1;font-family:monospace;font-size:13px">
+          <button id="btn-correct-save" class="btn btn-amber">Сохранить</button>
         </div>
-
-        <div class="bg-amber-50 border border-amber-200 rounded p-3 mb-3">
-          <label class="block text-sm font-medium mb-1 text-amber-900">
-            Пояснение к коду:
-          </label>
-          <p class="text-xs text-amber-700 mb-2">В каких случаях применяется этот код? Это поможет улучшить модель.</p>
-          <textarea id="correct-annotation" rows="3"
-                    class="w-full border rounded px-3 py-2 text-sm"
+        <div style="background:var(--amber-light);border:1px solid #f5c67a;border-radius:6px;padding:12px;margin-bottom:12px">
+          <div class="edit-form-label" style="color:#8a5a00">Пояснение к коду:</div>
+          <p class="edit-form-hint" style="color:#8a5a00">В каких случаях применяется этот код? Это поможет улучшить модель.</p>
+          <textarea id="correct-annotation" rows="3" style="width:100%;margin-top:8px"
                     placeholder="Опишите, почему выбран этот код..."></textarea>
-          <div id="annotation-hint" class="text-xs text-amber-600 mt-1 hidden">
-            Минимум 10 символов
-          </div>
+          <div id="annotation-hint" class="hidden" style="font-size:12px;color:#8a5a00;margin-top:4px">Минимум 10 символов</div>
         </div>
       </div>
 
-      <details class="mt-4 text-sm">
-        <summary class="cursor-pointer text-gray-600 hover:text-gray-900">▸ Показать JSON ответа</summary>
-        <pre id="json-pre" class="mt-2 bg-gray-100 rounded p-3 overflow-x-auto text-xs"></pre>
+      <details style="margin-top:16px;font-size:13px">
+        <summary style="cursor:pointer;color:var(--muted)">Показать JSON ответа</summary>
+        <pre id="json-pre" class="json-pre"></pre>
       </details>
     </section>
+  </main>
 
-    <!-- Toast -->
-    <div id="toast" class="hidden fixed bottom-4 right-4 bg-gray-900 text-white px-4 py-2 rounded shadow-lg"></div>
+  <!-- Toast -->
+  <div id="toast" class="hidden"
+       style="position:fixed;bottom:16px;right:16px;background:var(--navy);color:#fff;
+              padding:8px 16px;border-radius:6px;box-shadow:var(--shadow-md);font-size:13px;z-index:999"></div>
 
-  </div>
-
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

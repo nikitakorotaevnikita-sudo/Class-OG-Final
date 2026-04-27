@@ -1,4 +1,4 @@
-// Historical data upload and validation UI
+// historical.js — загрузка исторических данных (Directum Design System)
 
 (function() {
   'use strict';
@@ -36,7 +36,8 @@
   function showToast(message) {
     toast.textContent = message;
     toast.classList.remove('hidden');
-    setTimeout(function() {
+    clearTimeout(toast._tid);
+    toast._tid = setTimeout(function() {
       toast.classList.add('hidden');
     }, 3000);
   }
@@ -48,17 +49,23 @@
 
   dropZone.addEventListener('dragover', function(e) {
     e.preventDefault();
-    dropZone.classList.add('border-blue-500', 'bg-blue-50');
+    dropZone.style.borderColor = 'var(--blue)';
+    dropZone.style.background = 'var(--blue-light)';
+    dropZone.style.color = 'var(--blue)';
   });
 
   dropZone.addEventListener('dragleave', function(e) {
     e.preventDefault();
-    dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+    dropZone.style.borderColor = '';
+    dropZone.style.background = '';
+    dropZone.style.color = '';
   });
 
   dropZone.addEventListener('drop', function(e) {
     e.preventDefault();
-    dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+    dropZone.style.borderColor = '';
+    dropZone.style.background = '';
+    dropZone.style.color = '';
     var files = e.dataTransfer.files;
     if (files.length > 0) {
       handleFile(files[0]);
@@ -126,6 +133,7 @@
       data.errors.forEach(function(err) {
         var li = document.createElement('li');
         li.textContent = 'Строка ' + err.row + ': ' + err.code + ' — ' + err.error;
+        li.style.marginBottom = '4px';
         errorsUl.appendChild(li);
       });
     } else {
@@ -134,6 +142,7 @@
 
     // Preview table
     if (data.preview && data.preview.length > 0) {
+      document.getElementById('preview-section').classList.remove('hidden');
       renderPreviewTable(data.preview);
     }
 
@@ -146,7 +155,6 @@
   function renderPreviewTable(records) {
     if (records.length === 0) return;
 
-    // Get headers from first record
     var headers = Object.keys(records[0]);
 
     // Render header
@@ -154,7 +162,14 @@
     headers.forEach(function(header) {
       var th = document.createElement('th');
       th.textContent = header;
-      th.className = 'border border-gray-300 px-3 py-2 text-left font-medium';
+      th.style.border = '1px solid var(--border)';
+      th.style.padding = '8px 12px';
+      th.style.textAlign = 'left';
+      th.style.fontWeight = '600';
+      th.style.fontSize = '12px';
+      th.style.color = 'var(--muted)';
+      th.style.textTransform = 'uppercase';
+      th.style.background = 'var(--surface2)';
       previewHeader.appendChild(th);
     });
 
@@ -163,12 +178,14 @@
     records.forEach(function(record, idx) {
       var tr = document.createElement('tr');
       if (idx % 2 === 1) {
-        tr.className = 'bg-gray-50';
+        tr.style.background = 'var(--surface2)';
       }
       headers.forEach(function(header) {
         var td = document.createElement('td');
         td.textContent = record[header] !== null ? record[header] : '';
-        td.className = 'border border-gray-300 px-3 py-2';
+        td.style.border = '1px solid var(--border)';
+        td.style.padding = '8px 12px';
+        td.style.fontSize = '13px';
         tr.appendChild(td);
       });
       previewBody.appendChild(tr);
@@ -201,7 +218,7 @@
     .then(function(data) {
       confirmLoading.classList.add('hidden');
       confirmSuccess.classList.remove('hidden');
-      showToast('Файл успешно сохранен');
+      showToast('Файл успешно сохранён');
       loadHistoricalCount();
     })
     .catch(function(error) {
@@ -230,9 +247,7 @@
           historicalCount.textContent = data.count;
         }
       })
-      .catch(function() {
-        // Silently fail
-      });
+      .catch(function() {});
   }
 
   // Fine-tune button handler
@@ -256,7 +271,7 @@
     .then(function(data) {
       finetuneLoading.classList.add('hidden');
       finetuneResult.classList.remove('hidden');
-      finetuneResult.textContent = '✓ Дообучение завершено. Модель обновлена.';
+      finetuneResult.textContent = 'Дообучение завершено. Модель обновлена.';
       showToast('Дообучение модели завершено');
     })
     .catch(function(error) {

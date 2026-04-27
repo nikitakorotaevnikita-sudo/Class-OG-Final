@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 30" width="120" height="30">
+  <style>
+    .d-text { font-family: 'Segoe UI', Arial, sans-serif; font-weight: 700; font-size: 18px; }
+  </style>
+  <text x="0" y="22" class="d-text" fill="#FF7A00">Directum</text>
+</svg>

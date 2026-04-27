@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Бэк-офис — Классификация обращений граждан</title>
+  <link rel="stylesheet" href="/static/base.css">
+</head>
+<body>
+
+  <header class="header">
+    <a href="/" class="header-logo-wrap">
+      <img src="/static/logo.svg" class="header-logo" alt="Directum"
+           onerror="this.style.display='none';this.nextElementSibling.style.display='inline'">
+      <span class="header-logo-text" style="display:none">Directum</span>
+    </a>
+    <div class="header-divider"></div>
+    <span class="header-title">Бэк-офис</span>
+  </header>
+
+  <nav class="sidebar">
+    <a href="/" class="nav-item">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/>
+        <rect x="9" y="3" width="6" height="4" rx="1"/>
+        <path d="M9 12h6M9 16h6"/>
+      </svg>
+      Классификация
+    </a>
+    <a href="/static/historical.html" class="nav-item">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 8v4l3 3M3 12a9 9 0 1018 0 9 9 0 00-18 0z"/>
+      </svg>
+      Исторические данные
+    </a>
+    <a href="/backoffice" class="nav-item active">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>
+      </svg>
+      Бэк-офис
+    </a>
+  </nav>
+
+  <main class="content">
+    <h1 class="page-title">Бэк-офис</h1>
+
+    <!-- 4 KPI Cards -->
+    <div class="kpi-grid">
+      <div class="kpi accent-orange">
+        <div class="kpi-label">Всего классификаций</div>
+        <div class="kpi-value" id="kpi-total">—</div>
+        <div class="kpi-sub" id="kpi-total-sub">загрузка...</div>
+      </div>
+      <div class="kpi accent-blue">
+        <div class="kpi-label">Верификаций</div>
+        <div class="kpi-value" id="kpi-verified">—</div>
+        <div class="kpi-sub" id="kpi-verified-sub">загрузка...</div>
+      </div>
+      <div class="kpi accent-green">
+        <div class="kpi-label">Доля подтверждённых</div>
+        <div class="kpi-value" id="kpi-confirmed-rate">—</div>
+        <div class="kpi-sub" id="kpi-confirmed-sub">загрузка...</div>
+      </div>
+      <div class="kpi accent-amber">
+        <div class="kpi-label">Средняя уверенность</div>
+        <div class="kpi-value" id="kpi-avg-confidence">—</div>
+        <div class="kpi-sub" id="kpi-avg-sub">загрузка...</div>
+      </div>
+    </div>
+
+    <!-- Row 1: Confidence Histogram + Top-10 Codes -->
+    <div class="charts-row charts-row-2">
+      <div class="chart-card">
+        <div class="chart-title">Распределение уверенности</div>
+        <canvas id="chart-confidence" style="max-height:220px"></canvas>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">Топ-10 кодов классификатора</div>
+        <canvas id="chart-top-codes" style="max-height:220px"></canvas>
+      </div>
+    </div>
+
+    <!-- Row 2: Daily Usage Line + IP Stats Table -->
+    <div class="charts-row charts-row-3-1">
+      <div class="chart-card">
+        <div class="chart-title">Частота использования (30 дней)</div>
+        <canvas id="chart-daily" style="max-height:220px"></canvas>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">Статистика по IP-адресам</div>
+        <table id="ip-stats" style="font-size:13px;margin-top:8px">
+          <thead>
+            <tr>
+              <th>IP-адрес</th>
+              <th>Запросов</th>
+            </tr>
+          </thead>
+          <tbody id="ip-stats-body">
+            <tr><td colspan="2" style="text-align:center;color:var(--subtle);padding:20px">Загрузка...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div style="margin-top:24px;padding:12px;text-align:center;font-size:12px;color:var(--subtle);border-top:1px solid var(--border)">
+      Class OG Final &bull; Directum &bull; v1.0
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="/static/backoffice.js"></script>
+</body>
+</html>

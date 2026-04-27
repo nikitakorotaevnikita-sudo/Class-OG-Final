@@ -331,6 +331,58 @@ launch.bat → [3] Start API server
 
 ---
 
+## Бэк-офис (метрики использования)
+
+**URL:** http://localhost:8000/backoffice
+**Доступ:** по логину и паролю (Basic Auth)
+
+| Параметр | Значение |
+|----------|---------|
+| **Логин** | `admin` |
+| **Пароль** | `password` (изменить в `.env`!) |
+
+На странице бэк-офиса:
+- **4 KPI-карточки:** всего классификаций, верификаций, доля подтверждённых, средняя уверенность
+- **График распределения уверенности** (Chart.js bar chart)
+- **График топ-10 кодов** (Chart.js horizontal bar)
+- **График использования по дням** (Chart.js line chart, 30 дней)
+- **Таблица IP-адресов** — с каких адресов были запросы
+
+Статистика собирается автоматически при каждом запросе к `/classify`. IP-адреса сохраняются в `data/request_log.jsonl`.
+
+**Как изменить пароль** — добавьте в `.env`:
+```
+BACKOFFICE_USER=admin
+BACKOFFICE_PASSWORD=<новый_пароль>
+```
+
+---
+
+## UI — Дизайн-система Directum
+
+Веб-интерфейс реализован по **Directum Design System** (не Tailwind):
+- CSS Custom Properties: `--orange: #FF7A00`, `--blue: #3C65CC`, `--bg: #F4F4F4`, `--surface: #FFFFFF`
+- Layout: header 56px (фиксированный) + sidebar 224px + content area
+- Компоненты: `.btn`, `.card`, `.badge`, `.kpi`, `.nav-item`
+- Шрифт: Inter / Segoe UI / system-ui (без Google Fonts в Docker)
+- Логотип Directum в header (svg или text fallback)
+
+### Структура статических файлов
+
+```
+src/static/
+├── base.css           # CSS Custom Properties + компоненты
+├── logo.svg           # Логотип Directum (fallback: текст)
+├── index.html         # Главная страница (классификация)
+├── app.js             # Логика главной страницы
+├── historical.html     # Страница загрузки исторических данных
+├── historical.js       # Логика загрузки
+├── backoffice.html    # Страница бэк-офиса
+└── backoffice.js      # Chart.js + fetch /api/backoffice/stats
+```
+
+---
+
 ## API — примеры запросов
 
 ```bash
@@ -359,6 +411,9 @@ curl -X POST http://localhost:8000/api/upload-historical \
 
 # Статистика верификаций и прогресс дообучения
 curl http://localhost:8000/stats
+
+# Бэк-офис: метрики использования (требует Basic Auth)
+curl -u admin:password http://localhost:8000/api/backoffice/stats
 
 # Проверить работоспособность
 curl http://localhost:8000/health
