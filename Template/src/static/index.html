@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- TEMPLATE: Замени title на название проекта -->
+  <title>ИИ-помощник</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="app-layout">
+    <!-- =================================================================
+         ЛЕВАЯ ПАНЕЛЬ
+         TEMPLATE: Адаптируй содержимое панели под объекты проекта.
+         Паттерн: логотип → фильтры → список объектов → индикатор выбора.
+
+         IMPORTANT: Логотип размещается ТОЛЬКО здесь (в левой панели).
+         В шапке правой области (main header) логотип НЕ дублируется.
+         Если логотип тёмный на тёмном фоне — добавь белый фон в .panel-header.
+         ================================================================= -->
+    <aside class="left-panel">
+      <div class="panel-header">
+        <!-- TEMPLATE: Замени на логотип продукта. Скачай с https://www.directum.ru/ui-kit
+             и положи в src/static/logo.svg (не CDN — в Docker без интернета).
+             Если логотип тёмный (чёрно-зелёный) — добавь в .panel-header: background: white -->
+        <img src="/static/logo.svg"
+             alt="Directum"
+             class="panel-logo"
+             onerror="this.onerror=null;this.parentElement.innerHTML='<span style=\'font-size:16px;font-weight:700\'>Directum</span>'">
+      </div>
+
+      <!-- TEMPLATE: Фильтры (опционально). Если фильтрация не нужна — удали этот блок. -->
+      <div class="panel-section">
+        <label for="filter-select" class="filter-label">Фильтр:</label>
+        <select id="filter-select" class="filter-select" onchange="filterObjects()">
+          <option value="">— все —</option>
+          <!-- TEMPLATE: Заполняется динамически из API -->
+        </select>
+      </div>
+
+      <!-- TEMPLATE: Основной список объектов — searchable combobox.
+           Используй при любом количестве объектов (особенно N > 20).
+           Функции openCombobox/closeComboboxDelayed/filterCombobox/selectObjectFromCombobox
+           уже реализованы в app.js. -->
+      <div class="panel-section">
+        <label for="objects-search" class="filter-label">Объект:</label>
+        <div class="searchable-combobox" id="objects-combobox">
+          <input
+            type="text"
+            id="objects-search"
+            class="combobox-input"
+            placeholder="— выберите объект —"
+            oninput="filterCombobox()"
+            onfocus="openCombobox()"
+            onblur="closeComboboxDelayed()"
+            autocomplete="off"
+          >
+          <div class="combobox-dropdown" id="objects-dropdown">
+            <!-- Заполняется динамически из app.js -->
+          </div>
+        </div>
+      </div>
+
+      <!-- TEMPLATE: Список дочерних элементов (опционально, показывается после выбора объекта).
+           Занимает всё оставшееся вертикальное пространство панели (flex: 1). -->
+      <div id="items-section" class="panel-section items-section-expandable hidden">
+        <label class="filter-label">Элемент (опционально):</label>
+        <div id="items-list" class="items-list">
+          <!-- TEMPLATE: Заполняется динамически -->
+        </div>
+      </div>
+
+      <!-- Индикатор текущего выбора — всегда внизу панели -->
+      <div class="context-indicator" id="context-indicator">
+        <div class="context-label">Выбрано:</div>
+        <div id="context-text" class="context-text">— нет выбора —</div>
+      </div>
+    </aside>
+
+    <!-- ОСНОВНАЯ ОБЛАСТЬ -->
+    <main class="main-area">
+      <!-- TEMPLATE: В шапке — только название и ссылка на бэк-офис. Логотип НЕ здесь. -->
+      <header class="app-header">
+        <div class="header-left">
+          <!-- TEMPLATE: Замени название и подзаголовок -->
+          <span class="header-logo">Directum</span>
+          <span class="header-subtitle">ИИ-помощник</span>
+        </div>
+        <nav class="header-nav">
+          <select id="model-select" class="model-select" title="Выбранная LLM-модель" onchange="onModelSelectChange()">
+            <option value="0">Загрузка моделей...</option>
+          </select>
+          <a href="/backoffice" target="_blank">Бэк-офис</a>
+        </nav>
+      </header>
+
+      <!-- Чат -->
+      <div class="chat-container">
+        <div class="chat-messages-wrap">
+          <div class="chat-messages" id="chat-messages">
+            <div class="chat-message assistant">
+              <!-- TEMPLATE: Замени приветственное сообщение -->
+              Здравствуйте! Выберите объект слева, затем задайте вопрос или нажмите кнопку кейса.
+            </div>
+          </div>
+          <button class="scroll-to-bottom-btn hidden" id="scroll-to-bottom-btn" onclick="resumeAutoScroll()">↓ Прокрутить вниз</button>
+        </div>
+
+        <!-- TEMPLATE: Кнопки кейсов. Замени data-case-id, data-mode, текст и title на реальные кейсы.
+             data-mode="object" — активна только при выбранном объекте (без элемента).
+             data-mode="item"   — активна только при выбранном дочернем элементе.
+             Паттерн: добавь <span class="prompt-edit-icon"> внутрь кнопки для редактирования промпта. -->
+        <div class="case-buttons-bar" id="case-buttons-bar">
+          <button class="case-btn" data-case-id="1" data-mode="item" onclick="runCaseInChat(1)" disabled title="Описание кейса 1">
+            Кейс 1
+            <span class="prompt-edit-icon" title="Редактировать промпт" onclick="event.stopPropagation();editSystemPrompt(1)">🖊</span>
+          </button>
+          <button class="case-btn" data-case-id="2" data-mode="item" onclick="runCaseInChat(2)" disabled title="Описание кейса 2">Кейс 2</button>
+          <button class="case-btn" data-case-id="3" data-mode="object" onclick="runCaseInChat(3)" disabled title="Описание кейса 3">Кейс 3</button>
+          <!-- TEMPLATE: Добавь остальные кейсы по аналогии -->
+          <!-- Кнопка добавления пользовательского промпта (всегда активна) -->
+          <button class="case-btn" id="btn-add-prompt" onclick="openPromptModal()"
+                  style="border-style:dashed;opacity:0.7"
+                  title="Добавить пользовательский промпт">
+            + Добавить промпт
+          </button>
+        </div>
+
+        <!-- Ввод сообщения -->
+        <div class="chat-input-area">
+          <textarea
+            class="chat-input"
+            id="chat-input"
+            placeholder="Введите вопрос... (Enter для отправки, Shift+Enter — перенос строки)"
+            rows="1"
+            onkeydown="handleChatKeydown(event)"
+            oninput="autoResizeTextarea(this)"
+          ></textarea>
+          <button class="btn btn-primary" onclick="sendChatMessage()" id="btn-chat-send">Отправить</button>
+          <button class="btn btn-secondary" onclick="resetConversation()" title="Сбросить историю диалога">Новая беседа</button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- МОДАЛ: редактирование системного промпта кейса
+       TEMPLATE: Замени заголовок и placeholder на релевантные для кейса. -->
+  <div id="system-prompt-modal" class="modal-overlay hidden" onclick="closeSystemPromptModal(event)">
+    <div class="modal-dialog" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <!-- TEMPLATE: Замени название кнопки/кейса -->
+        <span>Промпт для кнопки «Кейс»</span>
+        <button class="modal-close-btn" onclick="closeSystemPromptModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <label class="modal-label">Инструкции для анализа</label>
+        <textarea id="system-prompt-text" class="modal-input" rows="12"
+          placeholder="Введите инструкции для ИИ-анализа..."></textarea>
+        <div style="font-size:11px;color:#6B778C;margin-top:5px">
+          <!-- TEMPLATE: Опиши, какие данные добавляются к запросу автоматически -->
+          Данные контекста добавляются к запросу автоматически.
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="resetSystemPrompt()" title="Вернуть исходный текст промпта">↺ Сбросить</button>
+        <button class="btn btn-secondary" onclick="closeSystemPromptModal()">Отмена</button>
+        <button class="btn btn-primary" onclick="saveSystemPrompt()">Сохранить</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- МОДАЛ: создание/редактирование пользовательского промпта -->
+  <div id="custom-prompt-modal" class="modal-overlay hidden" onclick="closePromptModal(event)">
+    <div class="modal-dialog" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <span id="custom-prompt-modal-title">Новый промпт</span>
+        <button class="modal-close-btn" onclick="closePromptModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="custom-prompt-edit-id" value="">
+        <label class="modal-label">Название кнопки *</label>
+        <input type="text" id="custom-prompt-name" class="modal-input" placeholder="Например: Дополнительный анализ">
+        <label class="modal-label" style="margin-top:12px">Текст промпта *</label>
+        <textarea id="custom-prompt-text" class="modal-input" rows="10"
+          placeholder="Проведи анализ...&#10;&#10;Данные контекста будут добавлены автоматически."></textarea>
+        <div style="font-size:11px;color:#6B778C;margin-top:5px">
+          <!-- TEMPLATE: Опиши, какие данные добавляются автоматически -->
+          Данные контекста добавляются к запросу автоматически.
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closePromptModal()">Отмена</button>
+        <button class="btn btn-primary" onclick="savePrompt()">Сохранить</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/markdown.js"></script>
+  <script src="/static/sse.js"></script>
+  <script src="/static/app.js"></script>
+  <script src="/static/prompts.js"></script>
+</body>
+</html>

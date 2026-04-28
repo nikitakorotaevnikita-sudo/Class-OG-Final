@@ -1,0 +1,829 @@
+/* =============================================================================
+   ШАБЛОН ДИЗАЙН-СИСТЕМЫ ПРОТОТИПА
+   =============================================================================
+   Двухколоночный layout: левая панель (объекты) + основная область (чат).
+   TEMPLATE: Адаптируй --color-primary под продукт с https://www.directum.ru/ui-kit
+   ============================================================================= */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  /* TEMPLATE: Замени primary color на цвет продукта из https://www.directum.ru/ui-kit */
+  --color-primary: #0043A4;
+  --color-primary-hover: #00348A;
+  --color-success: #36B37E;
+  --color-danger: #FF5630;
+  --color-warning: #FFAB00;
+  --color-bg: #F4F5F7;
+  --color-surface: #FFFFFF;
+  --color-border: #DFE1E6;
+  --color-text: #172B4D;
+  --color-text-muted: #6B778C;
+  --radius: 6px;
+  --shadow: 0 1px 3px rgba(9, 30, 66, 0.13), 0 0 0 1px rgba(9, 30, 66, 0.08);
+  --shadow-md: 0 4px 8px rgba(9, 30, 66, 0.15);
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+  color: var(--color-text);
+  background: var(--color-bg);
+  line-height: 1.5;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ===== Layout ===== */
+
+.app-layout {
+  display: flex;
+  height: 100vh;
+}
+
+/* ===== Left Panel ===== */
+
+.left-panel {
+  width: 280px;
+  flex-shrink: 0;
+  /* IMPORTANT: height: 100% обязателен для корректной работы flex: 1 внутри панели.
+     Без него items-list не заполнит доступную высоту. */
+  height: 100%;
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.panel-header {
+  padding: 16px;
+  border-bottom: 1px solid var(--color-border);
+  /* TEMPLATE: Если логотип тёмный (чёрный/зелёный) на тёмном фоне — добавь белый фон:
+     background: white;
+     Логотип размещается ТОЛЬКО в левой панели, не в шапке правой области. */
+  flex-shrink: 0;
+}
+
+.panel-header h2 {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.panel-logo {
+  height: 28px;
+  width: auto;
+  display: block;
+}
+
+.panel-section {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0; /* Фиксированные секции не сжимаются */
+}
+
+/* IMPORTANT: items-section-expandable должна занимать всё свободное вертикальное
+   пространство между фиксированными секциями выше и context-indicator ниже.
+   Цепочка: left-panel (flex column, height: 100%) → items-section-expandable (flex: 1)
+   → items-list (flex: 1, min-height: 0, overflow-y: auto). */
+.panel-section.items-section-expandable {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  /* Нижний border не нужен — context-indicator прилегает снизу */
+  border-bottom: none;
+}
+
+.filter-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  margin-bottom: 6px;
+  color: var(--color-text-muted);
+}
+
+.filter-select {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  font-size: 13px;
+  background: white;
+  outline: none;
+  cursor: pointer;
+}
+
+.filter-select:focus {
+  border-color: var(--color-primary);
+}
+
+/* Items List (дочерние элементы в левой панели) */
+
+.items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.item-entry {
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  background: var(--color-bg);
+  cursor: pointer;
+  transition: all 0.15s;
+  border: 1px solid transparent;
+}
+
+.item-entry:hover {
+  background: #E9EAED;
+  border-color: var(--color-border);
+}
+
+.item-entry.active {
+  background: #E4F0FF;
+  border-color: var(--color-primary);
+}
+
+.item-name {
+  font-size: 12px;
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+
+.item-meta {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+/* Items loading indicator */
+.items-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 4px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+/* Context Indicator */
+
+.context-indicator {
+  padding: 12px 16px;
+  background: #F9F9FA;
+  border-top: 1px solid var(--color-border);
+  flex-shrink: 0;
+  /* IMPORTANT: НЕ использовать margin-top: auto здесь.
+     Позиция определяется flex: 1 на items-section-expandable. */
+}
+
+.context-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+
+.context-text {
+  font-size: 12px;
+  font-weight: 500;
+  word-break: break-word;
+}
+
+.hidden { display: none !important; }
+
+/* ===== Main Area ===== */
+
+.main-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.app-header {
+  background: var(--color-primary);
+  color: white;
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.header-logo   { font-size: 17px; font-weight: 700; }
+.header-subtitle { font-size: 12px; opacity: 0.85; }
+
+.header-nav a {
+  color: rgba(255,255,255,0.85);
+  text-decoration: none;
+  padding: 6px 12px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  transition: background 0.15s;
+}
+
+.header-nav a:hover {
+  background: rgba(255,255,255,0.15);
+  color: white;
+}
+
+.model-select {
+  background: rgba(255,255,255,0.12);
+  color: white;
+  border: 1px solid rgba(255,255,255,0.25);
+  border-radius: var(--radius);
+  padding: 5px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  max-width: 280px;
+  outline: none;
+  transition: background 0.15s, border-color 0.15s;
+}
+.model-select:hover { background: rgba(255,255,255,0.2); }
+.model-select:focus { border-color: rgba(255,255,255,0.5); }
+.model-select option { background: var(--color-primary); color: white; }
+
+/* ===== Chat Container ===== */
+
+.chat-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--color-surface);
+  margin: 12px;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.chat-messages-wrap {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.scroll-to-bottom-btn {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--color-primary);
+  color: #fff;
+  border: none;
+  border-radius: 20px;
+  padding: 6px 16px;
+  font-size: 13px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  z-index: 10;
+  transition: opacity 0.2s;
+}
+.scroll-to-bottom-btn:hover { opacity: 0.85; }
+.scroll-to-bottom-btn.hidden { display: none; }
+
+.chat-message {
+  font-size: 14px;
+  line-height: 1.6;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+.chat-message.user {
+  max-width: 75%;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  border-bottom-right-radius: 2px;
+  background: var(--color-primary);
+  color: white;
+  align-self: flex-end;
+  white-space: pre-wrap;
+}
+
+.chat-message.assistant {
+  align-self: flex-start;
+  width: 100%;
+  color: var(--color-text);
+  padding: 2px 0;
+}
+
+/* Markdown inside assistant */
+.chat-message.assistant h1,
+.chat-message.assistant h2,
+.chat-message.assistant h3 {
+  font-weight: 700;
+  margin: 14px 0 6px;
+  line-height: 1.3;
+}
+.chat-message.assistant h1 { font-size: 1.3em; }
+.chat-message.assistant h2 { font-size: 1.15em; }
+.chat-message.assistant h3 { font-size: 1.05em; }
+.chat-message.assistant p  { margin: 5px 0; }
+.chat-message.assistant ul,
+.chat-message.assistant ol { margin: 5px 0 5px 20px; padding-left: 4px; }
+.chat-message.assistant li { margin: 2px 0; }
+.chat-message.assistant strong { font-weight: 700; }
+.chat-message.assistant hr { border: none; border-top: 1px solid var(--color-border); margin: 10px 0; }
+.chat-message.assistant blockquote {
+  border-left: 3px solid var(--color-border);
+  padding-left: 10px;
+  color: var(--color-text-muted);
+  margin: 5px 0;
+}
+.chat-message.assistant code {
+  background: #F0F2F5;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: monospace;
+  font-size: 0.9em;
+}
+
+/* Markdown tables */
+.chat-message.assistant .md-table-wrap {
+  overflow-x: auto;
+  margin: 8px 0;
+}
+.chat-message.assistant .md-table {
+  border-collapse: collapse;
+  font-size: 13px;
+  min-width: 300px;
+}
+.chat-message.assistant .md-table th,
+.chat-message.assistant .md-table td {
+  border: 1px solid var(--color-border);
+  padding: 6px 12px;
+  text-align: left;
+}
+.chat-message.assistant .md-table th {
+  background: #F4F5F7;
+  font-weight: 600;
+  font-size: 12px;
+}
+.chat-message.assistant .md-table tr:nth-child(even) td {
+  background: #FAFBFC;
+}
+
+/* ===== Case Buttons Bar ===== */
+
+.case-buttons-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--color-border);
+  background: #FAFBFC;
+  flex-shrink: 0;
+}
+
+.case-btn {
+  padding: 7px 16px;
+  border: 1px solid var(--color-primary);
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 500;
+  background: var(--color-primary);
+  color: white;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.case-btn:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+  border-color: var(--color-primary-hover);
+}
+
+.case-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  border-color: var(--color-border);
+}
+
+/* ===== Input Area ===== */
+
+.chat-input-area {
+  display: flex;
+  gap: 8px;
+  padding: 10px 16px 12px;
+  border-top: 1px solid var(--color-border);
+  align-items: flex-end;
+  flex-shrink: 0;
+}
+
+.chat-input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  resize: none;
+  min-height: 38px;
+  max-height: 120px;
+  transition: border-color 0.15s;
+  line-height: 1.5;
+}
+
+.chat-input:focus {
+  border-color: var(--color-primary);
+}
+
+/* ===== Buttons ===== */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 16px;
+  border: none;
+  border-radius: var(--radius);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-primary { background: var(--color-primary); color: white; }
+.btn-primary:hover:not(:disabled) { background: var(--color-primary-hover); }
+
+.btn-secondary {
+  background: var(--color-surface);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+}
+.btn-secondary:hover:not(:disabled) { background: var(--color-bg); }
+
+/* ===== Feedback ===== */
+
+.feedback-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-border);
+}
+
+.feedback-label { font-size: 12px; color: var(--color-text-muted); }
+
+.feedback-btn {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 3px 10px;
+  font-size: 15px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.feedback-btn:hover {
+  border-color: var(--color-primary);
+  background: rgba(0, 67, 164, 0.04);
+}
+
+.feedback-sent { font-size: 12px; color: var(--color-success); }
+
+/* ===== Spinner ===== */
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  display: inline-block;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ===== Utilities ===== */
+
+.alert {
+  padding: 12px 16px;
+  border-radius: var(--radius);
+  margin-bottom: 16px;
+  font-size: 13px;
+}
+.alert-info { background: #E4F0FF; color: var(--color-primary); border: 1px solid #b3d1ff; }
+.alert-error { background: #FFEBE6; color: #BF2600; border: 1px solid #ffbdad; }
+
+.container {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px 20px;
+}
+
+.card {
+  background: var(--color-surface);
+  border-radius: var(--radius);
+  padding: 16px;
+  box-shadow: var(--shadow);
+  margin-bottom: 16px;
+}
+
+.card-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: var(--color-text);
+}
+
+/* ===== Thinking Indicator ===== */
+/* Показывается пока LLM генерирует ответ. Скрывается при первом SSE chunk. */
+
+.thinking-indicator {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  font-style: italic;
+}
+
+.thinking-text {
+  transition: opacity 0.3s;
+}
+
+/* ===== Searchable Combobox ===== */
+/* Используется вместо <select> при N > 20 объектов. */
+
+.searchable-combobox {
+  position: relative;
+  width: 100%;
+}
+
+.combobox-input {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-family: inherit;
+  background: white;
+  outline: none;
+  cursor: text;
+}
+
+.combobox-input:focus {
+  border-color: var(--color-primary);
+}
+
+.combobox-dropdown {
+  display: none;
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  background: white;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  max-height: 220px;
+  overflow-y: auto;
+  z-index: 100;
+}
+
+.combobox-dropdown.open {
+  display: block;
+}
+
+.combobox-option {
+  padding: 7px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.combobox-option:hover {
+  background: #E9EAED;
+}
+
+.combobox-option.selected {
+  background: #E4F0FF;
+  color: var(--color-primary);
+  font-weight: 500;
+}
+
+.combobox-empty {
+  padding: 10px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+/* ===== Backoffice: Spoiler для чат-оценок ===== */
+/* Паттерн: summary (bold заголовок 2-4 слова) + <details> спойлер с полным вопросом */
+
+.bo-question-title {
+  font-weight: 600;
+  font-size: 13px;
+  display: block;
+  margin-bottom: 2px;
+}
+
+.bo-spoiler summary {
+  font-size: 11px;
+  color: #6B778C;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.bo-spoiler summary::before { content: '▸ '; }
+.bo-spoiler[open] summary::before { content: '▾ '; }
+
+.bo-spoiler-body {
+  padding: 6px 8px;
+  margin-top: 4px;
+  background: #F4F5F7;
+  border-radius: 4px;
+  font-size: 12px;
+  white-space: pre-wrap;
+  max-height: 200px;
+  overflow-y: auto;
+  color: var(--color-text);
+}
+
+/* ===== ИКОНКИ РЕДАКТИРОВАНИЯ ПРОМПТОВ ===== */
+.prompt-edit-icon,
+.prompt-del-icon {
+  display: none;
+  font-size: 11px;
+  padding: 1px 3px;
+  border-radius: 3px;
+  cursor: pointer;
+  opacity: 0.6;
+  margin-left: 4px;
+}
+.prompt-edit-icon:hover { opacity: 1; }
+.prompt-del-icon:hover  { opacity: 1; }
+.case-btn:hover .prompt-edit-icon,
+.case-btn:hover .prompt-del-icon { display: inline; opacity: 0.75; color: #fff; }
+.case-btn:hover .prompt-edit-icon:hover,
+.case-btn:hover .prompt-del-icon:hover { opacity: 1; }
+
+/* ===== МОДАЛЬНЫЕ ОКНА ===== */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.4);
+  z-index: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.modal-overlay.hidden { display: none; }
+
+.modal-dialog {
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+  width: 100%;
+  max-width: 560px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--color-border);
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--color-text);
+}
+
+.modal-close-btn {
+  background: none;
+  border: none;
+  font-size: 16px;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.modal-close-btn:hover { background: var(--color-hover); }
+
+.modal-body {
+  padding: 16px 18px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.modal-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 10px 0 4px;
+}
+.modal-label:first-child { margin-top: 0; }
+
+.modal-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--color-text);
+  background: #fff;
+  resize: vertical;
+}
+.modal-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px rgba(0,67,164,0.15);
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--color-border);
+}
+
+.modal-btn {
+  padding: 7px 16px;
+  border-radius: 5px;
+  border: 1px solid var(--color-border);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  background: #fff;
+  color: var(--color-text);
+}
+.modal-btn:hover { background: var(--color-bg); }
+.modal-btn.primary {
+  background: var(--color-primary);
+  color: #fff;
+  border-color: var(--color-primary);
+}
+.modal-btn.primary:hover { background: var(--color-primary-hover); border-color: var(--color-primary-hover); }
+.modal-btn.danger { color: var(--color-danger); border-color: var(--color-danger); }
+.modal-btn.danger:hover { background: #fff0ee; }
+
+/* ===== ИКОНКА СКАЧИВАНИЯ (ДИСКЕТА) ===== */
+.download-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 8px;
+  background: none;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  padding: 5px 10px;
+  border-radius: 5px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 0.15s, color 0.15s;
+}
+.download-icon-btn:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}

@@ -1,0 +1,28 @@
+# =============================================================================
+# БАЗОВЫЕ ЗАВИСИМОСТИ ПРОТОТИПА
+# =============================================================================
+# TEMPLATE: Добавляй проектно-специфичные зависимости ниже секции "Project-specific".
+# НЕ включай playwright и pytest-playwright — они ставятся только в test-образе.
+
+# --- Core ---
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+python-dotenv==1.0.1
+pydantic==2.10.3
+
+# --- LLM ---
+openai==1.58.1
+
+# --- File parsing ---
+python-multipart==0.0.20
+aiofiles==24.1.0
+python-docx==1.1.2
+
+# --- Testing (unit + integration) ---
+pytest==8.3.4
+pytest-asyncio==0.24.0
+pytest-cov==6.0.0
+httpx==0.28.1
+
+# --- Project-specific ---
+# TEMPLATE: Добавляй зависимости проекта здесь

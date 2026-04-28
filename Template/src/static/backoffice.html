@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- TEMPLATE: Замени title -->
+  <title>Бэк-офис — ИИ-помощник</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <!-- Chart.js 4.4.0 — лежит локально в src/static/chart.umd.min.js (уже в шаблоне).
+       В Docker без интернета CDN не работает, поэтому файл поставляется вместе с шаблоном.
+       Если файл вдруг отсутствует — графики автоматически отображаются как текстовые данные (fallback). -->
+  <script src="/static/chart.umd.min.js"></script>
+  <style>
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 14px;
+      margin-bottom: 24px;
+    }
+    .stat-card {
+      background: white;
+      border-radius: 6px;
+      padding: 16px;
+      box-shadow: 0 1px 3px rgba(9,30,66,0.13);
+      text-align: center;
+    }
+    .stat-value {
+      font-size: 28px;
+      font-weight: 700;
+      color: #0052CC;
+      margin-bottom: 4px;
+    }
+    .stat-label {
+      font-size: 12px;
+      color: #6B778C;
+    }
+    .charts-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-bottom: 24px;
+    }
+    @media (max-width: 700px) {
+      .charts-grid { grid-template-columns: 1fr; }
+    }
+    .chart-card {
+      background: white;
+      border-radius: 6px;
+      padding: 16px;
+      box-shadow: 0 1px 3px rgba(9,30,66,0.13);
+    }
+    .chart-title {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      color: #172B4D;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th, td {
+      text-align: left;
+      padding: 8px 12px;
+      border-bottom: 1px solid #DFE1E6;
+    }
+    th {
+      font-weight: 600;
+      color: #6B778C;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    tr:last-child td { border-bottom: none; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .badge-green { background: rgba(54,179,126,0.15); color: #006644; }
+    .badge-red { background: rgba(255,86,48,0.15); color: #BF2600; }
+    .badge-gray { background: #F4F5F7; color: #6B778C; }
+    .refresh-btn {
+      background: #0052CC;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+      margin-left: auto;
+    }
+    .refresh-btn:hover { background: #0041A8; }
+    .no-data { color: #6B778C; font-size: 13px; text-align: center; padding: 20px; }
+    .page-header {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .page-header h1 { font-size: 20px; font-weight: 700; }
+    /* Fallback если Chart.js не загрузился */
+    canvas.hidden { display: none; }
+    /* Переопределяем overflow:hidden из style.css — бэкофис требует прокрутки */
+    html, body { height: auto !important; overflow: auto !important; }
+
+    /* Models management */
+    .models-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .add-model-btn {
+      background: var(--color-primary, #0043A4); color: white; border: none;
+      padding: 6px 14px; border-radius: 6px; font-size: 13px; cursor: pointer;
+    }
+    .add-model-btn:hover { opacity: 0.85; }
+    .icon-btn {
+      background: none; border: none; cursor: pointer; font-size: 15px;
+      padding: 2px 6px; border-radius: 4px; color: #5E6C84;
+    }
+    .icon-btn:hover { background: #F4F5F7; color: #172B4D; }
+
+    /* Modal */
+    .modal-backdrop {
+      display: none; position: fixed; inset: 0;
+      background: rgba(9,30,66,0.4); z-index: 100;
+      align-items: center; justify-content: center;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal-box {
+      background: white; border-radius: 8px; padding: 24px;
+      width: 420px; max-width: 95vw; box-shadow: 0 8px 32px rgba(9,30,66,0.25);
+    }
+    .modal-title { font-size: 16px; font-weight: 700; margin-bottom: 16px; }
+    .modal-field { margin-bottom: 12px; }
+    .modal-field label { display: block; font-size: 12px; font-weight: 600; color: #6B778C; margin-bottom: 4px; }
+    .modal-field input {
+      width: 100%; padding: 7px 10px; border: 1px solid #DFE1E6;
+      border-radius: 6px; font-size: 13px; outline: none;
+    }
+    .modal-field input:focus { border-color: var(--color-primary, #0043A4); }
+    .modal-field .hint { font-size: 11px; color: #6B778C; margin-top: 3px; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+    .btn-cancel {
+      background: #F4F5F7; color: #172B4D; border: none;
+      padding: 7px 14px; border-radius: 6px; font-size: 13px; cursor: pointer;
+    }
+    .btn-save {
+      background: var(--color-primary, #0043A4); color: white; border: none;
+      padding: 7px 14px; border-radius: 6px; font-size: 13px; cursor: pointer;
+    }
+    .btn-save:hover { opacity: 0.85; }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <!-- TEMPLATE: Замени логотип -->
+    <span class="header-logo">Directum Ario</span>
+    <span class="header-subtitle">Бэк-офис — Метрики использования</span>
+    <nav class="header-nav">
+      <a href="/">Приложение</a>
+    </nav>
+  </header>
+
+  <main class="container">
+    <div class="page-header">
+      <!-- TEMPLATE: Замени заголовок -->
+      <h1>Статистика использования ИИ-помощника</h1>
+      <button class="refresh-btn" onclick="loadMetrics()">Обновить</button>
+    </div>
+
+    <div id="loading" class="alert alert-info">Загружаю метрики...</div>
+    <div id="error-msg" class="alert alert-error hidden"></div>
+
+    <!-- Сводка -->
+    <div class="stats-grid" id="stats-grid">
+      <div class="stat-card">
+        <div class="stat-value" id="stat-requests">—</div>
+        <div class="stat-label">Всего запросов</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="stat-unique-ip">—</div>
+        <div class="stat-label">Уникальных пользователей (IP)</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="stat-positive-pct">—</div>
+        <div class="stat-label">Оценок кейсов: положительных</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="stat-chat-count">—</div>
+        <div class="stat-label">Чат-оценок всего</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="stat-chat-pct">—</div>
+        <div class="stat-label">Чат-оценок: положительных</div>
+      </div>
+    </div>
+
+    <!-- Графики -->
+    <div class="charts-grid">
+      <div class="chart-card">
+        <div class="chart-title">Активность по дням (последние 30 дней)</div>
+        <canvas id="timeline-chart" height="200"></canvas>
+        <div id="no-timeline" class="no-data hidden">Нет данных</div>
+      </div>
+      <div class="chart-card">
+        <!-- TEMPLATE: Замени "кейсов" на название кейсов проекта -->
+        <div class="chart-title">Использование кейсов</div>
+        <canvas id="cases-chart" height="200"></canvas>
+        <div id="no-cases" class="no-data hidden">Нет данных</div>
+      </div>
+    </div>
+
+    <!-- Таблица IP -->
+    <div class="card" style="margin-bottom:20px">
+      <div class="card-title">Топ пользователей по IP</div>
+      <div id="ip-table-container">
+        <div class="no-data">Нет данных</div>
+      </div>
+    </div>
+
+    <!-- Таблица кейсов с оценками -->
+    <div class="card" style="margin-bottom:20px">
+      <!-- TEMPLATE: Адаптируй критерий гипотезы -->
+      <div class="card-title">Оценки по кейсам (критерий гипотезы: >70% положительных)</div>
+      <div id="cases-table-container">
+        <div class="no-data">Нет данных</div>
+      </div>
+    </div>
+
+    <!-- Чат-фидбек -->
+    <div class="card">
+      <div class="card-title" style="display:flex;align-items:center;gap:12px">
+        Последние оценки чата
+        <button class="refresh-btn" style="margin-left:0;font-size:12px;padding:4px 10px" onclick="loadChatFeedback()">Обновить</button>
+      </div>
+      <div id="chat-feedback-container">
+        <div class="no-data">Нет данных</div>
+      </div>
+    </div>
+
+    <!-- Управление моделями -->
+    <div class="card">
+      <div class="models-toolbar">
+        <span class="card-title" style="margin:0">Модели LLM</span>
+        <button class="add-model-btn" onclick="openModelModal()">+ Добавить модель</button>
+      </div>
+      <div id="models-container">
+        <div class="no-data">Загрузка...</div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Модальное окно редактирования модели -->
+  <div class="modal-backdrop" id="model-modal">
+    <div class="modal-box">
+      <div class="modal-title" id="model-modal-title">Добавить модель</div>
+      <div class="modal-field">
+        <label>Название модели *</label>
+        <input type="text" id="model-name" placeholder="Например: gpt-4o-mini">
+      </div>
+      <div class="modal-field">
+        <label>Base URL</label>
+        <input type="text" id="model-base-url" placeholder="https://api.openai.com/v1">
+        <div class="hint">Оставьте пустым для стандартного OpenAI endpoint</div>
+      </div>
+      <div class="modal-field">
+        <label>API-токен</label>
+        <input type="password" id="model-token" placeholder="sk-...">
+        <div class="hint" id="model-token-hint"></div>
+      </div>
+      <div class="modal-field">
+        <label>Отображаемое имя</label>
+        <input type="text" id="model-display-name" placeholder="Например: GPT-4o Mini">
+        <div class="hint">Если заполнено — отображается в селекторе вместо названия модели</div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-cancel" onclick="closeModelModal()">Отмена</button>
+        <button class="btn-save" onclick="saveModel()">Сохранить</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/backoffice.js"></script>
+</body>
+</html>

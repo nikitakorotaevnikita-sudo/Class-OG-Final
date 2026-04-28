@@ -1,0 +1,119 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+
+# Docker
+*.pid
+*.seed
+*.pid.lock
+
+# Cache and temporary files
+.cache/
+*.tmp
+*.temp
+
+# OS files
+Thumbs.db
+
+# Project specific
+data/uploads/*
+!data/uploads/.gitkeep
+data/cache/*
+!data/cache/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+
+# Models and large files
+*.h5
+*.pkl
+*.pickle
+*.model
+*.bin
+
+# Documentation builds
+docs/_build/
+site/
+
+# AI/ML specific
+wandb/
+mlruns/
+.neptune/
+checkpoints/
+
+# Playwright
+test-results/
+playwright-report/
+playwright/.cache/
+.playwright-mcp/
+# Тестовые артефакты (скриншоты E2E) — НЕ добавлять *.png глобально
+tmp/
+
+# Windows reserved names
+nul
+
+# Claude local settings
+.claude/settings.local.json
+
+# Hypothesis Generator App
+hypothesis-app/data/hypothesis.db
+hypothesis-app/data/uploads/*
+!hypothesis-app/data/uploads/.gitkeep

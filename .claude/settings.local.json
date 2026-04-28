@@ -1,7 +1,35 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python -m pytest tests/ -v)"
+      "Bash(python -m pytest tests/ -v)",
+      "Bash(powershell.exe -NoProfile -Command \"dir 'C:\\\\Users\\\\Администратор\\\\Desktop\\\\Работа\\\\Obsidian vault\\\\Обращения граждан\\\\' 2>&1 | Select-Object Name\")",
+      "Bash(cmd.exe /c dir \"C:\\\\Users\\\\Администратор\\\\Desktop\\\\Работа\")",
+      "Bash(powershell.exe -NoProfile -Command \"Get-ChildItem 'C:\\\\Users\\\\Администратор\\\\Desktop\\\\' -Directory | Select-Object Name\")",
+      "Bash(python.exe -c ' *)",
+      "Bash(python -m pytest tests/test_api_endpoints.py -v --cov=src --cov-report=term-missing)",
+      "Bash(python -m pytest tests/ -v --cov=src --cov-report=term-missing)",
+      "Bash(npx playwright *)",
+      "Bash(npm init *)",
+      "Bash(npm install *)",
+      "Bash(python -c \"import playwright; print\\(playwright.__version__\\)\")",
+      "Bash(python -m playwright install chromium)",
+      "Bash(python -m playwright install --check)",
+      "Bash(python -m pytest tests/e2e/ -v --help)",
+      "Bash(./node_modules/.bin/playwright install *)",
+      "Bash(powershell -Command \"Get-Process -Id 11112 | Get-Item | Select-Object -ExpandProperty VersionInfo | Format-List\")",
+      "Bash(powershell -Command \"Stop-Process -Id 11112 -Force -ErrorAction SilentlyContinue; Write-Output 'killed'\")",
+      "Bash(curl -s http://localhost:8000/)",
+      "Bash(node -e \"const p = require\\('./node_modules/playwright/package.json'\\); console.log\\(p.version\\)\")",
+      "Bash(./node_modules/.bin/playwright test *)",
+      "Bash(curl -s http://localhost:8000/backoffice)",
+      "Bash(powershell -Command \"Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess\")",
+      "Bash(python -m uvicorn src.api_server:app --host 127.0.0.1 --port 8000)",
+      "Bash(powershell -Command \"Stop-Process -Id 19480 -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2; Write-Output 'done'\")",
+      "Bash(powershell -Command \"Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue | Select-Object OwningProcess,LocalAddress,LocalPort\")",
+      "Bash(powershell -Command \"Start-Sleep -Seconds 3; Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue | Select-Object OwningProcess\")",
+      "Bash(powershell -Command \"Stop-Process -Id 19480 -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 3; Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue | Select-Object OwningProcess\")",
+      "Bash(python -m pytest tests/e2e/ -v)",
+      "Bash(start /B python -m uvicorn src.api_server:app --host 127.0.0.1 --port 8000)"
     ]
   }
 }
