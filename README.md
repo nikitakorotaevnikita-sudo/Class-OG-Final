@@ -74,9 +74,18 @@ similarities = embeddings_matrix @ query_vector   # одна строка код
 
 ---
 
-## Шаг 2 — Классификация через LLM (Groq)
+## Шаг 2 — Классификация через LLM
 
-Агент передаёт в **Groq** (`llama-3.3-70b-versatile`) текст обращения и топ-10 кандидатов. Модель рассуждает: что именно просит гражданин, какой код из кандидатов подходит точнее, есть ли несколько разных вопросов в одном тексте.
+Агент передаёт в **LLM** текст обращения и топ-10 кандидатов. Модель рассматривает: что именно просит гражданин, какой код из кандидатов подходит точнее, есть ли несколько разных вопросов в одном тексте.
+
+**4 провайдера на выбор:**
+
+| Провайдер | Модель | Примечание |
+|-----------|--------|------------|
+| **Groq** (основной) | `llama-3.3-70b-versatile` | Быстрый, хороший русский |
+| **Gemini** | `gemini-2.5-flash` | Бесплатно, лимит 20 req/day |
+| **Ollama** | `qwen2.5-14b` | Локально, без лимитов |
+| **Ario** | `Qwen/Qwen3-32B-AWQ` | Корпоративный Directum360 |
 
 Пример ответа:
 
@@ -248,7 +257,7 @@ cd "C:\путь\до\папки\Class OG Final"
 [2] Classify manually  — ввести текст обращения вручную
 [3] Start API server   — REST API на порту 8000
 [4] Operator mode      — верификация + дообучение
-[5] Select LLM model   — выбор провайдера LLM (Groq/Gemini/Ollama)
+[5] Select LLM model   — выбор провайдера LLM (Groq/Gemini/Ollama/Ario)
 ```
 
 ---
@@ -265,15 +274,27 @@ cd "C:\путь\до\папки\Class OG Final"
 
 | Компонент | Технология |
 |---|---|
-| Языковая модель | **Groq API** — `llama-3.3-70b-versatile` (основной) или **Gemini** `gemini-2.5-flash` (альтернатива) |
+| Языковая модель | **Groq** — `llama-3.3-70b-versatile` (основной), **Gemini** `gemini-2.5-flash` (альтернатива), **Ollama** `qwen2.5-14b` (локальный), **Ario** `Qwen/Qwen3-32B-AWQ` (корпоративный Directum360) |
 | Эмбеддинги | `intfloat/multilingual-e5-base` (локально) |
 | Векторный поиск | numpy cosine similarity |
 | API | FastAPI + uvicorn |
 | Текст из PDF | PyMuPDF |
 | Дообучение | sentence-transformers, MultipleNegativesRankingLoss |
 
-Переключение провайдера: `LLM_PROVIDER=groq`, `gemini` или `ollama` в `.env`.
-Ollama (локальный запуск без API-ключей) — реализуется в TICKET-22.
+Переключение провайдера: `LLM_PROVIDER=groq`, `gemini`, `ollama` или `ario` в `.env`.
+
+```
+# Пример .env для каждого провайдера
+LLM_PROVIDER=groq        # Groq (по умолчанию)
+LLM_PROVIDER=gemini      # Google Gemini
+LLM_PROVIDER=ollama      # Ollama локально
+LLM_PROVIDER=ario        # Ario Directum360 (корпоративный)
+
+# Ario (корпоративный) — дополнительные параметры
+ARIO_API_KEY=100111ac-d413-4721-9357-5d04aaf7386d
+ARIO_BASE_URL=https://gpt.ario.directum360.ru/v1
+ARIO_MODEL=Qwen/Qwen3-32B-AWQ
+```
 
 ---
 

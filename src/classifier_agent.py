@@ -6,8 +6,25 @@
 - Поддерживает несколько вопросов в одном обращении
 """
 
+import sys
+import io
+# Fix UTF-8 output on Windows cp1251 console
+sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
 import json
+import os
+# Set HF mirror before importing sentence_transformers (fixes SSL issues in corporate networks)
+os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+os.environ["HF_HUB_DISABLE_SSL"] = "1"
+# Fix Groq API connection - corporate proxy breaks Bearer auth
+os.environ["NO_PROXY"] = "api.groq.com,*.groq.com"
+os.environ["no_proxy"] = "api.groq.com,*.groq.com"
+
 import numpy as np
+import torch
+# Limit memory to prevent OSError 1455 (page file exhaustion)
+torch.set_num_threads(2)
 import time
 from pathlib import Path
 from groq import Groq, RateLimitError, APIError
@@ -21,6 +38,8 @@ from config import (
     VECTOR_DB_DIR, EMBEDDING_MODEL,
     TOP_K_CANDIDATES, TOP_K_RESULT, MIN_CONFIDENCE,
     LLM_PROVIDER, GEMINI_API_KEY,
+    OLLAMA_MODEL, OLLAMA_BASE_URL,
+    ARIO_API_KEY, ARIO_BASE_URL, ARIO_MODEL,
 )
 from appeals_logger import get_logger
 
@@ -111,15 +130,25 @@ class ClassifierAgent:
     def __init__(self):
         print("Инициализация агента классификации...")
 
-        # LLM client (Groq или Gemini)
+        # LLM client (Groq, Gemini, Ollama или Ario)
         if LLM_PROVIDER == "gemini":
             self.llm = "gemini"
             self.gemini = genai_client.Client(api_key=GEMINI_API_KEY)
-            print(f"  Модель LLM: gemini-2.5-flash (Google Gemini)")
+            print(f"  Model LLM: gemini-2.5-flash (Google Gemini)")
+        elif LLM_PROVIDER == "ollama":
+            self.llm = "ollama"
+            import httpx
+            self._ollama_client = httpx.Client(base_url=OLLAMA_BASE_URL, timeout=120)
+            print(f"  Model LLM: {OLLAMA_MODEL} (Ollama)")
+        elif LLM_PROVIDER == "ario":
+            self.llm = "ario"
+            import httpx
+            # Per-call httpx client (avoid sharing state with HF Hub)
+            print(f"  Model LLM: {ARIO_MODEL} (Ario)")
         else:
             self.llm = "groq"
             self.groq = Groq(api_key=GROQ_API_KEY)
-            print(f"  Модель LLM: {GROQ_MODEL} (Groq)")
+            print(f"  Model LLM: {GROQ_MODEL} (Groq)")
 
         # Модель эмбеддингов
         print(f"  Загрузка модели эмбеддингов: {EMBEDDING_MODEL}")
@@ -182,6 +211,51 @@ class ClassifierAgent:
                         ),
                     )
                     raw = response.text.strip()
+                elif self.llm == "ollama":
+                    response = self._ollama_client.post(
+                        "/chat/completions",
+                        json={
+                            "model": OLLAMA_MODEL,
+                            "messages": [
+                                {"role": "system", "content": SYSTEM_PROMPT},
+                                {"role": "user",   "content": user_message},
+                            ],
+                            "temperature": 0.1,
+                        },
+                    )
+                    response.raise_for_status()
+                    raw = response.json()["choices"][0]["message"]["content"].strip()
+                elif self.llm == "ario":
+                    import httpx
+                    client = httpx.Client(
+                        base_url=ARIO_BASE_URL,
+                        headers={"Authorization": f"Bearer {ARIO_API_KEY}"},
+                        timeout=120,
+                    )
+                    try:
+                        response = client.post(
+                            "/chat/completions",
+                            json={
+                                "model": ARIO_MODEL,
+                                "messages": [
+                                    {"role": "system", "content": SYSTEM_PROMPT},
+                                    {"role": "user",   "content": user_message},
+                                ],
+                                "temperature": 0.1,
+                            },
+                        )
+                        response.raise_for_status()
+                        raw = response.json()["choices"][0]["message"]["content"].strip()
+                        # Ario returns JSON wrapped in ```json ... ``` - strip it
+                        if raw.startswith("```json"):
+                            raw = raw[7:]
+                        if raw.startswith("```"):
+                            raw = raw[3:]
+                        if raw.endswith("```"):
+                            raw = raw[:-3]
+                        raw = raw.strip()
+                    finally:
+                        client.close()
                 else:
                     response = self.groq.chat.completions.create(
                         model=GROQ_MODEL,

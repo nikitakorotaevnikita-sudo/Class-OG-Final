@@ -246,3 +246,39 @@
 {"timestamp": "2026-04-27T12:05:16.835058", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 0.584, "confidence": null, "candidates_count": 10, "error": null}
 {"timestamp": "2026-04-27T12:05:17.781520", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 0.942, "confidence": null, "candidates_count": 10, "error": null}
 {"timestamp": "2026-04-27T12:05:17", "ip": "127.0.0.1", "endpoint": "/classify", "elapsed_seconds": 1.535, "log_id": "0b6e5389-75f2-422a-8c1d-98e8d1e923d9"}
+{"timestamp": "2026-04-29T14:47:44.865860", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 1.326, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-04-29T14:47:45.942130", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 1.074, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-04-29T14:47:46.116580", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 0.172, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-04-29T14:47:47.081343", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 0.964, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-04-29T14:47:47.248958", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 0.165, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-04-29T14:47:48.213773", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 0.964, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-04-29T14:47:48.352864", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 0.137, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-04-29T14:47:49.132288", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 0.778, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-04-29T15:06:53.391766", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 1.346, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-04-29T15:07:09.285529", "event": "groq_request", "success": true, "attempt": 2, "elapsed_seconds": 3.522, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-04-29T15:07:09", "ip": "127.0.0.1", "endpoint": "/classify", "elapsed_seconds": 17.244, "log_id": "187945ce-0942-4d1a-91d9-f4fae7da5ad7"}
+{"timestamp": "2026-05-05T09:38:55.259242", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 2.452, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-05-05T09:40:26.622972", "event": "groq_request", "success": false, "attempt": 5, "elapsed_seconds": null, "confidence": null, "candidates_count": 10, "error": "API error: Error code: 403 - {'error': {'message': 'Forbidden'}}"}
+{"timestamp": "2026-05-05T09:43:59.467915", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 0.394, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-05-05T09:44:00.589117", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 1.12, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-05-05T09:45:00.820869", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 0.31, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-05-05T09:45:01.902482", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 1.08, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-05-05T09:45:02.198508", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 0.294, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-05-05T09:45:03.310652", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 1.111, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-05-05T09:45:03.493636", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 0.181, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-05-05T09:45:04.875353", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 1.381, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-05-05T09:45:05.040218", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 0.164, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-05-05T09:45:06.451890", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 1.411, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-05-05T10:08:10.794551", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 0.241, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-05-05T10:09:51.134107", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 0.204, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-05-05T10:10:26.407185", "event": "groq_request", "success": false, "attempt": 5, "elapsed_seconds": null, "confidence": null, "candidates_count": 10, "error": "JSON parse error: Expecting value: line 1 column 1 (char 0)"}
+{"timestamp": "2026-05-05T10:11:26.271973", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 0.221, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-05-05T10:11:32.545159", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 6.272, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-05-05T10:12:10.923190", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 0.241, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-05-05T10:12:19.675746", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 8.752, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-05-05T10:18:01.942966", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 0.352, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-05-05T10:18:08.971465", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 7.027, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-05-05T10:18:08", "ip": "127.0.0.1", "endpoint": "/classify", "elapsed_seconds": 7.381, "log_id": "301e66ae-d303-435b-af56-72b549283bea"}
+{"timestamp": "2026-05-05T10:18:14.286270", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 0.326, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-05-05T10:18:29.405165", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 15.118, "confidence": null, "candidates_count": 10, "error": null}
+{"timestamp": "2026-05-05T10:18:29", "ip": "127.0.0.1", "endpoint": "/classify", "elapsed_seconds": 15.446, "log_id": "4f9d72fc-0c08-407f-887c-4eb672c1adfd"}

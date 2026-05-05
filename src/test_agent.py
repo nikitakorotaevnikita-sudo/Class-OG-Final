@@ -6,6 +6,9 @@
 """
 
 import sys
+sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -51,16 +54,16 @@ TEST_APPEALS = [
 
 def run_tests():
     print("=" * 65)
-    print("  ТЕСТИРОВАНИЕ АГЕНТА КЛАССИФИКАЦИИ ОБРАЩЕНИЙ ГРАЖДАН")
+    print("  TESTIROVANIE AGENTA KLASSIFIKATSII OBRASCHENII GRAZHDAN")
     print("=" * 65)
 
     agent = ClassifierAgent()
 
     for appeal in TEST_APPEALS:
-        print(f"\n\n{'═'*65}")
-        print(f"  Обращение {appeal['id']}")
-        print(f"{'═'*65}")
-        print(f"Текст:\n{appeal['text']}\n")
+        print(f"\n\n{'='*65}")
+        print(f"  Obrashenie {appeal['id']}")
+        print(f"{'='*65}")
+        print(f"Tekst:\n{appeal['text']}\n")
 
         result = agent.classify(appeal["text"])
         print(agent.format_for_operator(result))

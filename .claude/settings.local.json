@@ -29,7 +29,15 @@
       "Bash(powershell -Command \"Start-Sleep -Seconds 3; Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue | Select-Object OwningProcess\")",
       "Bash(powershell -Command \"Stop-Process -Id 19480 -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 3; Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue | Select-Object OwningProcess\")",
       "Bash(python -m pytest tests/e2e/ -v)",
-      "Bash(start /B python -m uvicorn src.api_server:app --host 127.0.0.1 --port 8000)"
+      "Bash(start /B python -m uvicorn src.api_server:app --host 127.0.0.1 --port 8000)",
+      "Bash(venv/Scripts/python.exe -m pytest tests/ -v)",
+      "Bash(venv/Scripts/pip.exe install *)",
+      "Bash(venv/Scripts/python.exe src/test_agent.py)",
+      "Bash(venv/Scripts/python.exe -c ' *)",
+      "Bash(venv/Scripts/python.exe -c \"import openai; print\\('openai:', openai.__version__\\)\")",
+      "Bash(venv/Scripts/python.exe -c \"import sys; print\\([p.key for p in sys.modules.keys\\(\\) if 'openai' in p.lower\\(\\)]\\)\")",
+      "Bash(venv/Scripts/python.exe -c \"import httpx; print\\('httpx:', httpx.__version__\\)\")",
+      "Bash(timeout 120 venv/Scripts/python.exe -c ' *)"
     ]
   }
 }

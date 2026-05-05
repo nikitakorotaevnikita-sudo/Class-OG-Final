@@ -72,10 +72,11 @@ echo ================================================
 echo   [1] Groq         - llama-3.3-70b-versatile
 echo   [2] Gemini       - gemini-2.5-flash (20 req/day)
 echo   [3] Qwen (Ollama) - qwen2.5-14b (local, no limits)
+echo   [4] Ario         - Qwen3-32B-AWQ (directum360)
 echo ================================================
 echo.
 
-set /p MODEL_CHOICE=Select (1/2/3):
+set /p MODEL_CHOICE=Select (1/2/3/4):
 
 if "%MODEL_CHOICE%"=="1" (
     set "NEW_LLM=groq"
@@ -87,6 +88,10 @@ if "%MODEL_CHOICE%"=="2" (
 )
 if "%MODEL_CHOICE%"=="3" (
     set "NEW_LLM=ollama"
+    goto :update_env
+)
+if "%MODEL_CHOICE%"=="4" (
+    set "NEW_LLM=ario"
     goto :update_env
 )
 echo Invalid choice.

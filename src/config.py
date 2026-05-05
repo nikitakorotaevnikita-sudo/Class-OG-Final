@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent / ".env")
 
 # ── LLM Provider ────────────────────────────────────────────────────────────────
-LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "groq")  # "groq" or "gemini"
+LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "groq")  # "groq" | "gemini" | "ollama" | "ario"
 
 # ── Groq API ───────────────────────────────────────────────────────────────────
 GROQ_API_KEY: str = os.environ.get("GROQ_API_KEY", "")
@@ -19,8 +19,17 @@ GROQ_API_KEY: str = os.environ.get("GROQ_API_KEY", "")
 # ── Google Gemini API ─────────────────────────────────────────────────────────
 GEMINI_API_KEY: str = os.environ.get("GEMINI_API_KEY", "")
 # llama-3.3-70b-versatile  — лучший русский язык (рекомендуется)
-# llama-3.1-8b-instant     — быстрее, меньше точность
+# llama-3.1-8b-instruct   — быстрее, меньше точность
 GROQ_MODEL: str = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+
+# ── Ollama API (локально) ───────────────────────────────────────────────────────
+OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "qwen2.5-14b")
+OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+
+# ── Ario API (OpenAI-compatible) ───────────────────────────────────────────────
+ARIO_API_KEY: str = os.environ.get("ARIO_API_KEY", "")
+ARIO_BASE_URL: str = os.getenv("ARIO_BASE_URL", "https://gpt.ario.directum360.ru/v1")
+ARIO_MODEL: str = os.getenv("ARIO_MODEL", "Qwen/Qwen3-32B-AWQ")
 
 # ── Векторная база (numpy) ─────────────────────────────────────────────────────
 _data_dir = Path(__file__).parent.parent / "data"
