@@ -41,6 +41,14 @@ from config import (
     LLM_PROVIDER, GEMINI_API_KEY,
     OLLAMA_MODEL, OLLAMA_BASE_URL,
     ARIO_API_KEY, ARIO_BASE_URL, ARIO_MODEL,
+    ENABLE_CROSS_ENCODER_RERANKER, CROSS_ENCODER_MODEL,
+    ENABLE_QUERY_EXPANSION,
+    HIERARCHY_BRANCH_WEIGHT, HIERARCHY_PARENT_WEIGHT,
+    ENABLE_HIERARCHY_PRUNING, HIERARCHY_PRUNE_THRESHOLD,
+)
+from hierarchy import (
+    branch_agreement_scores, parent_similarity_boost,
+    dominant_l1_sections, prefix_at_level,
 )
 from appeals_logger import get_logger
 
@@ -247,6 +255,25 @@ SYSTEM_PROMPT = """Ты — эксперт по классификации об�
 Отвечай строго в формате JSON, без дополнительного текста."""
 
 
+QUERY_EXPANSION_SYSTEM = """Ты — эксперт по Общероссийскому классификатору вопросов обращений граждан.
+Из вопроса гражданина извлеки официальную терминологию, которая используется в классификаторе.
+Отвечай ОДНОЙ строкой через запятую — без вводных слов, без объяснений, без кавычек.
+3-7 терминов или коротких словосочетаний, типичных для государственно-административной речи.
+Примеры:
+Вопрос: «Хочу в детский сад, очередь не двигается»
+Ответ: Дошкольное образование, поступление детей в МДОУ, очередь в детский сад, муниципальные дошкольные образовательные учреждения
+
+Вопрос: «Соседи шумят, участковый бездействует»
+Ответ: Бездействие должностных лиц, рассмотрение обращений граждан, охрана общественного порядка, участковый уполномоченный полиции
+
+Вопрос: «Нужна доставка лекарств на дом, инсулин»
+Ответ: Лекарственное обеспечение, льготные лекарства, инвалидность, медицинская помощь на дому"""
+
+
+QUERY_EXPANSION_USER_TEMPLATE = """Вопрос: «{question}»
+Ответ:"""
+
+
 CLASSIFICATION_PROMPT_TEMPLATE = """Классифицируй следующее обращение гражданина.
 
 ТЕКСТ ОБРАЩЕНИЯ (полный):
@@ -260,7 +287,8 @@ CLASSIFICATION_PROMPT_TEMPLATE = """Классифицируй следующе�
 2. НЕ выбирай код "0001.0002.0027.0126" (Отсутствует адресат обращения) если хоть один другой кандидат соответствует теме вопроса — это резервная категория только для случаев, когда заявитель совсем не указал, к кому обращается.
 3. Запрещено присваивать ОДИН И ТОТ ЖЕ код разным вопросам, если темы вопросов разные.
 4. Предпочитай более глубокий код (level 4-5) над общим (level 1-3), если оба применимы.
-5. Если ни один кандидат не подходит — выбери ближайший по смыслу и понизь confidence до <= 0.5.
+5. Если в кандидатах несколько SIBLING-кодов (отличаются только последней цифрой кода) — это разные подвопросы одной темы. Внимательно прочитай "name" каждого и выбери ТОЧНО соответствующий формулировке вопроса гражданина. НЕ выбирай первый попавшийся sibling.
+6. Если ни один кандидат не подходит — выбери ближайший по смыслу и понизь confidence до <= 0.5.
 
 Верни JSON строго в формате:
 {{
@@ -317,6 +345,13 @@ class ClassifierAgent:
 
         self.code_index = {m["code"]: m for m in self.metadata}
         print(f"  Готово. База содержит {len(self.metadata)} записей.")
+
+        # CrossEncoder reranker — lazy-load, только если флаг включён
+        self.ce_reranker = None
+        if ENABLE_CROSS_ENCODER_RERANKER:
+            from reranker import CrossEncoderReranker
+            self.ce_reranker = CrossEncoderReranker(CROSS_ENCODER_MODEL)
+            print(f"  CE reranker enabled: {CROSS_ENCODER_MODEL} (lazy load at first use)")
 
     def _resolve_llm(self, llm_provider: str | None = None, llm_model: str | None = None) -> tuple[str, str]:
         """Return provider/model for a request, falling back to .env defaults."""
@@ -399,14 +434,42 @@ class ClassifierAgent:
         return min(1.0, weighted_overlap / max(len(query_tokens), 1))
 
     def _rerank_candidates(self, query_text: str, candidates: list, top_k: int = TOP_K_CANDIDATES) -> list:
-        """Compress a wider dense pool with a cheap lexical signal before LLM."""
+        """Compress wider pool with lexical + hierarchy signals before LLM."""
+        if not candidates:
+            return []
+
+        # Optional L1-pruning: если 1-2 раздела доминируют — отсекаем другие.
+        # Должно идти ДО boost-расчётов, чтобы branch_scores считались уже на отфильтрованном пуле.
+        working = candidates
+        if ENABLE_HIERARCHY_PRUNING:
+            dominant = dominant_l1_sections(candidates, threshold=HIERARCHY_PRUNE_THRESHOLD)
+            if dominant:
+                kept = [c for c in candidates if prefix_at_level(c["code"], 1) in dominant]
+                if len(kept) >= max(top_k, 5):  # не оставляем меньше top-k кандидатов
+                    working = kept
+
         query_tokens = self._query_tokens_for_rerank(query_text)
+        lexical_weight = float(os.getenv("LEXICAL_RERANK_WEIGHT", "0.12"))
+
+        # Hierarchy scores (one pass over working)
+        branch_scores = branch_agreement_scores(working, level=2) if HIERARCHY_BRANCH_WEIGHT > 0 else {}
+        parent_boosts = parent_similarity_boost(working) if HIERARCHY_PARENT_WEIGHT > 0 else {}
+
         scored = []
-        for idx, candidate in enumerate(candidates):
+        for idx, candidate in enumerate(working):
             dense_score = float(candidate.get("similarity", 0.0))
             lexical_score = self._lexical_score(query_tokens, candidate)
             level_bonus = 0.01 if int(candidate.get("level", 0) or 0) >= 4 else 0.0
-            combined_score = dense_score + 0.12 * lexical_score + level_bonus
+            branch_score = branch_scores.get(candidate["code"], 0.0)
+            parent_score = parent_boosts.get(candidate["code"], 0.0)
+
+            combined_score = (
+                dense_score
+                + lexical_weight * lexical_score
+                + level_bonus
+                + HIERARCHY_BRANCH_WEIGHT * branch_score
+                + HIERARCHY_PARENT_WEIGHT * parent_score
+            )
             scored.append((combined_score, idx, candidate))
 
         scored.sort(key=lambda item: (-item[0], item[1]))
@@ -418,6 +481,7 @@ class ClassifierAgent:
             "name":       meta["name"],
             "level":      meta["level"],
             "full_path":  meta["full_path"],
+            "parent_code": meta.get("parent_code", ""),
             "similarity": round(float(similarity), 3),
             "source":     source,
         }
@@ -470,15 +534,106 @@ class ClassifierAgent:
             candidates.append(self._candidate_from_metadata(meta, similarities[idx]))
         return candidates
 
-    def _retrieve_for_segment(self, segment_text: str) -> list[dict]:
-        """Per-question retrieval: dense + lexical + rerank → top-K."""
+    def _expand_query(self, question_text: str, provider: str, model: str) -> str:
+        """LLM query expansion — переформулировать вопрос в терминах классификатора.
+
+        Возвращает строку с дополнительными терминами; пустая строка при ошибке.
+        Дешёвый LLM-вызов с маленьким max_tokens — должен быть быстрым.
+        """
+        user_msg = QUERY_EXPANSION_USER_TEMPLATE.format(question=question_text[:500])
+        try:
+            if provider == "gemini":
+                response = self._get_gemini_client().models.generate_content(
+                    model=model,
+                    contents=user_msg,
+                    config=GenerateContentConfig(
+                        system_instruction=QUERY_EXPANSION_SYSTEM,
+                        temperature=0.0,
+                        max_output_tokens=120,
+                    ),
+                )
+                return (response.text or "").strip()
+            elif provider == "ollama":
+                r = self._get_ollama_client().post(
+                    "/chat/completions",
+                    json={
+                        "model": model,
+                        "messages": [
+                            {"role": "system", "content": QUERY_EXPANSION_SYSTEM},
+                            {"role": "user", "content": user_msg},
+                        ],
+                        "temperature": 0.0,
+                        "max_tokens": 120,
+                    },
+                )
+                r.raise_for_status()
+                return r.json()["choices"][0]["message"]["content"].strip()
+            elif provider == "ario":
+                import httpx
+                client = httpx.Client(
+                    base_url=ARIO_BASE_URL,
+                    headers={"Authorization": f"Bearer {ARIO_API_KEY}"},
+                    timeout=60,
+                )
+                try:
+                    r = client.post(
+                        "/chat/completions",
+                        json={
+                            "model": model,
+                            "messages": [
+                                {"role": "system", "content": QUERY_EXPANSION_SYSTEM},
+                                {"role": "user", "content": user_msg},
+                            ],
+                            "temperature": 0.0,
+                            "max_tokens": 120,
+                        },
+                    )
+                    r.raise_for_status()
+                    raw = r.json()["choices"][0]["message"]["content"].strip()
+                    # Strip Ario ```json wrappers if present
+                    for prefix in ("```json", "```"):
+                        if raw.startswith(prefix):
+                            raw = raw[len(prefix):].strip()
+                    if raw.endswith("```"):
+                        raw = raw[:-3].strip()
+                    return raw
+                finally:
+                    client.close()
+            else:
+                r = self._get_groq_client().chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": QUERY_EXPANSION_SYSTEM},
+                        {"role": "user", "content": user_msg},
+                    ],
+                    temperature=0.0,
+                    max_tokens=120,
+                )
+                return r.choices[0].message.content.strip()
+        except Exception as e:
+            print(f"  [QE] expansion failed: {e}")
+            return ""
+
+    def _retrieve_for_segment(self, segment_text: str, expanded: str = "") -> list[dict]:
+        """Per-question retrieval: dense + lexical + heuristic rerank → (CE rerank?) → top-K.
+
+        Если есть expanded query — ищем по объединённому тексту "original. expansion".
+        """
+        query = segment_text if not expanded else f"{segment_text}. {expanded}"
+
         dense_pool = self._search_candidates(
-            segment_text,
+            query,
             top_k=max(RETRIEVAL_POOL_SIZE, TOP_K_CANDIDATES),
         )
-        lexical_pool = self._search_lexical_candidates(segment_text, top_k=LEXICAL_POOL_SIZE)
+        lexical_pool = self._search_lexical_candidates(query, top_k=LEXICAL_POOL_SIZE)
         merged = self._merge_candidate_pools(dense_pool, lexical_pool)
-        return self._rerank_candidates(segment_text, merged, top_k=TOP_K_CANDIDATES)
+
+        if self.ce_reranker is not None:
+            # Heuristic rerank на широкий пул (top-30) — это вход в CE
+            heuristic_top = self._rerank_candidates(query, merged, top_k=30)
+            return self.ce_reranker.rerank(query, heuristic_top, top_k=TOP_K_CANDIDATES)
+
+        return self._rerank_candidates(query, merged, top_k=TOP_K_CANDIDATES)
 
     def _classify_with_llm(
         self,
@@ -494,19 +649,32 @@ class ClassifierAgent:
         """
         provider, model = self._resolve_llm(llm_provider, llm_model)
 
-        # Сжимаем кандидатов до минимума (code, name, full_path, level) — экономия токенов
+        # Сжимаем кандидатов до минимума (code, name, full_path, level) — экономия токенов.
+        # Помечаем sibling-группы (одинаковый родитель = код без последнего сегмента).
         compact_questions = []
         total_candidates = 0
         for q in questions_with_candidates:
-            compact_candidates = [
-                {
+            # Группируем siblings: parent_code = код без последнего сегмента
+            parent_counts: dict[str, int] = {}
+            for c in q["candidates"]:
+                parts = c["code"].split(".")
+                parent = ".".join(parts[:-1]) if len(parts) > 1 else c["code"]
+                parent_counts[parent] = parent_counts.get(parent, 0) + 1
+
+            compact_candidates = []
+            for c in q["candidates"]:
+                parts = c["code"].split(".")
+                parent = ".".join(parts[:-1]) if len(parts) > 1 else c["code"]
+                entry = {
                     "code": c["code"],
                     "name": c["name"],
                     "level": c.get("level", 0),
                     "full_path": c.get("full_path", ""),
                 }
-                for c in q["candidates"]
-            ]
+                if parent_counts.get(parent, 0) > 1:
+                    entry["sibling_group"] = parent  # маркер: рядом ещё siblings
+                compact_candidates.append(entry)
+
             total_candidates += len(compact_candidates)
             compact_questions.append({
                 "ordinal": q["ordinal"],
@@ -685,12 +853,22 @@ class ClassifierAgent:
             segments = [AppealQuestion(text=appeal_text.strip(), ordinal=1, evidence="single")]
         print(f"  [Сегментация] Выделено {len(segments)} вопрос(ов)")
 
+        # Шаг 1b: Опциональное LLM query expansion — переформулировать сегменты в терминах классификатора
+        expansions: dict[int, str] = {}
+        if ENABLE_QUERY_EXPANSION:
+            qe_start = time.time()
+            for seg in segments:
+                expansions[seg.ordinal] = self._expand_query(seg.text, provider, model)
+            print(
+                f"  [QE] Query expansion для {len(segments)} сегментов за {time.time() - qe_start:.2f}с"
+            )
+
         # Шаг 2: Per-question retrieval — для каждого вопроса свой пул кандидатов
         search_start = time.time()
         questions_with_candidates: list[dict] = []
         valid_code_sets: dict[int, set[str]] = {}
         for seg in segments:
-            seg_candidates = self._retrieve_for_segment(seg.text)
+            seg_candidates = self._retrieve_for_segment(seg.text, expanded=expansions.get(seg.ordinal, ""))
             questions_with_candidates.append({
                 "ordinal": seg.ordinal,
                 "question_text": seg.text,

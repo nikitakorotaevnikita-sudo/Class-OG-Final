@@ -44,7 +44,16 @@
       "Bash(./venv/Scripts/python.exe tests/verify_5question_fix.py)",
       "Bash(./venv/Scripts/python.exe tests/eval_accuracy.py)",
       "Bash(./venv/Scripts/python.exe -m pytest tests/test_question_segmentation.py tests/test_eval_metrics_helpers.py -v)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(ls -la \"c:/Users/Korotaev_NO/Desktop/Проекты/MCP-Directum-RX\" 2>&1 | head -30)",
+      "Read(//c/Users/Korotaev_NO/Desktop/Проекты/MCP-Directum-RX/**)",
+      "Bash(HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./venv/Scripts/python.exe tests/eval_accuracy.py)",
+      "Bash(LEXICAL_RERANK_WEIGHT=0.20 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./venv/Scripts/python.exe tests/eval_accuracy.py)",
+      "Bash(ENABLE_CROSS_ENCODER_RERANKER=true ./venv/Scripts/python.exe tests/verify_5question_fix.py)",
+      "Bash(ENABLE_CROSS_ENCODER_RERANKER=true ./venv/Scripts/python.exe tests/eval_accuracy.py)",
+      "Bash(ENABLE_QUERY_EXPANSION=true HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./venv/Scripts/python.exe tests/eval_accuracy.py)",
+      "Bash(./venv/Scripts/python.exe -m pytest tests/test_hierarchy.py tests/test_question_segmentation.py tests/test_eval_metrics_helpers.py -v)"
     ]
   }
 }

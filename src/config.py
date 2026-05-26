@@ -50,6 +50,28 @@ LEXICAL_POOL_SIZE: int = int(os.getenv("LEXICAL_POOL_SIZE", "30"))
 TOP_K_RESULT:     int = 3
 MIN_CONFIDENCE:  float = float(os.getenv("MIN_CONFIDENCE", "0.65"))
 
+# ── CrossEncoder reranker (опциональный, после heuristic rerank) ────────────────
+ENABLE_CROSS_ENCODER_RERANKER: bool = os.getenv("ENABLE_CROSS_ENCODER_RERANKER", "false").lower() == "true"
+CROSS_ENCODER_MODEL: str = os.getenv("CROSS_ENCODER_MODEL", "BAAI/bge-reranker-base")
+# Сколько кандидатов передавать в CE (пересортировать). Если 0/None — все.
+CE_RERANK_TOP_N: int = int(os.getenv("CE_RERANK_TOP_N", "30"))
+# Веса при смешивании: финальный_score = (1-w) * heuristic + w * ce_score
+CE_BLEND_WEIGHT: float = float(os.getenv("CE_BLEND_WEIGHT", "0.7"))
+
+# ── LLM Query Expansion (опциональный, перед retrieval) ─────────────────────────
+# Если включён — для каждого сегмента делается LLM-вызов: переформулировать вопрос
+# в стиле классификаторных терминов. Embedding ищется по [original + expansion].
+ENABLE_QUERY_EXPANSION: bool = os.getenv("ENABLE_QUERY_EXPANSION", "false").lower() == "true"
+
+# ── Hierarchy-aware reranking ───────────────────────────────────────────────────
+# Branch agreement: буст кандидата если другие кандидаты из той же L2-ветки.
+HIERARCHY_BRANCH_WEIGHT: float = float(os.getenv("HIERARCHY_BRANCH_WEIGHT", "0.05"))
+# Parent similarity: буст кандидата если его родительский код тоже в пуле.
+HIERARCHY_PARENT_WEIGHT: float = float(os.getenv("HIERARCHY_PARENT_WEIGHT", "0.04"))
+# L1-pruning: если 1-2 раздела доминируют — отсечь кандидатов из других. Default OFF (агрессивно).
+ENABLE_HIERARCHY_PRUNING: bool = os.getenv("ENABLE_HIERARCHY_PRUNING", "false").lower() == "true"
+HIERARCHY_PRUNE_THRESHOLD: float = float(os.getenv("HIERARCHY_PRUNE_THRESHOLD", "0.70"))
+
 # ── Пути к файлам классификатора ───────────────────────────────────────────────
 CLASSIFIER_FLAT_PATH: str = os.getenv(
     "CLASSIFIER_FLAT_PATH", str(_data_dir / "classifier_flat.json")
