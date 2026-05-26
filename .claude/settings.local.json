@@ -61,7 +61,30 @@
       "Read(//c/Users/Korotaev_NO/Desktop/**)",
       "Bash(ENABLE_SECTION_ROUTING=true HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./venv/Scripts/python.exe tests/eval_accuracy.py --fixtures tests/fixtures/test_appeals_real12.json)",
       "Bash(ENABLE_SECTION_ROUTING=true HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./venv/Scripts/python.exe tests/eval_accuracy.py)",
-      "Bash(./venv/Scripts/python.exe -m pytest tests/test_import_ii25_dataset.py tests/test_section_router_prompt.py tests/test_strict_validation.py tests/test_hierarchy.py tests/test_question_segmentation.py -v --no-header)"
+      "Bash(./venv/Scripts/python.exe -m pytest tests/test_import_ii25_dataset.py tests/test_section_router_prompt.py tests/test_strict_validation.py tests/test_hierarchy.py tests/test_question_segmentation.py -v --no-header)",
+      "Bash(ENABLE_SECTION_ROUTING=true HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./venv/Scripts/python.exe tests/eval_accuracy.py --fixtures tests/fixtures/ii25_test.json)",
+      "Bash(./venv/Scripts/python.exe scripts/generate_hard_negatives.py)",
+      "Bash(./venv/Scripts/python.exe scripts/finetune_reranker.py)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" -m 10 https://huggingface.co)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" -m 10 https://hf-mirror.com)",
+      "Bash(HF_ENDPOINT=https://huggingface.co ./venv/Scripts/python.exe scripts/finetune_reranker.py)",
+      "Bash(HF_ENDPOINT=https://huggingface.co ./venv/Scripts/python.exe -u scripts/finetune_reranker.py --epochs 1 --batch-size 4)",
+      "Bash(./venv/Scripts/python.exe -u -c ' *)",
+      "Bash(HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./venv/Scripts/python.exe scripts/build_ltr_dataset.py)",
+      "Bash(tasklist)",
+      "PowerShell(Get-Process python -ErrorAction SilentlyContinue)",
+      "PowerShell(Stop-Process -Force)",
+      "Bash(HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./venv/Scripts/python.exe -u scripts/build_ltr_dataset.py)",
+      "Bash(./venv/Scripts/python.exe scripts/train_ltr.py)",
+      "Bash(HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./venv/Scripts/python.exe tests/eval_accuracy.py --fixtures tests/fixtures/ii25_test.json)",
+      "Bash(HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./venv/Scripts/python.exe -u scripts/encode_queries.py)",
+      "Bash(HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe -u scripts/encode_queries.py)",
+      "Bash(PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe -u scripts/train_adapter.py)",
+      "Bash(PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe scripts/apply_adapter.py)",
+      "Bash(HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe tests/eval_accuracy.py --fixtures tests/fixtures/ii25_test.json)",
+      "Bash(ENABLE_LTR_RERANKER=false HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe tests/eval_accuracy.py --fixtures tests/fixtures/ii25_test.json)",
+      "Bash(git reset *)",
+      "Bash(grep -v \"^\\\\\\\\?\\\\\\\\?\")"
     ]
   }
 }

@@ -13,6 +13,7 @@ sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
 import json
+import math
 import os
 import re
 # Set HF mirror before importing sentence_transformers (fixes SSL issues in corporate networks)
@@ -46,6 +47,8 @@ from config import (
     HIERARCHY_BRANCH_WEIGHT, HIERARCHY_PARENT_WEIGHT,
     ENABLE_HIERARCHY_PRUNING, HIERARCHY_PRUNE_THRESHOLD,
     ENABLE_SECTION_ROUTING, SECTION_ROUTING_MAX_TOPICS,
+    ENABLE_LTR_RERANKER, LTR_MODEL_PATH, LTR_WEIGHT,
+    ENABLE_EMBEDDING_ADAPTER, ADAPTER_PATH,
 )
 from hierarchy import (
     branch_agreement_scores, parent_similarity_boost,
@@ -358,6 +361,32 @@ class ClassifierAgent:
             self.ce_reranker = CrossEncoderReranker(CROSS_ENCODER_MODEL)
             print(f"  CE reranker enabled: {CROSS_ENCODER_MODEL} (lazy load at first use)")
 
+        # Learning-to-Rank weights — sklearn LogReg обученный на ii25_train
+        self.ltr_weights: dict | None = None
+        if ENABLE_LTR_RERANKER:
+            ltr_path = Path(LTR_MODEL_PATH)
+            if ltr_path.exists():
+                with open(ltr_path, encoding="utf-8") as f:
+                    self.ltr_weights = json.load(f)
+                print(f"  LtR reranker enabled: {ltr_path.name} (weight={LTR_WEIGHT})")
+            else:
+                print(f"  LtR enabled but model not found at {ltr_path} — disabled")
+
+        # Embedding adapter — Linear(768, 768) обученный на ii25_train с InfoNCE
+        # Применяется к query embedding ПОСЛЕ e5. Vector DB должна быть пересобрана
+        # через тот же адаптер (см. scripts/apply_adapter.py).
+        self.adapter_W: np.ndarray | None = None
+        self.adapter_b: np.ndarray | None = None
+        if ENABLE_EMBEDDING_ADAPTER:
+            adapter_path = Path(ADAPTER_PATH)
+            if adapter_path.exists():
+                data = np.load(adapter_path)
+                self.adapter_W = data["W"].astype(np.float32)
+                self.adapter_b = data["b"].astype(np.float32)
+                print(f"  Embedding adapter enabled: {adapter_path.name} (W={self.adapter_W.shape})")
+            else:
+                print(f"  Adapter enabled but file not found at {adapter_path} — disabled")
+
     def _resolve_llm(self, llm_provider: str | None = None, llm_model: str | None = None) -> tuple[str, str]:
         """Return provider/model for a request, falling back to .env defaults."""
         provider = (llm_provider or self.llm or "groq").strip().lower()
@@ -389,8 +418,15 @@ class ClassifierAgent:
         return self._ollama_client
 
     def _embed_query(self, text: str) -> np.ndarray:
-        """Векторизация запроса с префиксом для multilingual-e5"""
-        return self.embedder.encode(f"query: {text}", normalize_embeddings=True)
+        """Векторизация запроса с префиксом для multilingual-e5.
+        Если включён embedding adapter — применяется его проекция."""
+        emb = self.embedder.encode(f"query: {text}", normalize_embeddings=True)
+        if self.adapter_W is not None:
+            emb = emb @ self.adapter_W.T + self.adapter_b
+            n = float(np.linalg.norm(emb))
+            if n > 1e-12:
+                emb = emb / n
+        return emb
 
     def _split_appeal_questions(self, text: str, max_segments: int = 7) -> list[AppealQuestion]:
         """Делегирует module-level функции — позволяет тестировать без агента."""
@@ -438,6 +474,19 @@ class ClassifierAgent:
         weighted_overlap = sum(2.0 if token in name_tokens else 1.0 for token in overlap)
         return min(1.0, weighted_overlap / max(len(query_tokens), 1))
 
+    def _ltr_score(self, features: dict) -> float:
+        """Sigmoid(LogReg(features)) ∈ [0, 1]. Возвращает 0 если LtR не загружен."""
+        if not self.ltr_weights:
+            return 0.0
+        w = self.ltr_weights
+        z = float(w.get("intercept", 0.0))
+        for key, coef in zip(w["features"], w["coef"]):
+            z += float(features.get(key, 0.0)) * float(coef)
+        if z >= 0:
+            return 1.0 / (1.0 + math.exp(-z))
+        ez = math.exp(z)
+        return ez / (1.0 + ez)
+
     def _rerank_candidates(self, query_text: str, candidates: list, top_k: int = TOP_K_CANDIDATES) -> list:
         """Compress wider pool with lexical + hierarchy signals before LLM."""
         if not candidates:
@@ -475,11 +524,30 @@ class ClassifierAgent:
                 + HIERARCHY_BRANCH_WEIGHT * branch_score
                 + HIERARCHY_PARENT_WEIGHT * parent_score
             )
+
+            # LtR score — sklearn-LogReg обученный на ии25_train
+            ltr_score_val = 0.0
+            if self.ltr_weights is not None:
+                level_val = int(candidate.get("level", 0) or 0)
+                ltr_features = {
+                    "dense_score": dense_score,
+                    "lexical_score": lexical_score,
+                    "branch_score": branch_score,
+                    "parent_score": parent_score,
+                    "level": level_val,
+                    "is_l4": 1 if level_val == 4 else 0,
+                    "is_l5": 1 if level_val == 5 else 0,
+                }
+                ltr_score_val = self._ltr_score(ltr_features)
+                combined_score += LTR_WEIGHT * ltr_score_val
+
             enriched = dict(candidate)
             enriched["rerank_score"] = round(float(combined_score), 6)
             enriched["lexical_score"] = round(float(lexical_score), 6)
             enriched["branch_score"] = round(float(branch_score), 6)
             enriched["parent_score"] = round(float(parent_score), 6)
+            if self.ltr_weights is not None:
+                enriched["ltr_score"] = round(float(ltr_score_val), 6)
             scored.append((combined_score, idx, enriched))
 
         scored.sort(key=lambda item: (-item[0], item[1]))

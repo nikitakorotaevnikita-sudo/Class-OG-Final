@@ -7,9 +7,19 @@ venv/
 
 # Векторная база (большой файл, пересобирается из данных)
 data/vector_db/
+data/vector_db_adapted/
 
-# Дообученные модели (большие файлы)
-models/
+# Кэшированные query embeddings (пересобираются скриптом encode_queries.py)
+data/ii25_*_query_embs.npy
+data/ii25_*_query_meta.json
+
+# Дообученные модели — большие файлы исключены, лёгкие артефакты коммитим
+models/*
+!models/.gitkeep
+!models/adapter_v1.npz
+!models/adapter_v1.json
+!models/ltr_v1.json
+!models/ltr_gbm_v1.joblib
 
 # Старая векторная база ChromaDB
 data/chroma_db/

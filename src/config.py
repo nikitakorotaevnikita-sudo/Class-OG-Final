@@ -79,6 +79,20 @@ ENABLE_SECTION_ROUTING: bool = os.getenv("ENABLE_SECTION_ROUTING", "false").lowe
 # Максимальное число L2-тематик которые LLM может выбрать (3 = широко, 1 = жёсткое сужение)
 SECTION_ROUTING_MAX_TOPICS: int = int(os.getenv("SECTION_ROUTING_MAX_TOPICS", "3"))
 
+# ── Learning-to-Rank reranker (опциональный) ────────────────────────────────────
+# Sklearn LogReg обучен на ii25_train: предсказывает вероятность что candidate -
+# правильный код. Score добавляется в combined_score reranker'а.
+ENABLE_LTR_RERANKER: bool = os.getenv("ENABLE_LTR_RERANKER", "false").lower() == "true"
+LTR_MODEL_PATH: str = os.getenv("LTR_MODEL_PATH", str(Path(__file__).parent.parent / "models" / "ltr_v1.json"))
+# Вес LtR-score в финальном combined_score
+LTR_WEIGHT: float = float(os.getenv("LTR_WEIGHT", "0.30"))
+
+# ── Embedding Adapter (Linear 768→768, обученный на ii25_train с InfoNCE) ──────
+# Применяется к query embedding после e5. Vector DB должна быть пересобрана
+# через тот же адаптер (data/vector_db_adapted).
+ENABLE_EMBEDDING_ADAPTER: bool = os.getenv("ENABLE_EMBEDDING_ADAPTER", "false").lower() == "true"
+ADAPTER_PATH: str = os.getenv("ADAPTER_PATH", str(Path(__file__).parent.parent / "models" / "adapter_v1.npz"))
+
 # ── Пути к файлам классификатора ───────────────────────────────────────────────
 CLASSIFIER_FLAT_PATH: str = os.getenv(
     "CLASSIFIER_FLAT_PATH", str(_data_dir / "classifier_flat.json")

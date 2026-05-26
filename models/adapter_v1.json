@@ -1,0 +1,13 @@
+{
+  "dim": 768,
+  "epochs_trained": 100,
+  "best_epoch": 10,
+  "best_test_recall_10": 0.5179,
+  "baseline_test_recall_10": 0.375,
+  "baseline_test_recall_50": 0.5179,
+  "lr": 0.001,
+  "weight_decay": 0.01,
+  "temperature": 0.05,
+  "train_size": 43,
+  "test_size": 56
+}
