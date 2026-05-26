@@ -21,21 +21,21 @@
       "expected_codes": [
         "0003.0009.0099.0742.0110"
       ],
-      "confidence": 0.92,
-      "needs_verification": false,
+      "confidence": 0.62,
+      "needs_verification": true,
       "invalid_llm_codes": [],
       "retrieval_recall_at_10": true,
       "retrieval_recall_at_50": true,
       "reranked_recall_at_10": true,
       "first_expected_rank_dense": 2,
       "first_expected_rank_reranked": 1,
-      "elapsed": 14.58,
+      "elapsed": 14.17,
       "stage_timings": {
         "segmentation": null,
-        "dense_retrieval": 0.515,
+        "dense_retrieval": 0.43,
         "rerank": null,
-        "classification": 14.07,
-        "total": 14.585
+        "classification": 13.743,
+        "total": 14.173
       },
       "debug": {
         "expected_codes": [
@@ -872,7 +872,11 @@
             "full_path": "Экономика / Хозяйственная деятельность / Транспорт / Эксплуатация и сохранность автомобильных дорог / ремонт автомобильных дорог",
             "parent_code": "0003.0009.0099.0742",
             "similarity": 0.81,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.882954,
+            "lexical_score": 0.095238,
+            "branch_score": 0.38971,
+            "parent_score": 0.801
           },
           {
             "code": "0003.0009.0099.0744",
@@ -881,7 +885,11 @@
             "full_path": "Экономика / Хозяйственная деятельность / Транспорт / Дорожные знаки и дорожная разметка",
             "parent_code": "0003.0009.0099.0000",
             "similarity": 0.809,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.881794,
+            "lexical_score": 0.095238,
+            "branch_score": 0.38971,
+            "parent_score": 0.797
           },
           {
             "code": "0003.0009.0097.0699",
@@ -890,7 +898,11 @@
             "full_path": "Экономика / Хозяйственная деятельность / Градостроительство и архитектура / Благоустройство и ремонт подъездных дорог, в том числе тротуаров",
             "parent_code": "0003.0009.0097.0000",
             "similarity": 0.808,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.880794,
+            "lexical_score": 0.095238,
+            "branch_score": 0.38971,
+            "parent_score": 0.797
           },
           {
             "code": "0003.0009.0099.0743",
@@ -899,7 +911,11 @@
             "full_path": "Экономика / Хозяйственная деятельность / Транспорт / Борьба с аварийностью. Безопасность дорожного движения",
             "parent_code": "0003.0009.0099.0000",
             "similarity": 0.806,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.878794,
+            "lexical_score": 0.095238,
+            "branch_score": 0.38971,
+            "parent_score": 0.797
           },
           {
             "code": "0005.0005.0056.1158",
@@ -908,7 +924,11 @@
             "full_path": "Жилищно-коммунальная сфера / Жилище / Коммунальное хозяйство / Ремонт и эксплуатация ливневой канализации",
             "parent_code": "0005.0005.0056.0000",
             "similarity": 0.811,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.877623,
+            "lexical_score": 0.095238,
+            "branch_score": 0.265483,
+            "parent_score": 0.798
           },
           {
             "code": "0003.0009.0099.0742.0109",
@@ -917,7 +937,11 @@
             "full_path": "Экономика / Хозяйственная деятельность / Транспорт / Эксплуатация и сохранность автомобильных дорог / капитальный ремонт автомобильных дорог",
             "parent_code": "0003.0009.0099.0742",
             "similarity": 0.803,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.875954,
+            "lexical_score": 0.095238,
+            "branch_score": 0.38971,
+            "parent_score": 0.801
           },
           {
             "code": "0005.0005.0056.1170",
@@ -926,7 +950,11 @@
             "full_path": "Жилищно-коммунальная сфера / Жилище / Коммунальное хозяйство / Капитальный ремонт общего имущества",
             "parent_code": "0005.0005.0056.0000",
             "similarity": 0.807,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.873623,
+            "lexical_score": 0.095238,
+            "branch_score": 0.265483,
+            "parent_score": 0.798
           },
           {
             "code": "0003.0009.0097.0690",
@@ -935,7 +963,11 @@
             "full_path": "Экономика / Хозяйственная деятельность / Градостроительство и архитектура / Уличное освещение",
             "parent_code": "0003.0009.0097.0000",
             "similarity": 0.808,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.869365,
+            "lexical_score": 0.0,
+            "branch_score": 0.38971,
+            "parent_score": 0.797
           },
           {
             "code": "0003.0009.0096.0684",
@@ -944,7 +976,11 @@
             "full_path": "Экономика / Хозяйственная деятельность / Строительство / Строительство и реконструкция дорог",
             "parent_code": "0003.0009.0096.0000",
             "similarity": 0.803,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.864285,
+            "lexical_score": 0.0,
+            "branch_score": 0.38971,
+            "parent_score": 0.795
           },
           {
             "code": "0005.0005.0056.1154",
@@ -953,7 +989,11 @@
             "full_path": "Жилищно-коммунальная сфера / Жилище / Коммунальное хозяйство / Перебои в водоснабжении",
             "parent_code": "0005.0005.0056.0000",
             "similarity": 0.808,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.863194,
+            "lexical_score": 0.0,
+            "branch_score": 0.265483,
+            "parent_score": 0.798
           }
         ],
         "llm_codes": [
@@ -963,10 +1003,10 @@
         "first_expected_rank_reranked": 1,
         "stage_timings": {
           "segmentation": null,
-          "dense_retrieval": 0.515,
+          "dense_retrieval": 0.43,
           "rerank": null,
-          "classification": 14.07,
-          "total": 14.585
+          "classification": 13.743,
+          "total": 14.173
         }
       }
     },
@@ -999,13 +1039,13 @@
       "reranked_recall_at_10": true,
       "first_expected_rank_dense": 2,
       "first_expected_rank_reranked": 1,
-      "elapsed": 28.71,
+      "elapsed": 13.99,
       "stage_timings": {
         "segmentation": null,
-        "dense_retrieval": 0.332,
+        "dense_retrieval": 0.418,
         "rerank": null,
-        "classification": 28.379,
-        "total": 28.711
+        "classification": 13.571,
+        "total": 13.989
       },
       "debug": {
         "expected_codes": [
@@ -1842,7 +1882,11 @@
             "full_path": "Жилищно-коммунальная сфера / Жилище / Коммунальное хозяйство / Обращение с твердыми коммунальными отходами",
             "parent_code": "0005.0005.0056.0000",
             "similarity": 0.848,
-            "source": "lexical"
+            "source": "lexical",
+            "rerank_score": 0.948833,
+            "lexical_score": 0.352941,
+            "branch_score": 0.3256,
+            "parent_score": 0.805
           },
           {
             "code": "0005.0005.0056.1161",
@@ -1851,7 +1895,11 @@
             "full_path": "Жилищно-коммунальная сфера / Жилище / Коммунальное хозяйство / Несанкционированная свалка мусора, биоотходы",
             "parent_code": "0005.0005.0056.0000",
             "similarity": 0.828,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.907656,
+            "lexical_score": 0.176471,
+            "branch_score": 0.3256,
+            "parent_score": 0.805
           },
           {
             "code": "0005.0005.0056.1155",
@@ -1860,7 +1908,11 @@
             "full_path": "Жилищно-коммунальная сфера / Жилище / Коммунальное хозяйство / Перебои в газоснабжении",
             "parent_code": "0005.0005.0056.0000",
             "similarity": 0.821,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.886539,
+            "lexical_score": 0.058824,
+            "branch_score": 0.3256,
+            "parent_score": 0.805
           },
           {
             "code": "0005.0005.0056.1173",
@@ -1869,7 +1921,11 @@
             "full_path": "Жилищно-коммунальная сфера / Жилище / Коммунальное хозяйство / Нормативы потребления коммунальных ресурсов",
             "parent_code": "0005.0005.0056.0000",
             "similarity": 0.81,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.882598,
+            "lexical_score": 0.117647,
+            "branch_score": 0.3256,
+            "parent_score": 0.805
           },
           {
             "code": "0005.0005.0056.1157",
@@ -1878,7 +1934,11 @@
             "full_path": "Жилищно-коммунальная сфера / Жилище / Коммунальное хозяйство / Перебои в водоотведении и канализовании",
             "parent_code": "0005.0005.0056.0000",
             "similarity": 0.817,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.882539,
+            "lexical_score": 0.058824,
+            "branch_score": 0.3256,
+            "parent_score": 0.805
           },
           {
             "code": "0005.0005.0056.1174",
@@ -1887,7 +1947,11 @@
             "full_path": "Жилищно-коммунальная сфера / Жилище / Коммунальное хозяйство / Нормативы потребления коммунальных услуг",
             "parent_code": "0005.0005.0056.0000",
             "similarity": 0.809,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.881598,
+            "lexical_score": 0.117647,
+            "branch_score": 0.3256,
+            "parent_score": 0.805
           },
           {
             "code": "0005.0005.0056.1154",
@@ -1896,7 +1960,11 @@
             "full_path": "Жилищно-коммунальная сфера / Жилище / Коммунальное хозяйство / Перебои в водоснабжении",
             "parent_code": "0005.0005.0056.0000",
             "similarity": 0.816,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.881539,
+            "lexical_score": 0.058824,
+            "branch_score": 0.3256,
+            "parent_score": 0.805
           },
           {
             "code": "0005.0005.0056.1148",
@@ -1905,7 +1973,11 @@
             "full_path": "Жилищно-коммунальная сфера / Жилище / Коммунальное хозяйство / Устранение аварийных ситуаций на магистральных коммуникациях. Работа аварийных коммунальных служб",
             "parent_code": "0005.0005.0056.0000",
             "similarity": 0.808,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.880598,
+            "lexical_score": 0.117647,
+            "branch_score": 0.3256,
+            "parent_score": 0.805
           },
           {
             "code": "0005.0005.0056.1169",
@@ -1914,7 +1986,11 @@
             "full_path": "Жилищно-коммунальная сфера / Жилище / Коммунальное хозяйство / Предоставление коммунальных услуг ненадлежащего качества",
             "parent_code": "0005.0005.0056.0000",
             "similarity": 0.806,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.878598,
+            "lexical_score": 0.117647,
+            "branch_score": 0.3256,
+            "parent_score": 0.805
           },
           {
             "code": "0005.0005.0056.1153",
@@ -1923,7 +1999,11 @@
             "full_path": "Жилищно-коммунальная сфера / Жилище / Коммунальное хозяйство / Перебои в электроснабжении",
             "parent_code": "0005.0005.0056.0000",
             "similarity": 0.81,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.875539,
+            "lexical_score": 0.058824,
+            "branch_score": 0.3256,
+            "parent_score": 0.805
           }
         ],
         "llm_codes": [
@@ -1933,10 +2013,10 @@
         "first_expected_rank_reranked": 1,
         "stage_timings": {
           "segmentation": null,
-          "dense_retrieval": 0.332,
+          "dense_retrieval": 0.418,
           "rerank": null,
-          "classification": 28.379,
-          "total": 28.711
+          "classification": 13.571,
+          "total": 13.989
         }
       }
     },
@@ -1962,7 +2042,7 @@
         "0005.0005.0056.1163",
         "0005.0005.0057.1178"
       ],
-      "confidence": 0.95,
+      "confidence": 0.92,
       "needs_verification": false,
       "invalid_llm_codes": [],
       "retrieval_recall_at_10": true,
@@ -1970,13 +2050,13 @@
       "reranked_recall_at_10": true,
       "first_expected_rank_dense": 1,
       "first_expected_rank_reranked": 1,
-      "elapsed": 14.64,
+      "elapsed": 13.76,
       "stage_timings": {
         "segmentation": null,
-        "dense_retrieval": 0.484,
+        "dense_retrieval": 0.402,
         "rerank": null,
-        "classification": 14.158,
-        "total": 14.641
+        "classification": 13.357,
+        "total": 13.76
       },
       "debug": {
         "expected_codes": [
@@ -2814,7 +2894,11 @@
             "full_path": "Жилищно-коммунальная сфера / Жилище / Коммунальное хозяйство / Субсидии, компенсации и иные меры социальной поддержки при оплате жилого помещения и коммунальных услуг",
             "parent_code": "0005.0005.0056.0000",
             "similarity": 0.854,
-            "source": "lexical"
+            "source": "lexical",
+            "rerank_score": 0.958832,
+            "lexical_score": 0.375,
+            "branch_score": 0.363832,
+            "parent_score": 0.791
           },
           {
             "code": "0005.0005.0056.1149",
@@ -2823,7 +2907,11 @@
             "full_path": "Жилищно-коммунальная сфера / Жилище / Коммунальное хозяйство / Оплата жилищно-коммунальных услуг (ЖКХ), взносов в Фонд капитального ремонта",
             "parent_code": "0005.0005.0056.0000",
             "similarity": 0.843,
-            "source": "lexical"
+            "source": "lexical",
+            "rerank_score": 0.942832,
+            "lexical_score": 0.333333,
+            "branch_score": 0.363832,
+            "parent_score": 0.791
           },
           {
             "code": "0005.0005.0056.1175",
@@ -2832,7 +2920,11 @@
             "full_path": "Жилищно-коммунальная сфера / Жилище / Коммунальное хозяйство / Оплата коммунальных услуг и электроэнергии, в том числе льготы",
             "parent_code": "0005.0005.0056.0000",
             "similarity": 0.833,
-            "source": "lexical"
+            "source": "lexical",
+            "rerank_score": 0.927832,
+            "lexical_score": 0.291667,
+            "branch_score": 0.363832,
+            "parent_score": 0.791
           },
           {
             "code": "0005.0005.0057.1178",
@@ -2841,7 +2933,11 @@
             "full_path": "Жилищно-коммунальная сфера / Жилище / Оплата строительства, содержания и ремонта жилья (кредиты, компенсации, субсидии, льготы) / Предоставление субсидий на жилье",
             "parent_code": "0005.0005.0057.0000",
             "similarity": 0.831,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.912272,
+            "lexical_score": 0.166667,
+            "branch_score": 0.363832,
+            "parent_score": 0.827
           },
           {
             "code": "0005.0005.0057.1179",
@@ -2850,7 +2946,11 @@
             "full_path": "Жилищно-коммунальная сфера / Жилище / Оплата строительства, содержания и ремонта жилья (кредиты, компенсации, субсидии, льготы) / Просьбы о выделении материальной помощи на строительство жилья",
             "parent_code": "0005.0005.0057.0000",
             "similarity": 0.828,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.909272,
+            "lexical_score": 0.166667,
+            "branch_score": 0.363832,
+            "parent_score": 0.827
           },
           {
             "code": "0005.0005.0056.1174",
@@ -2859,7 +2959,11 @@
             "full_path": "Жилищно-коммунальная сфера / Жилище / Коммунальное хозяйство / Нормативы потребления коммунальных услуг",
             "parent_code": "0005.0005.0056.0000",
             "similarity": 0.819,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.903832,
+            "lexical_score": 0.208333,
+            "branch_score": 0.363832,
+            "parent_score": 0.791
           },
           {
             "code": "0005.0005.0057.1176",
@@ -2868,7 +2972,11 @@
             "full_path": "Жилищно-коммунальная сфера / Жилище / Оплата строительства, содержания и ремонта жилья (кредиты, компенсации, субсидии, льготы) / Государственные жилищные сертификаты",
             "parent_code": "0005.0005.0057.0000",
             "similarity": 0.817,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.898272,
+            "lexical_score": 0.166667,
+            "branch_score": 0.363832,
+            "parent_score": 0.827
           },
           {
             "code": "0005.0005.0056.1169",
@@ -2877,7 +2985,11 @@
             "full_path": "Жилищно-коммунальная сфера / Жилище / Коммунальное хозяйство / Предоставление коммунальных услуг ненадлежащего качества",
             "parent_code": "0005.0005.0056.0000",
             "similarity": 0.812,
-            "source": "lexical"
+            "source": "lexical",
+            "rerank_score": 0.896832,
+            "lexical_score": 0.208333,
+            "branch_score": 0.363832,
+            "parent_score": 0.791
           },
           {
             "code": "0005.0005.0057.1177",
@@ -2886,7 +2998,11 @@
             "full_path": "Жилищно-коммунальная сфера / Жилище / Оплата строительства, содержания и ремонта жилья (кредиты, компенсации, субсидии, льготы) / Участие в долевом строительстве",
             "parent_code": "0005.0005.0057.0000",
             "similarity": 0.815,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.896272,
+            "lexical_score": 0.166667,
+            "branch_score": 0.363832,
+            "parent_score": 0.827
           },
           {
             "code": "0005.0005.0054.1119",
@@ -2895,7 +3011,11 @@
             "full_path": "Жилищно-коммунальная сфера / Жилище / Жилищный фонд / Вопросы частного домовладения",
             "parent_code": "0005.0005.0054.0000",
             "similarity": 0.825,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.895992,
+            "lexical_score": 0.083333,
+            "branch_score": 0.363832,
+            "parent_score": 0.82
           }
         ],
         "llm_codes": [
@@ -2905,10 +3025,10 @@
         "first_expected_rank_reranked": 1,
         "stage_timings": {
           "segmentation": null,
-          "dense_retrieval": 0.484,
+          "dense_retrieval": 0.402,
           "rerank": null,
-          "classification": 14.158,
-          "total": 14.641
+          "classification": 13.357,
+          "total": 13.76
         }
       }
     },
@@ -2941,13 +3061,13 @@
       "reranked_recall_at_10": true,
       "first_expected_rank_dense": 34,
       "first_expected_rank_reranked": 1,
-      "elapsed": 12.62,
+      "elapsed": 13.11,
       "stage_timings": {
         "segmentation": null,
-        "dense_retrieval": 0.475,
+        "dense_retrieval": 0.373,
         "rerank": null,
-        "classification": 12.145,
-        "total": 12.62
+        "classification": 12.742,
+        "total": 13.114
       },
       "debug": {
         "expected_codes": [
@@ -3784,7 +3904,11 @@
             "full_path": "Государство, общество, политика / Основы государственного управления / Обращения, заявления и жалобы граждан / Действие (бездействие) при рассмотрении обращения",
             "parent_code": "0001.0002.0027.0000",
             "similarity": 0.82,
-            "source": "lexical"
+            "source": "lexical",
+            "rerank_score": 0.908997,
+            "lexical_score": 0.238095,
+            "branch_score": 0.363705,
+            "parent_score": 0.806
           },
           {
             "code": "0001.0002.0027.0122",
@@ -3793,7 +3917,11 @@
             "full_path": "Государство, общество, политика / Основы государственного управления / Обращения, заявления и жалобы граждан / Неполучение ответа на обращение",
             "parent_code": "0001.0002.0027.0000",
             "similarity": 0.814,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.891568,
+            "lexical_score": 0.142857,
+            "branch_score": 0.363705,
+            "parent_score": 0.806
           },
           {
             "code": "0001.0002.0027.0126",
@@ -3802,7 +3930,11 @@
             "full_path": "Государство, общество, политика / Основы государственного управления / Обращения, заявления и жалобы граждан / Отсутствует адресат обращения",
             "parent_code": "0001.0002.0027.0000",
             "similarity": 0.822,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.88814,
+            "lexical_score": 0.047619,
+            "branch_score": 0.363705,
+            "parent_score": 0.806
           },
           {
             "code": "0001.0002.0027.0128",
@@ -3811,7 +3943,11 @@
             "full_path": "Государство, общество, политика / Основы государственного управления / Обращения, заявления и жалобы граждан / Некорректные обращения",
             "parent_code": "0001.0002.0027.0000",
             "similarity": 0.811,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.87714,
+            "lexical_score": 0.047619,
+            "branch_score": 0.363705,
+            "parent_score": 0.806
           },
           {
             "code": "0001.0002.0027.0151",
@@ -3820,7 +3956,11 @@
             "full_path": "Государство, общество, политика / Основы государственного управления / Обращения, заявления и жалобы граждан / Благодарности, приглашения, поздравления органам исполнительной власти субъектов Российской Федерации",
             "parent_code": "0001.0002.0027.0000",
             "similarity": 0.809,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.87514,
+            "lexical_score": 0.047619,
+            "branch_score": 0.363705,
+            "parent_score": 0.806
           },
           {
             "code": "0001.0002.0027.0125",
@@ -3829,7 +3969,11 @@
             "full_path": "Государство, общество, политика / Основы государственного управления / Обращения, заявления и жалобы граждан / Результаты рассмотрения обращения",
             "parent_code": "0001.0002.0027.0000",
             "similarity": 0.808,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.87414,
+            "lexical_score": 0.047619,
+            "branch_score": 0.363705,
+            "parent_score": 0.806
           },
           {
             "code": "0001.0002.0027.0144",
@@ -3838,7 +3982,11 @@
             "full_path": "Государство, общество, политика / Основы государственного управления / Обращения, заявления и жалобы граждан / Личный прием должностными лицами органов местного самоуправления",
             "parent_code": "0001.0002.0027.0000",
             "similarity": 0.808,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.87414,
+            "lexical_score": 0.047619,
+            "branch_score": 0.363705,
+            "parent_score": 0.806
           },
           {
             "code": "0001.0002.0027.0135",
@@ -3847,7 +3995,11 @@
             "full_path": "Государство, общество, политика / Основы государственного управления / Обращения, заявления и жалобы граждан / Предоставление ответа, размещенного на официальном сайте в сети «Интернет»",
             "parent_code": "0001.0002.0027.0000",
             "similarity": 0.796,
-            "source": "lexical"
+            "source": "lexical",
+            "rerank_score": 0.873568,
+            "lexical_score": 0.142857,
+            "branch_score": 0.363705,
+            "parent_score": 0.806
           },
           {
             "code": "0001.0002.0027.0137",
@@ -3856,7 +4008,11 @@
             "full_path": "Государство, общество, политика / Основы государственного управления / Обращения, заявления и жалобы граждан / Рассмотрение в административном порядке принятого по обращению решения или действия (бездействие) при рассмотрении обращения",
             "parent_code": "0001.0002.0027.0000",
             "similarity": 0.796,
-            "source": "lexical"
+            "source": "lexical",
+            "rerank_score": 0.873568,
+            "lexical_score": 0.142857,
+            "branch_score": 0.363705,
+            "parent_score": 0.806
           },
           {
             "code": "0001.0002.0027.0138",
@@ -3865,7 +4021,11 @@
             "full_path": "Государство, общество, политика / Основы государственного управления / Обращения, заявления и жалобы граждан / Рассмотрение в судебном порядке принятого по обращению решения или действия (бездействие) при рассмотрении обращения",
             "parent_code": "0001.0002.0027.0000",
             "similarity": 0.796,
-            "source": "lexical"
+            "source": "lexical",
+            "rerank_score": 0.873568,
+            "lexical_score": 0.142857,
+            "branch_score": 0.363705,
+            "parent_score": 0.806
           }
         ],
         "llm_codes": [
@@ -3875,10 +4035,10 @@
         "first_expected_rank_reranked": 1,
         "stage_timings": {
           "segmentation": null,
-          "dense_retrieval": 0.475,
+          "dense_retrieval": 0.373,
           "rerank": null,
-          "classification": 12.145,
-          "total": 12.62
+          "classification": 12.742,
+          "total": 13.114
         }
       }
     },
@@ -3903,21 +4063,21 @@
       "expected_codes": [
         "0003.0009.0094.0671"
       ],
-      "confidence": 0.92,
-      "needs_verification": false,
+      "confidence": 0.62,
+      "needs_verification": true,
       "invalid_llm_codes": [],
       "retrieval_recall_at_10": false,
       "retrieval_recall_at_50": true,
       "reranked_recall_at_10": false,
       "first_expected_rank_dense": 42,
       "first_expected_rank_reranked": null,
-      "elapsed": 14.11,
+      "elapsed": 13.8,
       "stage_timings": {
         "segmentation": null,
-        "dense_retrieval": 0.422,
+        "dense_retrieval": 0.385,
         "rerank": null,
-        "classification": 13.683,
-        "total": 14.107
+        "classification": 13.411,
+        "total": 13.796
       },
       "debug": {
         "expected_codes": [
@@ -4754,7 +4914,11 @@
             "full_path": "Жилищно-коммунальная сфера / Жилище / Жилищный фонд / Индивидуальное жилищное строительство",
             "parent_code": "0005.0005.0054.0000",
             "similarity": 0.828,
-            "source": "lexical"
+            "source": "lexical",
+            "rerank_score": 0.915239,
+            "lexical_score": 0.272727,
+            "branch_score": 0.233427,
+            "parent_score": 0.821
           },
           {
             "code": "0003.0011.0123.0849",
@@ -4763,7 +4927,11 @@
             "full_path": "Экономика / Природные ресурсы и охрана окружающей природной среды / Использование и охрана земель (за исключением международного сотрудничества) / Выделение земельных участков для индивидуального жилищного строительства",
             "parent_code": "0003.0011.0123.0000",
             "similarity": 0.851,
-            "source": "lexical"
+            "source": "lexical",
+            "rerank_score": 0.909459,
+            "lexical_score": 0.363636,
+            "branch_score": 0.096462,
+            "parent_score": 0.0
           },
           {
             "code": "0003.0009.0096.0682",
@@ -4772,7 +4940,11 @@
             "full_path": "Экономика / Хозяйственная деятельность / Строительство / Жилищное строительство",
             "parent_code": "0003.0009.0096.0000",
             "similarity": 0.823,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.894472,
+            "lexical_score": 0.181818,
+            "branch_score": 0.137878,
+            "parent_score": 0.819
           },
           {
             "code": "0005.0005.0054.1119",
@@ -4781,7 +4953,11 @@
             "full_path": "Жилищно-коммунальная сфера / Жилище / Жилищный фонд / Вопросы частного домовладения",
             "parent_code": "0005.0005.0054.0000",
             "similarity": 0.826,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.885966,
+            "lexical_score": 0.045455,
+            "branch_score": 0.233427,
+            "parent_score": 0.821
           },
           {
             "code": "0002.0004.0051.0239",
@@ -4790,7 +4966,11 @@
             "full_path": "Социальная сфера / Семья / Охрана семьи, материнства, отцовства и детства / Многодетные семьи. Малоимущие семьи. Неполные семьи. Молодые семьи",
             "parent_code": "0002.0004.0051.0000",
             "similarity": 0.822,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.878835,
+            "lexical_score": 0.090909,
+            "branch_score": 0.068914,
+            "parent_score": 0.812
           },
           {
             "code": "0005.0005.0054.0000",
@@ -4799,7 +4979,11 @@
             "full_path": "Жилищно-коммунальная сфера / Жилище / Жилищный фонд",
             "parent_code": "0005.0005.0000.0000",
             "similarity": 0.821,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.87614,
+            "lexical_score": 0.090909,
+            "branch_score": 0.233427,
+            "parent_score": 0.814
           },
           {
             "code": "0003.0011.0123.0847",
@@ -4808,7 +4992,11 @@
             "full_path": "Экономика / Природные ресурсы и охрана окружающей природной среды / Использование и охрана земель (за исключением международного сотрудничества) / Образование земельных участков (образование, раздел, выдел, объединение земельных участков). Возникновение прав на землю",
             "parent_code": "0003.0011.0123.0000",
             "similarity": 0.828,
-            "source": "lexical"
+            "source": "lexical",
+            "rerank_score": 0.87555,
+            "lexical_score": 0.272727,
+            "branch_score": 0.096462,
+            "parent_score": 0.0
           },
           {
             "code": "0003.0009.0096.0678",
@@ -4817,7 +5005,11 @@
             "full_path": "Экономика / Хозяйственная деятельность / Строительство / Согласование строительства",
             "parent_code": "0003.0009.0096.0000",
             "similarity": 0.82,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.875108,
+            "lexical_score": 0.045455,
+            "branch_score": 0.137878,
+            "parent_score": 0.819
           },
           {
             "code": "0003.0009.0096.0680",
@@ -4826,7 +5018,11 @@
             "full_path": "Экономика / Хозяйственная деятельность / Строительство / Инвестиции в строительство",
             "parent_code": "0003.0009.0096.0000",
             "similarity": 0.814,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.874563,
+            "lexical_score": 0.090909,
+            "branch_score": 0.137878,
+            "parent_score": 0.819
           },
           {
             "code": "0002.0004.0047.0230",
@@ -4835,7 +5031,11 @@
             "full_path": "Социальная сфера / Семья / Права и обязанности родителей и детей / Права и обязанности родителей и детей",
             "parent_code": "0002.0004.0047.0000",
             "similarity": 0.815,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.871915,
+            "lexical_score": 0.090909,
+            "branch_score": 0.068914,
+            "parent_score": 0.814
           }
         ],
         "llm_codes": [
@@ -4845,10 +5045,10 @@
         "first_expected_rank_reranked": null,
         "stage_timings": {
           "segmentation": null,
-          "dense_retrieval": 0.422,
+          "dense_retrieval": 0.385,
           "rerank": null,
-          "classification": 13.683,
-          "total": 14.107
+          "classification": 13.411,
+          "total": 13.796
         }
       }
     },
@@ -4873,21 +5073,21 @@
       "expected_codes": [
         "0002.0013.0139.0328.0031"
       ],
-      "confidence": 0.92,
-      "needs_verification": false,
+      "confidence": 0.62,
+      "needs_verification": true,
       "invalid_llm_codes": [],
       "retrieval_recall_at_10": false,
       "retrieval_recall_at_50": false,
       "reranked_recall_at_10": true,
       "first_expected_rank_dense": null,
       "first_expected_rank_reranked": 1,
-      "elapsed": 13.01,
+      "elapsed": 14.85,
       "stage_timings": {
         "segmentation": null,
-        "dense_retrieval": 0.45,
+        "dense_retrieval": 0.62,
         "rerank": null,
-        "classification": 12.558,
-        "total": 13.007
+        "classification": 14.226,
+        "total": 14.846
       },
       "debug": {
         "expected_codes": [
@@ -5724,7 +5924,11 @@
             "full_path": "Социальная сфера / Образование. Наука. Культура / Образование (за исключением международного сотрудничества) / Поступление в образовательные организации / дошкольное образование",
             "parent_code": "0002.0013.0139.0328",
             "similarity": 0.812,
-            "source": "lexical"
+            "source": "lexical",
+            "rerank_score": 0.894682,
+            "lexical_score": 0.208333,
+            "branch_score": 0.320842,
+            "parent_score": 0.791
           },
           {
             "code": "0002.0013.0139.0345.0031",
@@ -5733,7 +5937,11 @@
             "full_path": "Социальная сфера / Образование. Наука. Культура / Образование (за исключением международного сотрудничества) / Конфликтные ситуации в образовательных организациях / дошкольное образование",
             "parent_code": "0002.0013.0139.0345",
             "similarity": 0.812,
-            "source": "lexical"
+            "source": "lexical",
+            "rerank_score": 0.894682,
+            "lexical_score": 0.208333,
+            "branch_score": 0.320842,
+            "parent_score": 0.791
           },
           {
             "code": "0004.0015.0155.0947.0065",
@@ -5742,7 +5950,11 @@
             "full_path": "Оборона, безопасность, законность / Оборона / Военная служба / Установление места нахождения военнослужащих. Просьбы родственников об адресах военнослужащих / МЧС России",
             "parent_code": "0004.0015.0155.0947",
             "similarity": 0.823,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.87984,
+            "lexical_score": 0.041667,
+            "branch_score": 0.183196,
+            "parent_score": 0.817
           },
           {
             "code": "0004.0015.0155.0947",
@@ -5751,7 +5963,11 @@
             "full_path": "Оборона, безопасность, законность / Оборона / Военная служба / Установление места нахождения военнослужащих. Просьбы родственников об адресах военнослужащих",
             "parent_code": "0004.0015.0155.0000",
             "similarity": 0.817,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.87844,
+            "lexical_score": 0.083333,
+            "branch_score": 0.183196,
+            "parent_score": 0.807
           },
           {
             "code": "0004.0015.0155.0947.0064",
@@ -5760,7 +5976,11 @@
             "full_path": "Оборона, безопасность, законность / Оборона / Военная служба / Установление места нахождения военнослужащих. Просьбы родственников об адресах военнослужащих / Минобороны России",
             "parent_code": "0004.0015.0155.0947",
             "similarity": 0.82,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.87684,
+            "lexical_score": 0.041667,
+            "branch_score": 0.183196,
+            "parent_score": 0.817
           },
           {
             "code": "0001.0002.0025.0093.0004",
@@ -5769,7 +5989,11 @@
             "full_path": "Государство, общество, политика / Основы государственного управления / Общие вопросы государственного управления в сфере экономики, социально-культурного и административно-политического строительства / Нарушение сроков и порядка предоставления государственных и муниципальных услуг / муниципальные услуги",
             "parent_code": "0001.0002.0025.0093",
             "similarity": 0.814,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.874737,
+            "lexical_score": 0.125,
+            "branch_score": 0.065131,
+            "parent_score": 0.812
           },
           {
             "code": "0004.0015.0155.0947.0070",
@@ -5778,7 +6002,11 @@
             "full_path": "Оборона, безопасность, законность / Оборона / Военная служба / Установление места нахождения военнослужащих. Просьбы родственников об адресах военнослужащих / СК России",
             "parent_code": "0004.0015.0155.0947",
             "similarity": 0.817,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.87384,
+            "lexical_score": 0.041667,
+            "branch_score": 0.183196,
+            "parent_score": 0.817
           },
           {
             "code": "0004.0015.0155.0947.0069",
@@ -5787,7 +6015,11 @@
             "full_path": "Оборона, безопасность, законность / Оборона / Военная служба / Установление места нахождения военнослужащих. Просьбы родственников об адресах военнослужащих / Росгвардия",
             "parent_code": "0004.0015.0155.0947",
             "similarity": 0.817,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.87384,
+            "lexical_score": 0.041667,
+            "branch_score": 0.183196,
+            "parent_score": 0.817
           },
           {
             "code": "0002.0004.0051.0240",
@@ -5796,7 +6028,11 @@
             "full_path": "Социальная сфера / Семья / Охрана семьи, материнства, отцовства и детства / Выплата пособий и компенсаций на ребенка",
             "parent_code": "0002.0004.0051.0000",
             "similarity": 0.815,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.873323,
+            "lexical_score": 0.083333,
+            "branch_score": 0.117663,
+            "parent_score": 0.811
           },
           {
             "code": "0004.0015.0155.0933",
@@ -5805,7 +6041,11 @@
             "full_path": "Оборона, безопасность, законность / Оборона / Военная служба / Продление срока службы",
             "parent_code": "0004.0015.0155.0000",
             "similarity": 0.811,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.87244,
+            "lexical_score": 0.083333,
+            "branch_score": 0.183196,
+            "parent_score": 0.807
           }
         ],
         "llm_codes": [
@@ -5815,10 +6055,10 @@
         "first_expected_rank_reranked": 1,
         "stage_timings": {
           "segmentation": null,
-          "dense_retrieval": 0.45,
+          "dense_retrieval": 0.62,
           "rerank": null,
-          "classification": 12.558,
-          "total": 13.007
+          "classification": 14.226,
+          "total": 14.846
         }
       }
     },
@@ -5843,21 +6083,21 @@
       "expected_codes": [
         "0003.0009.0096.0684.0107"
       ],
-      "confidence": 0.92,
-      "needs_verification": false,
+      "confidence": 0.62,
+      "needs_verification": true,
       "invalid_llm_codes": [],
       "retrieval_recall_at_10": false,
       "retrieval_recall_at_50": true,
       "reranked_recall_at_10": true,
       "first_expected_rank_dense": 42,
       "first_expected_rank_reranked": 7,
-      "elapsed": 24.97,
+      "elapsed": 15.13,
       "stage_timings": {
         "segmentation": null,
-        "dense_retrieval": 0.467,
+        "dense_retrieval": 0.33,
         "rerank": null,
-        "classification": 24.503,
-        "total": 24.97
+        "classification": 14.798,
+        "total": 15.129
       },
       "debug": {
         "expected_codes": [
@@ -6694,7 +6934,11 @@
             "full_path": "Экономика / Хозяйственная деятельность / Строительство / Прохождение разрешительных процедур на капитальное строительство",
             "parent_code": "0003.0009.0096.0000",
             "similarity": 0.808,
-            "source": "lexical"
+            "source": "lexical",
+            "rerank_score": 0.891023,
+            "lexical_score": 0.190476,
+            "branch_score": 0.344107,
+            "parent_score": 0.824
           },
           {
             "code": "0003.0009.0096.0682",
@@ -6703,7 +6947,11 @@
             "full_path": "Экономика / Хозяйственная деятельность / Строительство / Жилищное строительство",
             "parent_code": "0003.0009.0096.0000",
             "similarity": 0.818,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.889594,
+            "lexical_score": 0.095238,
+            "branch_score": 0.344107,
+            "parent_score": 0.824
           },
           {
             "code": "0003.0009.0096.0677",
@@ -6712,7 +6960,11 @@
             "full_path": "Экономика / Хозяйственная деятельность / Строительство / Деятельность в сфере строительства. Сооружение зданий, объектов капитального строительства",
             "parent_code": "0003.0009.0096.0000",
             "similarity": 0.801,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.878308,
+            "lexical_score": 0.142857,
+            "branch_score": 0.344107,
+            "parent_score": 0.824
           },
           {
             "code": "0003.0009.0096.0678",
@@ -6721,7 +6973,11 @@
             "full_path": "Экономика / Хозяйственная деятельность / Строительство / Согласование строительства",
             "parent_code": "0003.0009.0096.0000",
             "similarity": 0.81,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.87588,
+            "lexical_score": 0.047619,
+            "branch_score": 0.344107,
+            "parent_score": 0.824
           },
           {
             "code": "0003.0009.0096.0680",
@@ -6730,7 +6986,11 @@
             "full_path": "Экономика / Хозяйственная деятельность / Строительство / Инвестиции в строительство",
             "parent_code": "0003.0009.0096.0000",
             "similarity": 0.803,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.874594,
+            "lexical_score": 0.095238,
+            "branch_score": 0.344107,
+            "parent_score": 0.824
           },
           {
             "code": "0003.0009.0096.0681",
@@ -6739,7 +6999,11 @@
             "full_path": "Экономика / Хозяйственная деятельность / Строительство / Строительные организации, застройщики",
             "parent_code": "0003.0009.0096.0000",
             "similarity": 0.808,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.87388,
+            "lexical_score": 0.047619,
+            "branch_score": 0.344107,
+            "parent_score": 0.824
           },
           {
             "code": "0003.0009.0096.0684.0107",
@@ -6748,7 +7012,11 @@
             "full_path": "Экономика / Хозяйственная деятельность / Строительство / Строительство и реконструкция дорог / строительство дорог",
             "parent_code": "0003.0009.0096.0684",
             "similarity": 0.802,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.872674,
+            "lexical_score": 0.095238,
+            "branch_score": 0.344107,
+            "parent_score": 0.801
           },
           {
             "code": "0003.0009.0096.0684",
@@ -6757,7 +7025,11 @@
             "full_path": "Экономика / Хозяйственная деятельность / Строительство / Строительство и реконструкция дорог",
             "parent_code": "0003.0009.0096.0000",
             "similarity": 0.801,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.872594,
+            "lexical_score": 0.095238,
+            "branch_score": 0.344107,
+            "parent_score": 0.824
           },
           {
             "code": "0003.0009.0096.0679",
@@ -6766,7 +7038,11 @@
             "full_path": "Экономика / Хозяйственная деятельность / Строительство / Государственный кадастровый учет недвижимого имущества",
             "parent_code": "0003.0009.0096.0000",
             "similarity": 0.806,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.87188,
+            "lexical_score": 0.047619,
+            "branch_score": 0.344107,
+            "parent_score": 0.824
           },
           {
             "code": "0003.0009.0096.0674",
@@ -6775,7 +7051,11 @@
             "full_path": "Экономика / Хозяйственная деятельность / Строительство / Нормативное правовое регулирование строительной деятельности",
             "parent_code": "0003.0009.0096.0000",
             "similarity": 0.804,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.86988,
+            "lexical_score": 0.047619,
+            "branch_score": 0.344107,
+            "parent_score": 0.824
           }
         ],
         "llm_codes": [
@@ -6785,10 +7065,10 @@
         "first_expected_rank_reranked": 7,
         "stage_timings": {
           "segmentation": null,
-          "dense_retrieval": 0.467,
+          "dense_retrieval": 0.33,
           "rerank": null,
-          "classification": 24.503,
-          "total": 24.97
+          "classification": 14.798,
+          "total": 15.129
         }
       }
     },
@@ -6813,21 +7093,21 @@
       "expected_codes": [
         "0002.0007.0071.0282"
       ],
-      "confidence": 0.92,
-      "needs_verification": false,
+      "confidence": 0.55,
+      "needs_verification": true,
       "invalid_llm_codes": [],
       "retrieval_recall_at_10": false,
       "retrieval_recall_at_50": true,
       "reranked_recall_at_10": true,
       "first_expected_rank_dense": 19,
       "first_expected_rank_reranked": 1,
-      "elapsed": 16.53,
+      "elapsed": 13.18,
       "stage_timings": {
         "segmentation": null,
-        "dense_retrieval": 0.411,
+        "dense_retrieval": 0.361,
         "rerank": null,
-        "classification": 16.123,
-        "total": 16.534
+        "classification": 12.819,
+        "total": 13.179
       },
       "debug": {
         "expected_codes": [
@@ -7664,7 +7944,11 @@
             "full_path": "Социальная сфера / Социальное обеспечение и социальное страхование / Пенсии (за исключением международного сотрудничества) / Назначение пенсии",
             "parent_code": "0002.0007.0071.0000",
             "similarity": 0.817,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.895444,
+            "lexical_score": 0.133333,
+            "branch_score": 0.414472,
+            "parent_score": 0.793
           },
           {
             "code": "0002.0007.0071.0283",
@@ -7673,7 +7957,11 @@
             "full_path": "Социальная сфера / Социальное обеспечение и социальное страхование / Пенсии (за исключением международного сотрудничества) / Перерасчет размеров пенсий",
             "parent_code": "0002.0007.0071.0000",
             "similarity": 0.82,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.890444,
+            "lexical_score": 0.066667,
+            "branch_score": 0.414472,
+            "parent_score": 0.793
           },
           {
             "code": "0002.0007.0072.0288",
@@ -7682,7 +7970,11 @@
             "full_path": "Социальная сфера / Социальное обеспечение и социальное страхование / Пособия. Компенсационные выплаты (за исключением международного сотрудничества) / Просьбы об оказании финансовой помощи",
             "parent_code": "0002.0007.0072.0000",
             "similarity": 0.82,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.890444,
+            "lexical_score": 0.066667,
+            "branch_score": 0.414472,
+            "parent_score": 0.793
           },
           {
             "code": "0002.0007.0071.0283.0026",
@@ -7691,7 +7983,11 @@
             "full_path": "Социальная сфера / Социальное обеспечение и социальное страхование / Пенсии (за исключением международного сотрудничества) / Перерасчет размеров пенсий / по инвалидности",
             "parent_code": "0002.0007.0071.0283",
             "similarity": 0.818,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.889524,
+            "lexical_score": 0.066667,
+            "branch_score": 0.414472,
+            "parent_score": 0.82
           },
           {
             "code": "0002.0007.0071.0283.0025",
@@ -7700,7 +7996,11 @@
             "full_path": "Социальная сфера / Социальное обеспечение и социальное страхование / Пенсии (за исключением международного сотрудничества) / Перерасчет размеров пенсий / по старости",
             "parent_code": "0002.0007.0071.0283",
             "similarity": 0.818,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.889524,
+            "lexical_score": 0.066667,
+            "branch_score": 0.414472,
+            "parent_score": 0.82
           },
           {
             "code": "0002.0007.0071.0282.0025",
@@ -7709,7 +8009,11 @@
             "full_path": "Социальная сфера / Социальное обеспечение и социальное страхование / Пенсии (за исключением международного сотрудничества) / Назначение пенсии / по старости",
             "parent_code": "0002.0007.0071.0282",
             "similarity": 0.818,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.889404,
+            "lexical_score": 0.066667,
+            "branch_score": 0.414472,
+            "parent_score": 0.817
           },
           {
             "code": "0003.0008.0087.0595",
@@ -7718,7 +8022,11 @@
             "full_path": "Экономика / Финансы / Банковское дело / Расчетный счет",
             "parent_code": "0003.0008.0087.0000",
             "similarity": 0.816,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.889399,
+            "lexical_score": 0.133333,
+            "branch_score": 0.295187,
+            "parent_score": 0.816
           },
           {
             "code": "0002.0007.0071.0283.0028",
@@ -7727,7 +8035,11 @@
             "full_path": "Социальная сфера / Социальное обеспечение и социальное страхование / Пенсии (за исключением международного сотрудничества) / Перерасчет размеров пенсий / за выслугу лет",
             "parent_code": "0002.0007.0071.0283",
             "similarity": 0.817,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.888524,
+            "lexical_score": 0.066667,
+            "branch_score": 0.414472,
+            "parent_score": 0.82
           },
           {
             "code": "0002.0007.0071.0282.0026",
@@ -7736,7 +8048,11 @@
             "full_path": "Социальная сфера / Социальное обеспечение и социальное страхование / Пенсии (за исключением международного сотрудничества) / Назначение пенсии / по инвалидности",
             "parent_code": "0002.0007.0071.0282",
             "similarity": 0.817,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.888404,
+            "lexical_score": 0.066667,
+            "branch_score": 0.414472,
+            "parent_score": 0.817
           },
           {
             "code": "0002.0007.0071.0282.0028",
@@ -7745,7 +8061,11 @@
             "full_path": "Социальная сфера / Социальное обеспечение и социальное страхование / Пенсии (за исключением международного сотрудничества) / Назначение пенсии / за выслугу лет",
             "parent_code": "0002.0007.0071.0282",
             "similarity": 0.815,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.886404,
+            "lexical_score": 0.066667,
+            "branch_score": 0.414472,
+            "parent_score": 0.817
           }
         ],
         "llm_codes": [
@@ -7755,10 +8075,10 @@
         "first_expected_rank_reranked": 1,
         "stage_timings": {
           "segmentation": null,
-          "dense_retrieval": 0.411,
+          "dense_retrieval": 0.361,
           "rerank": null,
-          "classification": 16.123,
-          "total": 16.534
+          "classification": 12.819,
+          "total": 13.179
         }
       }
     },
@@ -7767,9 +8087,9 @@
       "title": "Предложение по благоустройству сквера",
       "status": "OK",
       "vid_correct": true,
-      "top1_correct": true,
-      "top3_correct": true,
-      "top5_correct": true,
+      "top1_correct": false,
+      "top3_correct": false,
+      "top5_correct": false,
       "prefix_correct": true,
       "prefix_level1": true,
       "prefix_level2": true,
@@ -7778,26 +8098,26 @@
       "questions_count": 1,
       "agent_vid": "Предложение",
       "agent_codes": [
-        "0003.0009.0097.0689"
+        "0003.0009.0097.0699"
       ],
       "expected_codes": [
         "0003.0009.0097.0689"
       ],
-      "confidence": 0.92,
-      "needs_verification": false,
+      "confidence": 0.55,
+      "needs_verification": true,
       "invalid_llm_codes": [],
       "retrieval_recall_at_10": true,
       "retrieval_recall_at_50": true,
       "reranked_recall_at_10": true,
       "first_expected_rank_dense": 1,
       "first_expected_rank_reranked": 1,
-      "elapsed": 13.01,
+      "elapsed": 13.52,
       "stage_timings": {
         "segmentation": null,
-        "dense_retrieval": 0.382,
+        "dense_retrieval": 0.387,
         "rerank": null,
-        "classification": 12.626,
-        "total": 13.008
+        "classification": 13.137,
+        "total": 13.524
       },
       "debug": {
         "expected_codes": [
@@ -8634,7 +8954,11 @@
             "full_path": "Экономика / Хозяйственная деятельность / Градостроительство и архитектура / Комплексное благоустройство",
             "parent_code": "0003.0009.0097.0000",
             "similarity": 0.824,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.885554,
+            "lexical_score": 0.0,
+            "branch_score": 0.384681,
+            "parent_score": 0.808
           },
           {
             "code": "0003.0009.0097.0690",
@@ -8643,7 +8967,11 @@
             "full_path": "Экономика / Хозяйственная деятельность / Градостроительство и архитектура / Уличное освещение",
             "parent_code": "0003.0009.0097.0000",
             "similarity": 0.813,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.885463,
+            "lexical_score": 0.090909,
+            "branch_score": 0.384681,
+            "parent_score": 0.808
           },
           {
             "code": "0003.0009.0096.0684.0108",
@@ -8652,7 +8980,11 @@
             "full_path": "Экономика / Хозяйственная деятельность / Строительство / Строительство и реконструкция дорог / реконструкция дорог",
             "parent_code": "0003.0009.0096.0684",
             "similarity": 0.809,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.881463,
+            "lexical_score": 0.090909,
+            "branch_score": 0.384681,
+            "parent_score": 0.808
           },
           {
             "code": "0003.0009.0096.0684",
@@ -8661,7 +8993,11 @@
             "full_path": "Экономика / Хозяйственная деятельность / Строительство / Строительство и реконструкция дорог",
             "parent_code": "0003.0009.0096.0000",
             "similarity": 0.808,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.880463,
+            "lexical_score": 0.090909,
+            "branch_score": 0.384681,
+            "parent_score": 0.808
           },
           {
             "code": "0003.0009.0097.0699",
@@ -8670,7 +9006,11 @@
             "full_path": "Экономика / Хозяйственная деятельность / Градостроительство и архитектура / Благоустройство и ремонт подъездных дорог, в том числе тротуаров",
             "parent_code": "0003.0009.0097.0000",
             "similarity": 0.818,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.879554,
+            "lexical_score": 0.0,
+            "branch_score": 0.384681,
+            "parent_score": 0.808
           },
           {
             "code": "0003.0009.0097.0692",
@@ -8679,7 +9019,11 @@
             "full_path": "Экономика / Хозяйственная деятельность / Градостроительство и архитектура / Озеленение",
             "parent_code": "0003.0009.0097.0000",
             "similarity": 0.817,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.878554,
+            "lexical_score": 0.0,
+            "branch_score": 0.384681,
+            "parent_score": 0.808
           },
           {
             "code": "0003.0009.0096.0684.0107",
@@ -8688,7 +9032,11 @@
             "full_path": "Экономика / Хозяйственная деятельность / Строительство / Строительство и реконструкция дорог / строительство дорог",
             "parent_code": "0003.0009.0096.0684",
             "similarity": 0.805,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.872009,
+            "lexical_score": 0.045455,
+            "branch_score": 0.384681,
+            "parent_score": 0.808
           },
           {
             "code": "0003.0009.0097.0698",
@@ -8697,7 +9045,11 @@
             "full_path": "Экономика / Хозяйственная деятельность / Градостроительство и архитектура / Организация условий и мест для детского отдыха и досуга (детских и спортивных площадок)",
             "parent_code": "0003.0009.0097.0000",
             "similarity": 0.808,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.869554,
+            "lexical_score": 0.0,
+            "branch_score": 0.384681,
+            "parent_score": 0.808
           },
           {
             "code": "0003.0009.0097.0703",
@@ -8706,7 +9058,11 @@
             "full_path": "Экономика / Хозяйственная деятельность / Градостроительство и архитектура / Газификация поселений",
             "parent_code": "0003.0009.0097.0000",
             "similarity": 0.807,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.868554,
+            "lexical_score": 0.0,
+            "branch_score": 0.384681,
+            "parent_score": 0.808
           },
           {
             "code": "0003.0009.0097.0702",
@@ -8715,20 +9071,24 @@
             "full_path": "Экономика / Хозяйственная деятельность / Градостроительство и архитектура / Электрификация поселений",
             "parent_code": "0003.0009.0097.0000",
             "similarity": 0.807,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.868554,
+            "lexical_score": 0.0,
+            "branch_score": 0.384681,
+            "parent_score": 0.808
           }
         ],
         "llm_codes": [
-          "0003.0009.0097.0689"
+          "0003.0009.0097.0699"
         ],
         "first_expected_rank_dense": 1,
         "first_expected_rank_reranked": 1,
         "stage_timings": {
           "segmentation": null,
-          "dense_retrieval": 0.382,
+          "dense_retrieval": 0.387,
           "rerank": null,
-          "classification": 12.626,
-          "total": 13.008
+          "classification": 13.137,
+          "total": 13.524
         }
       }
     },
@@ -8738,19 +9098,18 @@
       "status": "OK",
       "vid_correct": true,
       "top1_correct": false,
-      "top3_correct": false,
+      "top3_correct": true,
       "top5_correct": true,
       "prefix_correct": true,
       "prefix_level1": true,
       "prefix_level2": true,
-      "prefix_level3": false,
-      "questions_count_match": false,
-      "questions_count": 4,
+      "prefix_level3": true,
+      "questions_count_match": true,
+      "questions_count": 3,
       "agent_vid": "Жалоба",
       "agent_codes": [
-        "0005.0005.0054.1119",
         "0005.0005.0056.1156",
-        "0005.0005.0056.1170",
+        "0005.0005.0060.1185",
         "0003.0009.0097.0699"
       ],
       "expected_codes": [
@@ -8758,21 +9117,21 @@
         "0003.0009.0099.0742.0110",
         "0003.0009.0097.0699"
       ],
-      "confidence": 0.887,
-      "needs_verification": false,
+      "confidence": 0.517,
+      "needs_verification": true,
       "invalid_llm_codes": [],
       "retrieval_recall_at_10": true,
       "retrieval_recall_at_50": true,
       "reranked_recall_at_10": true,
       "first_expected_rank_dense": 5,
       "first_expected_rank_reranked": 7,
-      "elapsed": 44.49,
+      "elapsed": 25.79,
       "stage_timings": {
         "segmentation": null,
-        "dense_retrieval": 0.603,
+        "dense_retrieval": 0.508,
         "rerank": null,
-        "classification": 43.883,
-        "total": 44.485
+        "classification": 25.282,
+        "total": 25.79
       },
       "debug": {
         "expected_codes": [
@@ -9611,7 +9970,11 @@
             "full_path": "Жилищно-коммунальная сфера / Жилище / Коммунальное хозяйство / Капитальный ремонт общего имущества",
             "parent_code": "0005.0005.0056.0000",
             "similarity": 0.816,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.894451,
+            "lexical_score": 0.114286,
+            "branch_score": 0.453138,
+            "parent_score": 0.802
           },
           {
             "code": "0005.0005.0056.1156",
@@ -9620,7 +9983,11 @@
             "full_path": "Жилищно-коммунальная сфера / Жилище / Коммунальное хозяйство / Перебои в теплоснабжении",
             "parent_code": "0005.0005.0056.0000",
             "similarity": 0.827,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.891737,
+            "lexical_score": 0.0,
+            "branch_score": 0.453138,
+            "parent_score": 0.802
           },
           {
             "code": "0005.0005.0054.1119",
@@ -9629,7 +9996,11 @@
             "full_path": "Жилищно-коммунальная сфера / Жилище / Жилищный фонд / Вопросы частного домовладения",
             "parent_code": "0005.0005.0054.0000",
             "similarity": 0.818,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.889554,
+            "lexical_score": 0.057143,
+            "branch_score": 0.453138,
+            "parent_score": 0.801
           },
           {
             "code": "0005.0005.0056.1154",
@@ -9638,7 +10009,11 @@
             "full_path": "Жилищно-коммунальная сфера / Жилище / Коммунальное хозяйство / Перебои в водоснабжении",
             "parent_code": "0005.0005.0056.0000",
             "similarity": 0.82,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.884737,
+            "lexical_score": 0.0,
+            "branch_score": 0.453138,
+            "parent_score": 0.802
           },
           {
             "code": "0005.0005.0056.1171",
@@ -9647,7 +10022,11 @@
             "full_path": "Жилищно-коммунальная сфера / Жилище / Коммунальное хозяйство / Включение многоквартирного дома в региональную программу капитального ремонта многоквартирных домов",
             "parent_code": "0005.0005.0056.0000",
             "similarity": 0.805,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.883451,
+            "lexical_score": 0.114286,
+            "branch_score": 0.453138,
+            "parent_score": 0.802
           },
           {
             "code": "0005.0005.0056.1155",
@@ -9656,7 +10035,11 @@
             "full_path": "Жилищно-коммунальная сфера / Жилище / Коммунальное хозяйство / Перебои в газоснабжении",
             "parent_code": "0005.0005.0056.0000",
             "similarity": 0.818,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.882737,
+            "lexical_score": 0.0,
+            "branch_score": 0.453138,
+            "parent_score": 0.802
           },
           {
             "code": "0005.0005.0056.1153",
@@ -9665,7 +10048,11 @@
             "full_path": "Жилищно-коммунальная сфера / Жилище / Коммунальное хозяйство / Перебои в электроснабжении",
             "parent_code": "0005.0005.0056.0000",
             "similarity": 0.817,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.881737,
+            "lexical_score": 0.0,
+            "branch_score": 0.453138,
+            "parent_score": 0.802
           },
           {
             "code": "0005.0005.0056.1157",
@@ -9674,7 +10061,11 @@
             "full_path": "Жилищно-коммунальная сфера / Жилище / Коммунальное хозяйство / Перебои в водоотведении и канализовании",
             "parent_code": "0005.0005.0056.0000",
             "similarity": 0.816,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.880737,
+            "lexical_score": 0.0,
+            "branch_score": 0.453138,
+            "parent_score": 0.802
           },
           {
             "code": "0005.0005.0056.1149",
@@ -9683,7 +10074,11 @@
             "full_path": "Жилищно-коммунальная сфера / Жилище / Коммунальное хозяйство / Оплата жилищно-коммунальных услуг (ЖКХ), взносов в Фонд капитального ремонта",
             "parent_code": "0005.0005.0056.0000",
             "similarity": 0.799,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.877451,
+            "lexical_score": 0.114286,
+            "branch_score": 0.453138,
+            "parent_score": 0.802
           },
           {
             "code": "0003.0009.0097.0699",
@@ -9692,23 +10087,26 @@
             "full_path": "Экономика / Хозяйственная деятельность / Градостроительство и архитектура / Благоустройство и ремонт подъездных дорог, в том числе тротуаров",
             "parent_code": "0003.0009.0097.0000",
             "similarity": 0.811,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.869855,
+            "lexical_score": 0.057143,
+            "branch_score": 0.198348,
+            "parent_score": 0.802
           }
         ],
         "llm_codes": [
-          "0005.0005.0054.1119",
           "0005.0005.0056.1156",
-          "0005.0005.0056.1170",
+          "0005.0005.0060.1185",
           "0003.0009.0097.0699"
         ],
         "first_expected_rank_dense": 5,
         "first_expected_rank_reranked": 7,
         "stage_timings": {
           "segmentation": null,
-          "dense_retrieval": 0.603,
+          "dense_retrieval": 0.508,
           "rerank": null,
-          "classification": 43.883,
-          "total": 44.485
+          "classification": 25.282,
+          "total": 25.79
         }
       }
     },
@@ -9740,21 +10138,21 @@
         "0002.0007.0070.0281",
         "0002.0007.0074.0320"
       ],
-      "confidence": 0.884,
-      "needs_verification": false,
+      "confidence": 0.634,
+      "needs_verification": true,
       "invalid_llm_codes": [],
       "retrieval_recall_at_10": false,
       "retrieval_recall_at_50": true,
       "reranked_recall_at_10": false,
       "first_expected_rank_dense": 32,
       "first_expected_rank_reranked": null,
-      "elapsed": 95.88,
+      "elapsed": 87.48,
       "stage_timings": {
         "segmentation": null,
-        "dense_retrieval": 0.613,
+        "dense_retrieval": 0.619,
         "rerank": null,
-        "classification": 95.263,
-        "total": 95.877
+        "classification": 86.865,
+        "total": 87.484
       },
       "debug": {
         "expected_codes": [
@@ -10594,7 +10992,11 @@
             "full_path": "Оборона, безопасность, законность / Оборона / Военная служба / Установление места нахождения военнослужащих. Просьбы родственников об адресах военнослужащих / иные войска и органы",
             "parent_code": "0004.0015.0155.0947",
             "similarity": 0.815,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.867647,
+            "lexical_score": 0.0,
+            "branch_score": 0.19773,
+            "parent_score": 0.819
           },
           {
             "code": "0004.0015.0155.0947.0068",
@@ -10603,7 +11005,11 @@
             "full_path": "Оборона, безопасность, законность / Оборона / Военная служба / Установление места нахождения военнослужащих. Просьбы родственников об адресах военнослужащих / СВР России",
             "parent_code": "0004.0015.0155.0947",
             "similarity": 0.815,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.867647,
+            "lexical_score": 0.0,
+            "branch_score": 0.19773,
+            "parent_score": 0.819
           },
           {
             "code": "0004.0015.0155.0947.0069",
@@ -10612,7 +11018,11 @@
             "full_path": "Оборона, безопасность, законность / Оборона / Военная служба / Установление места нахождения военнослужащих. Просьбы родственников об адресах военнослужащих / Росгвардия",
             "parent_code": "0004.0015.0155.0947",
             "similarity": 0.815,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.867647,
+            "lexical_score": 0.0,
+            "branch_score": 0.19773,
+            "parent_score": 0.819
           },
           {
             "code": "0004.0015.0155.0947.0065",
@@ -10621,7 +11031,11 @@
             "full_path": "Оборона, безопасность, законность / Оборона / Военная служба / Установление места нахождения военнослужащих. Просьбы родственников об адресах военнослужащих / МЧС России",
             "parent_code": "0004.0015.0155.0947",
             "similarity": 0.814,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.866647,
+            "lexical_score": 0.0,
+            "branch_score": 0.19773,
+            "parent_score": 0.819
           },
           {
             "code": "0004.0015.0155.0947.0070",
@@ -10630,7 +11044,11 @@
             "full_path": "Оборона, безопасность, законность / Оборона / Военная служба / Установление места нахождения военнослужащих. Просьбы родственников об адресах военнослужащих / СК России",
             "parent_code": "0004.0015.0155.0947",
             "similarity": 0.813,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.865647,
+            "lexical_score": 0.0,
+            "branch_score": 0.19773,
+            "parent_score": 0.819
           },
           {
             "code": "0004.0015.0155.0947.0064",
@@ -10639,7 +11057,11 @@
             "full_path": "Оборона, безопасность, законность / Оборона / Военная служба / Установление места нахождения военнослужащих. Просьбы родственников об адресах военнослужащих / Минобороны России",
             "parent_code": "0004.0015.0155.0947",
             "similarity": 0.813,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.865647,
+            "lexical_score": 0.0,
+            "branch_score": 0.19773,
+            "parent_score": 0.819
           },
           {
             "code": "0004.0015.0154.0927",
@@ -10648,7 +11070,11 @@
             "full_path": "Оборона, безопасность, законность / Оборона / Воинская обязанность / Порядок призыва",
             "parent_code": "0004.0015.0154.0000",
             "similarity": 0.812,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.864287,
+            "lexical_score": 0.0,
+            "branch_score": 0.19773,
+            "parent_score": 0.81
           },
           {
             "code": "0004.0019.0181.1115",
@@ -10657,7 +11083,11 @@
             "full_path": "Оборона, безопасность, законность / Прокуратура. Органы юстиции. Адвокатура. Нотариат / Нотариат / Право на наследство",
             "parent_code": "0004.0019.0181.0000",
             "similarity": 0.815,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.861325,
+            "lexical_score": 0.0,
+            "branch_score": 0.079304,
+            "parent_score": 0.809
           },
           {
             "code": "0004.0015.0155.0947.0067",
@@ -10666,7 +11096,11 @@
             "full_path": "Оборона, безопасность, законность / Оборона / Военная служба / Установление места нахождения военнослужащих. Просьбы родственников об адресах военнослужащих / ФСО России",
             "parent_code": "0004.0015.0155.0947",
             "similarity": 0.808,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.860647,
+            "lexical_score": 0.0,
+            "branch_score": 0.19773,
+            "parent_score": 0.819
           },
           {
             "code": "0002.0007.0070.0000",
@@ -10675,7 +11109,11 @@
             "full_path": "Социальная сфера / Социальное обеспечение и социальное страхование / Установление инвалидности, временной нетрудоспособности",
             "parent_code": "0002.0007.0000.0000",
             "similarity": 0.817,
-            "source": "dense"
+            "source": "dense",
+            "rerank_score": 0.860571,
+            "lexical_score": 0.032258,
+            "branch_score": 0.143597,
+            "parent_score": 0.813
           }
         ],
         "llm_codes": [
@@ -10689,10 +11127,10 @@
         "first_expected_rank_reranked": null,
         "stage_timings": {
           "segmentation": null,
-          "dense_retrieval": 0.613,
+          "dense_retrieval": 0.619,
           "rerank": null,
-          "classification": 95.263,
-          "total": 95.877
+          "classification": 86.865,
+          "total": 87.484
         }
       }
     }
@@ -10702,19 +11140,19 @@
     "errors": 0,
     "ok": 11,
     "vid_correct": 10,
-    "top1_correct": 5,
+    "top1_correct": 4,
     "top3_correct": 5,
-    "top5_correct": 7,
+    "top5_correct": 6,
     "prefix_correct": 11,
     "prefix_level1": 11,
     "prefix_level2": 11,
-    "prefix_level3": 9,
+    "prefix_level3": 10,
     "retrieval_recall_at_10": 5,
     "retrieval_recall_at_50": 10,
     "reranked_recall_at_10": 9,
-    "needs_verification": 0,
+    "needs_verification": 8,
     "invalid_llm_code_count": 0,
-    "avg_confidence": 0.9191818181818182,
-    "avg_time": 26.595454545454547
+    "avg_confidence": 0.6837272727272727,
+    "avg_time": 21.707272727272724
   }
 }

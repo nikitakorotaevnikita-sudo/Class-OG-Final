@@ -298,33 +298,66 @@ python src/auto_import_historical.py --watch     # слежение за пап�
 
 ## Результаты оценки точности (2026-05-26)
 
-Прогресс после EPIC-08 (per-question segmentation + hierarchy-aware reranking):
+Прогресс после EPIC-08 (per-question segmentation + hierarchy-aware reranking + section routing):
 
-| Метрика | v1 (2026-04-22) | v2 baseline | **v2 + hierarchy** | Цель MVP |
+### Синтетические 11 фикстур (`tests/fixtures/test_appeals.json`)
+
+| Метрика | v1 (Apr-22) | v2 baseline | **+ hierarchy + routing** | Цель MVP |
 |---|---:|---:|---:|---|
 | Точность вида обращения | 90.0% | 90.9% | **90.9%** | >= 90% ✅ |
 | Prefix L1 (раздел) | 90.0% | 100% | **100%** | >= 85% ✅ |
-| Prefix L2 (подраздел) | — | 90.9% | **90.9%** | — |
-| **Exact Top-1** | 40.0% | 63.6% | **72.7%** | >= 70% ✅ |
-| **Exact Top-3** | 40.0% | 63.6% | **72.7%** | >= 85% ⚠ |
-| **Exact Top-5** | — | 72.7% | **81.8%** | — |
-| Reranked recall@10 | — | 81.8% | 81.8% | — |
-| Среднее время | 5.0 сек | 22.2 сек | **13.6 сек** | <= 8 сек ⚠ |
+| Prefix L2 (подраздел) | — | 90.9% | **100%** | — |
+| **Exact Top-1** | 40.0% | 63.6% | 45.5% | >= 70% ⚠ |
+| **Exact Top-3** | 40.0% | 63.6% | 45.5% | >= 85% ⚠ |
+| Среднее время | 5.0 сек | 22.2 сек | ~25 сек | <= 8 сек ⚠ |
 
-**Что дало прирост:**
-1. **Per-question segmentation** (+13.6 pp Top-1) — главный прорыв; решил проблему многовопросных обращений, где все вопросы получали один fallback-код.
-2. **Hierarchy-aware reranking** (+9 pp Top-1) — branch agreement + parent similarity boost; решил случай детсада, где правильный код вообще не попадал в top-50 dense.
+### Real-12 — экспертная разметка из xlsx (`tests/fixtures/test_appeals_real12.json`)
 
-**Что осталось:**
-- Top-3 не достиг цели 85% из-за sibling-кодов (выбор между `0282` и `0284` в одной L4-ветке). Лечится fine-tuning эмбеддера на размеченных данных.
-- Среднее время 13.6с не достигло цели 8с из-за per-question retrieval (N запросов вместо 1). Можно ускорить батчингом embedding-запросов.
+| Метрика | Baseline (без routing) | **С section routing** |
+|---|---:|---:|
+| Prefix L1 | 72.7% | **81.8%** |
+| Prefix L2 | 72.7% | 81.8% |
+| Prefix L3 | 54.5% | 72.7% |
+| **Exact Top-1** | 18.2% | **54.5%** (+36 pp, 3x) |
+
+### 🆕 ИИ25 dataset (99 кейсов: 43 train + 56 test) — `data/ii25_*.jsonl`
+
+Источник: папка `C:\Users\Korotaev_NO\Desktop\Проекты\ИИ25` с .docx-файлами, в которых коды зашиты в имена файлов (например `03-689.docx → 0003.0009.0097.0689`). Импортирован через [scripts/import_ii25_dataset.py](scripts/import_ii25_dataset.py).
+
+**Распределение по разделам (всего 99):** Раздел 1 = 2 | 2 = 24 | **3 = 45** | 4 = 6 | 5 = 22. Доминирует Экономика (Хозяйственная деятельность).
+
+**Retrieval-only метрики на ii25_test (56 кейсов, БЕЗ LLM и БЕЗ section routing):**
+
+| Метрика | Значение |
+|---|---:|
+| Dense recall@10 | 37.5% |
+| **Dense recall@50** | **51.8%** ⚠ |
+| Lexical recall@30 | 14.3% |
+| Reranked Top-1 | 10.7% |
+| Reranked Top-3 | 16.1% |
+| **Prefix L1 Top-1** | **57.1%** |
+| Prefix L2 Top-1 | 46.4% |
+| Prefix L3 Top-1 | 37.5% |
+
+**Ключевое наблюдение:** Dense recall@50 = только **52%** — embedder в половине случаев НЕ находит правильный код даже в top-50. Это потолок embedder'а; никакой reranker / LLM / routing этого не исправит. **Fine-tuning эмбеддера на 43 train-парах ИИ25 + 269 verified из appeals_log — следующий главный шаг.**
+
+End-to-end метрика (с LLM + section routing) на ii25_test пока не измерена — это первое что нужно сделать в новой сессии.
+
+Подробные отчёты:
+- [docs/accuracy_report_v2.md](docs/accuracy_report_v2.md) — последний eval (перезаписывается)
+- [docs/ii25_retrieval_report.md](docs/ii25_retrieval_report.md) — отчёт retrieval-only на ии25
+- [data/ii25_report.json](data/ii25_report.json) — статистика по датасету
+- [docs/HANDOFF_classification_quality.md](docs/HANDOFF_classification_quality.md) — план для следующего шага
+
+**Что дало прирост Top-1:**
+1. **Per-question segmentation** — решил проблему многовопросных обращений (+13.6 pp на синтетике)
+2. **Hierarchy-aware reranking** — branch agreement + parent similarity boost
+3. **Section routing** (главное на real data) — отдельный LLM-вызов выбирает 1-3 тематики из 21 по описаниям из методички УПП РФ → фильтрация retrieval → +36 pp Top-1 на real-12
 
 **Путь дальнейшего улучшения:**
-- Расширенный fixture-набор (50+ кейсов) для надёжных метрик
-- Fine-tuning эмбеддера на накопленных верификациях + аннотациях
-- Опционально включить CrossEncoder (`ENABLE_CROSS_ENCODER_RERANKER=true`) для дальнейшего пересортирования top-30
-
-Подробный анализ ошибок — [docs/accuracy_report_v2.md](docs/accuracy_report_v2.md).
+- **Fine-tuning эмбеддера** на ии25_train (43) + appeals_log verified (~269) + historical (40) — должно повысить Dense recall@50 с 52% до 80%+
+- Расширение fixture-набора через скрипт импорта (формат: код в имени файла)
+- Опционально включить CrossEncoder (`ENABLE_CROSS_ENCODER_RERANKER=true`)
 
 ---
 
@@ -595,7 +628,7 @@ curl http://localhost:8000/health
 ## Тесты
 
 ```bash
-# Все тесты
+# Все unit-тесты
 python -m pytest tests/
 
 # Сегментация многовопросных обращений
@@ -604,23 +637,30 @@ python -m pytest tests/test_question_segmentation.py
 # Hierarchy-утилиты (branch agreement, parent boost)
 python -m pytest tests/test_hierarchy.py
 
+# Section router prompt (новый — проверка структуры каталога)
+python -m pytest tests/test_section_router_prompt.py
+
+# Strict validation (новый)
+python -m pytest tests/test_strict_validation.py
+
+# Импорт ии25 датасета (новый)
+python -m pytest tests/test_import_ii25_dataset.py
+
 # Метрики eval (Top-K, prefix-accuracy)
 python -m pytest tests/test_eval_metrics_helpers.py
 
 # Регрессия: 5-вопросное обращение из эксплуатации
 python tests/verify_5question_fix.py
 
-# Поиск по классификатору
-python -m pytest tests/test_search.py
-
-# API-эндпоинты
-python -m pytest tests/test_api_endpoints.py
-
-# Парсер исторических данных
-python -m pytest tests/test_historical_loader.py
-
-# Полная оценка точности
+# Полная оценка точности (LLM + retrieval + routing)
 python tests/eval_accuracy.py --fixtures tests/fixtures/test_appeals.json
+python tests/eval_accuracy.py --fixtures tests/fixtures/test_appeals_real12.json
+
+# Retrieval-only оценка на ии25 датасете (без LLM, быстро)
+python tests/eval_ii25_retrieval.py --dataset data/ii25_test.jsonl
+
+# Импорт нового датасета из папки с .docx-файлами
+python scripts/import_ii25_dataset.py --source "C:\path\to\dataset_folder"
 ```
 
 ---
@@ -633,5 +673,7 @@ python tests/eval_accuracy.py --fixtures tests/fixtures/test_appeals.json
 | [INTEGRATION.md](docs/INTEGRATION.md) | API-контракт для команды Directum RX |
 | [FINETUNING.md](docs/FINETUNING.md) | Как запустить и интерпретировать дообучение |
 | [accuracy_report_v1.md](docs/accuracy_report_v1.md) | Отчёт оценки точности v1 (10 обращений, 2026-04-22) |
-| [accuracy_report_v2.md](docs/accuracy_report_v2.md) | Отчёт точности v2 (11 фикстур, после EPIC-08 + hierarchy) |
+| [accuracy_report_v2.md](docs/accuracy_report_v2.md) | Отчёт точности v2 (последний прогон eval, перезаписывается) |
+| [ii25_retrieval_report.md](docs/ii25_retrieval_report.md) | Retrieval-only метрики на 56 кейсах ии25 |
+| [HANDOFF_classification_quality.md](docs/HANDOFF_classification_quality.md) | **Handoff для следующего агента** — текущее состояние + приоритетные задачи |
 | [docs/superpowers/plans/](docs/superpowers/plans/) | План EPIC-08 (повышение точности классификации) |

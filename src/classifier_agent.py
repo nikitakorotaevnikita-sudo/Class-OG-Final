@@ -475,7 +475,12 @@ class ClassifierAgent:
                 + HIERARCHY_BRANCH_WEIGHT * branch_score
                 + HIERARCHY_PARENT_WEIGHT * parent_score
             )
-            scored.append((combined_score, idx, candidate))
+            enriched = dict(candidate)
+            enriched["rerank_score"] = round(float(combined_score), 6)
+            enriched["lexical_score"] = round(float(lexical_score), 6)
+            enriched["branch_score"] = round(float(branch_score), 6)
+            enriched["parent_score"] = round(float(parent_score), 6)
+            scored.append((combined_score, idx, enriched))
 
         scored.sort(key=lambda item: (-item[0], item[1]))
         return [candidate for _, _, candidate in scored[:top_k]]
@@ -525,6 +530,66 @@ class ClassifierAgent:
                 if float(candidate.get("similarity", 0.0)) > float(merged[code].get("similarity", 0.0)):
                     merged[code] = candidate
         return [merged[code] for code in order]
+
+    def _candidate_score(self, candidate: dict | None) -> float:
+        if not candidate:
+            return 0.0
+        return float(candidate.get("rerank_score", candidate.get("similarity", 0.0)) or 0.0)
+
+    def _calibrate_question_confidence(
+        self,
+        *,
+        llm_confidence: float,
+        selected_code: str,
+        candidates: list[dict],
+        invalid_code: bool = False,
+        duplicate_code: bool = False,
+    ) -> tuple[float, list[str]]:
+        """Make confidence reflect retrieval evidence, not only LLM self-score."""
+        confidence = max(0.0, min(1.0, float(llm_confidence or 0.0)))
+        reasons: list[str] = []
+
+        if invalid_code:
+            confidence = min(confidence, 0.45)
+            reasons.append("llm_code_outside_candidates")
+
+        if duplicate_code:
+            confidence = min(confidence, 0.50)
+            reasons.append("same_code_for_multiple_questions")
+
+        if not candidates:
+            confidence = min(confidence, 0.50)
+            reasons.append("empty_candidate_pool")
+            return confidence, reasons
+
+        selected_idx = next(
+            (idx for idx, candidate in enumerate(candidates) if candidate.get("code") == selected_code),
+            None,
+        )
+        if selected_idx is None:
+            confidence = min(confidence, 0.45)
+            reasons.append("selected_code_not_in_final_candidates")
+            return confidence, reasons
+
+        rank = selected_idx + 1
+        if rank > 1:
+            confidence = min(confidence, 0.62 if rank <= 3 else 0.55)
+            reasons.append(f"selected_candidate_rank_{rank}")
+
+        selected_score = self._candidate_score(candidates[selected_idx])
+        top_score = self._candidate_score(candidates[0])
+        margin_to_top = top_score - selected_score
+        if rank > 1 and margin_to_top >= 0.03:
+            confidence = min(confidence, 0.55)
+            reasons.append("selected_below_top_with_margin")
+
+        if len(candidates) > 1:
+            top_margin = self._candidate_score(candidates[0]) - self._candidate_score(candidates[1])
+            if rank == 1 and top_margin < 0.015:
+                confidence = min(confidence, 0.62)
+                reasons.append("low_top_margin")
+
+        return confidence, reasons
 
     def _search_candidates(self, query_text: str, top_k: int | None = None) -> list:
         """Семантический поиск кандидатов через cosine similarity (numpy)"""
@@ -1018,10 +1083,25 @@ class ClassifierAgent:
 
         # Шаг 4: Обогащение результатов + строгая валидация выбранных кодов
         classified_questions = []
+        duplicate_code_counts: dict[str, int] = {}
+        raw_selected_codes = [
+            str(q.get("selected_code", ""))
+            for q in llm_result.get("questions", [])
+            if q.get("selected_code")
+        ]
+        if len(raw_selected_codes) > 1:
+            for raw_code in raw_selected_codes:
+                duplicate_code_counts[raw_code] = duplicate_code_counts.get(raw_code, 0) + 1
+
         for q in llm_result.get("questions", []):
             ordinal = int(q.get("ordinal") or len(classified_questions) + 1)
             code = q.get("selected_code", "")
             allowed_codes = valid_code_sets.get(ordinal, set())
+            question_candidates = next(
+                (qc["candidates"] for qc in questions_with_candidates if qc["ordinal"] == ordinal),
+                [],
+            )
+            original_code = code
 
             # Strict validation: если LLM выбрал код, которого нет в кандидатах ЭТОГО вопроса —
             # подменяем на топ-1 кандидата и помечаем низкой confidence
@@ -1049,11 +1129,20 @@ class ClassifierAgent:
                     })
 
             confidence_val = float(q.get("confidence", 0.0))
+            duplicate_code = duplicate_code_counts.get(original_code, 0) > 1
+            confidence_val, verification_reasons = self._calibrate_question_confidence(
+                llm_confidence=confidence_val,
+                selected_code=code,
+                candidates=question_candidates,
+                invalid_code=invalid_code,
+                duplicate_code=duplicate_code,
+            )
+            reasoning = q.get("reasoning", "")
             if invalid_code:
-                confidence_val = min(confidence_val, 0.45)
-                reasoning = q.get("reasoning", "") + " [LLM выбрал код вне кандидатов — подменён на top-1]"
-            else:
-                reasoning = q.get("reasoning", "")
+                reasoning += " [LLM выбрал код вне кандидатов — подменён на top-1]"
+            if verification_reasons:
+                reasoning += f" [verification: {', '.join(verification_reasons)}]"
+            reasoning = reasoning.strip()
 
             classified_questions.append(ClassifiedQuestion(
                 question_text=q.get("question_text", ""),

@@ -60,7 +60,8 @@
       "Bash(ls \"c:/Users/Korotaev_NO/Desktop/\" 2>&1 | grep -i metod 2>&1 | head -10)",
       "Read(//c/Users/Korotaev_NO/Desktop/**)",
       "Bash(ENABLE_SECTION_ROUTING=true HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./venv/Scripts/python.exe tests/eval_accuracy.py --fixtures tests/fixtures/test_appeals_real12.json)",
-      "Bash(ENABLE_SECTION_ROUTING=true HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./venv/Scripts/python.exe tests/eval_accuracy.py)"
+      "Bash(ENABLE_SECTION_ROUTING=true HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 ./venv/Scripts/python.exe tests/eval_accuracy.py)",
+      "Bash(./venv/Scripts/python.exe -m pytest tests/test_import_ii25_dataset.py tests/test_section_router_prompt.py tests/test_strict_validation.py tests/test_hierarchy.py tests/test_question_segmentation.py -v --no-header)"
     ]
   }
 }

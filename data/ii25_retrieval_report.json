@@ -1,0 +1,3719 @@
+{
+  "dataset": "C:\\Users\\Korotaev_NO\\Desktop\\Проекты\\Class-OG-Final\\data\\ii25_test.jsonl",
+  "summary": {
+    "total": 56,
+    "dense_recall_at_10": 21,
+    "dense_recall_at_50": 29,
+    "lexical_recall_at_30": 8,
+    "merged_recall_at_50": 29,
+    "reranked_top1": 6,
+    "reranked_top3": 9,
+    "reranked_top5": 10,
+    "reranked_recall_at_10": 17,
+    "reranked_prefix_level1": 32,
+    "reranked_prefix_level2": 26,
+    "reranked_prefix_level3": 21,
+    "mean_dense_rank_found": 9.4,
+    "mean_lexical_rank_found": 8.6,
+    "mean_reranked_rank_found": 4.1,
+    "avg_elapsed": 0.641
+  },
+  "results": [
+    {
+      "id": "ii25_test_001",
+      "source_file": "02-300.docx",
+      "expected_code": "0002.0007.0074.0300",
+      "expected_name": "Льготы и меры социальной поддержки инвалидов",
+      "dense_rank": null,
+      "lexical_rank": null,
+      "merged_rank": null,
+      "reranked_rank": null,
+      "dense_recall_at_10": false,
+      "dense_recall_at_50": false,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": false,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": false,
+      "reranked_prefix_level2": false,
+      "reranked_prefix_level3": false,
+      "top_reranked_codes": [
+        "0005.0005.0054.1119",
+        "0005.0005.0056.1165",
+        "0005.0005.0056.1160",
+        "0005.0005.0056.1161",
+        "0005.0005.0054.1120"
+      ],
+      "top_reranked": [
+        {
+          "code": "0005.0005.0054.1119",
+          "name": "Вопросы частного домовладения",
+          "similarity": 0.823,
+          "rerank_score": 0.880331,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0056.1165",
+          "name": "Частный жилищный фонд",
+          "similarity": 0.813,
+          "rerank_score": 0.870171,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0056.1160",
+          "name": "Обращение с твердыми коммунальными отходами",
+          "similarity": 0.812,
+          "rerank_score": 0.869171,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0056.1161",
+          "name": "Несанкционированная свалка мусора, биоотходы",
+          "similarity": 0.81,
+          "rerank_score": 0.868936,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0054.1120",
+          "name": "Индивидуальное жилищное строительство",
+          "similarity": 0.811,
+          "rerank_score": 0.868331,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 3.084
+    },
+    {
+      "id": "ii25_test_002",
+      "source_file": "02-325-1.docx",
+      "expected_code": "0002.0013.0139.0325",
+      "expected_name": "Образовательные стандарты, требования к образовательному процессу",
+      "dense_rank": null,
+      "lexical_rank": null,
+      "merged_rank": null,
+      "reranked_rank": null,
+      "dense_recall_at_10": false,
+      "dense_recall_at_50": false,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": false,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": false,
+      "reranked_prefix_level2": false,
+      "reranked_prefix_level3": false,
+      "top_reranked_codes": [
+        "0004.0015.0155.0946",
+        "0004.0015.0155.0946.0064",
+        "0004.0015.0155.0946.0068",
+        "0004.0015.0155.0946.0069",
+        "0004.0015.0155.0929"
+      ],
+      "top_reranked": [
+        {
+          "code": "0004.0015.0155.0946",
+          "name": "Факты коррупции при поступлении в военные учебные заведения, на службу по контракту",
+          "similarity": 0.815,
+          "rerank_score": 0.879245,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0015.0155.0946.0064",
+          "name": "Минобороны России",
+          "similarity": 0.815,
+          "rerank_score": 0.877869,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0015.0155.0946.0068",
+          "name": "СВР России",
+          "similarity": 0.814,
+          "rerank_score": 0.876869,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0015.0155.0946.0069",
+          "name": "Росгвардия",
+          "similarity": 0.814,
+          "rerank_score": 0.876869,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0015.0155.0929",
+          "name": "Повышение престижа военной службы",
+          "similarity": 0.813,
+          "rerank_score": 0.875589,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.792
+    },
+    {
+      "id": "ii25_test_003",
+      "source_file": "02-331-2.docx",
+      "expected_code": "0002.0013.0139.0331",
+      "expected_name": "Материально-техническое и информационное обеспечение образовательного процесса",
+      "dense_rank": null,
+      "lexical_rank": null,
+      "merged_rank": null,
+      "reranked_rank": null,
+      "dense_recall_at_10": false,
+      "dense_recall_at_50": false,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": false,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": true,
+      "reranked_prefix_level2": false,
+      "reranked_prefix_level3": false,
+      "top_reranked_codes": [
+        "0002.0004.0047.0230",
+        "0001.0001.0006.0018.0075",
+        "0001.0001.0006.0018.0074",
+        "0001.0001.0006.0015.0075",
+        "0001.0001.0006.0013.0001"
+      ],
+      "top_reranked": [
+        {
+          "code": "0002.0004.0047.0230",
+          "name": "Права и обязанности родителей и детей",
+          "similarity": 0.808,
+          "rerank_score": 0.856729,
+          "source": "dense"
+        },
+        {
+          "code": "0001.0001.0006.0018.0075",
+          "name": "Законодательство субъектов Российской Федерации",
+          "similarity": 0.814,
+          "rerank_score": 0.846679,
+          "source": "dense"
+        },
+        {
+          "code": "0001.0001.0006.0018.0074",
+          "name": "Законодательство Российской Федерации",
+          "similarity": 0.811,
+          "rerank_score": 0.843679,
+          "source": "dense"
+        },
+        {
+          "code": "0001.0001.0006.0015.0075",
+          "name": "Законодательство субъектов Российской Федерации",
+          "similarity": 0.811,
+          "rerank_score": 0.842846,
+          "source": "dense"
+        },
+        {
+          "code": "0001.0001.0006.0013.0001",
+          "name": "на территории Российской Федерации",
+          "similarity": 0.779,
+          "rerank_score": 0.841886,
+          "source": "lexical"
+        }
+      ],
+      "elapsed": 0.824
+    },
+    {
+      "id": "ii25_test_004",
+      "source_file": "02-438.docx",
+      "expected_code": "0002.0014.0143.0438",
+      "expected_name": "Борьба с табакокурением, алкоголизмом и наркоманией",
+      "dense_rank": null,
+      "lexical_rank": null,
+      "merged_rank": null,
+      "reranked_rank": null,
+      "dense_recall_at_10": false,
+      "dense_recall_at_50": false,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": false,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": false,
+      "reranked_prefix_level2": false,
+      "reranked_prefix_level3": false,
+      "top_reranked_codes": [
+        "0003.0009.0102.0772",
+        "0001.0002.0028.0159",
+        "0003.0009.0102.0000",
+        "0003.0009.0102.0768",
+        "0003.0009.0102.0773"
+      ],
+      "top_reranked": [
+        {
+          "code": "0003.0009.0102.0772",
+          "name": "Продажа товаров с нарушением маркировки товаров контрольными (идентификационными) знаками",
+          "similarity": 0.807,
+          "rerank_score": 0.874509,
+          "source": "dense"
+        },
+        {
+          "code": "0001.0002.0028.0159",
+          "name": "Привлечение к административной ответственности",
+          "similarity": 0.802,
+          "rerank_score": 0.870515,
+          "source": "lexical"
+        },
+        {
+          "code": "0003.0009.0102.0000",
+          "name": "Торговля",
+          "similarity": 0.819,
+          "rerank_score": 0.865789,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0102.0768",
+          "name": "Управление в сфере торговли. Правила торговли",
+          "similarity": 0.808,
+          "rerank_score": 0.865509,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0102.0773",
+          "name": "Нормативное правовое регулирование торговли",
+          "similarity": 0.805,
+          "rerank_score": 0.862509,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.336
+    },
+    {
+      "id": "ii25_test_005",
+      "source_file": "03-677.docx",
+      "expected_code": "0003.0009.0096.0677",
+      "expected_name": "Деятельность в сфере строительства. Сооружение зданий, объектов капитального строительства",
+      "dense_rank": null,
+      "lexical_rank": null,
+      "merged_rank": null,
+      "reranked_rank": null,
+      "dense_recall_at_10": false,
+      "dense_recall_at_50": false,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": false,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": true,
+      "reranked_prefix_level2": true,
+      "reranked_prefix_level3": true,
+      "top_reranked_codes": [
+        "0003.0009.0096.0682",
+        "0003.0009.0096.0681",
+        "0003.0009.0096.0686",
+        "0003.0009.0097.0699",
+        "0003.0009.0096.0685"
+      ],
+      "top_reranked": [
+        {
+          "code": "0003.0009.0096.0682",
+          "name": "Жилищное строительство",
+          "similarity": 0.813,
+          "rerank_score": 0.883264,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0096.0681",
+          "name": "Строительные организации, застройщики",
+          "similarity": 0.805,
+          "rerank_score": 0.881471,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0096.0686",
+          "name": "Устранение строительных недоделок",
+          "similarity": 0.807,
+          "rerank_score": 0.879333,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0097.0699",
+          "name": "Благоустройство и ремонт подъездных дорог, в том числе тротуаров",
+          "similarity": 0.806,
+          "rerank_score": 0.876104,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0096.0685",
+          "name": "Прохождение разрешительных процедур на капитальное строительство",
+          "similarity": 0.804,
+          "rerank_score": 0.874264,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.414
+    },
+    {
+      "id": "ii25_test_006",
+      "source_file": "03-689-3.docx",
+      "expected_code": "0003.0009.0097.0689",
+      "expected_name": "Комплексное благоустройство",
+      "dense_rank": null,
+      "lexical_rank": null,
+      "merged_rank": null,
+      "reranked_rank": null,
+      "dense_recall_at_10": false,
+      "dense_recall_at_50": false,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": false,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": false,
+      "reranked_prefix_level2": false,
+      "reranked_prefix_level3": false,
+      "top_reranked_codes": [
+        "0005.0005.0054.1119",
+        "0005.0005.0054.1121",
+        "0005.0005.0056.1170",
+        "0005.0005.0056.1149",
+        "0005.0005.0056.1171"
+      ],
+      "top_reranked": [
+        {
+          "code": "0005.0005.0054.1119",
+          "name": "Вопросы частного домовладения",
+          "similarity": 0.824,
+          "rerank_score": 0.893311,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0054.1121",
+          "name": "Реновация жилого фонда",
+          "similarity": 0.819,
+          "rerank_score": 0.890186,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0056.1170",
+          "name": "Капитальный ремонт общего имущества",
+          "similarity": 0.819,
+          "rerank_score": 0.885956,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0056.1149",
+          "name": "Оплата жилищно-коммунальных услуг (ЖКХ), взносов в Фонд капитального ремонта",
+          "similarity": 0.815,
+          "rerank_score": 0.885706,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0056.1171",
+          "name": "Включение многоквартирного дома в региональную программу капитального ремонта многоквартирных домов",
+          "similarity": 0.815,
+          "rerank_score": 0.885706,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.537
+    },
+    {
+      "id": "ii25_test_007",
+      "source_file": "03-693.docx",
+      "expected_code": "0003.0009.0097.0693",
+      "expected_name": "Парковки автотранспорта вне организованных автостоянок",
+      "dense_rank": 48,
+      "lexical_rank": null,
+      "merged_rank": 48,
+      "reranked_rank": null,
+      "dense_recall_at_10": false,
+      "dense_recall_at_50": true,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": true,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": false,
+      "reranked_prefix_level2": false,
+      "reranked_prefix_level3": false,
+      "top_reranked_codes": [
+        "0004.0015.0155.0938.0069",
+        "0004.0015.0155.0938.0071",
+        "0004.0015.0155.0938.0068",
+        "0004.0015.0155.0938.0070",
+        "0004.0015.0155.0938.0065"
+      ],
+      "top_reranked": [
+        {
+          "code": "0004.0015.0155.0938.0069",
+          "name": "Росгвардия",
+          "similarity": 0.81,
+          "rerank_score": 0.867195,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0015.0155.0938.0071",
+          "name": "иные войска и органы",
+          "similarity": 0.81,
+          "rerank_score": 0.867195,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0015.0155.0938.0068",
+          "name": "СВР России",
+          "similarity": 0.808,
+          "rerank_score": 0.865195,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0015.0155.0938.0070",
+          "name": "СК России",
+          "similarity": 0.808,
+          "rerank_score": 0.865195,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0015.0155.0938.0065",
+          "name": "МЧС России",
+          "similarity": 0.807,
+          "rerank_score": 0.864195,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.787
+    },
+    {
+      "id": "ii25_test_008",
+      "source_file": "03-700.docx",
+      "expected_code": "0003.0009.0097.0700",
+      "expected_name": "Водоснабжение поселений",
+      "dense_rank": 4,
+      "lexical_rank": null,
+      "merged_rank": 4,
+      "reranked_rank": 8,
+      "dense_recall_at_10": true,
+      "dense_recall_at_50": true,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": true,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": true,
+      "reranked_prefix_level1": true,
+      "reranked_prefix_level2": false,
+      "reranked_prefix_level3": false,
+      "top_reranked_codes": [
+        "0003.0011.0122.0841",
+        "0005.0005.0056.1157",
+        "0005.0005.0056.1154",
+        "0003.0009.0093.0643",
+        "0003.0009.0093.0649"
+      ],
+      "top_reranked": [
+        {
+          "code": "0003.0011.0122.0841",
+          "name": "СМС-оповещение о возможных чрезвычайных ситуациях природного и техногенного характера",
+          "similarity": 0.871,
+          "rerank_score": 0.937647,
+          "source": "lexical"
+        },
+        {
+          "code": "0005.0005.0056.1157",
+          "name": "Перебои в водоотведении и канализовании",
+          "similarity": 0.849,
+          "rerank_score": 0.927131,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0056.1154",
+          "name": "Перебои в водоснабжении",
+          "similarity": 0.848,
+          "rerank_score": 0.926131,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0093.0643",
+          "name": "Установление и утверждение границ охранной зоны газораспределительных сетей",
+          "similarity": 0.816,
+          "rerank_score": 0.903966,
+          "source": "lexical"
+        },
+        {
+          "code": "0003.0009.0093.0649",
+          "name": "Технологическое присоединение потребителей к системам электро-, тепло-, газо-, водоснабжения",
+          "similarity": 0.816,
+          "rerank_score": 0.903966,
+          "source": "lexical"
+        }
+      ],
+      "elapsed": 0.307
+    },
+    {
+      "id": "ii25_test_009",
+      "source_file": "03-733-2.docx",
+      "expected_code": "0003.0009.0099.0733",
+      "expected_name": "Транспортное обслуживание населения, пассажирские перевозки",
+      "dense_rank": 5,
+      "lexical_rank": null,
+      "merged_rank": 5,
+      "reranked_rank": 3,
+      "dense_recall_at_10": true,
+      "dense_recall_at_50": true,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": true,
+      "reranked_top1": false,
+      "reranked_top3": true,
+      "reranked_top5": true,
+      "reranked_recall_at_10": true,
+      "reranked_prefix_level1": true,
+      "reranked_prefix_level2": true,
+      "reranked_prefix_level3": true,
+      "top_reranked_codes": [
+        "0003.0009.0099.0733.0059",
+        "0003.0009.0093.0634",
+        "0003.0009.0099.0733",
+        "0003.0009.0099.0733.0061",
+        "0003.0009.0100.0762"
+      ],
+      "top_reranked": [
+        {
+          "code": "0003.0009.0099.0733.0059",
+          "name": "железнодорожный транспорт",
+          "similarity": 0.811,
+          "rerank_score": 0.878578,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0093.0634",
+          "name": "Железнодорожное машиностроение",
+          "similarity": 0.812,
+          "rerank_score": 0.878128,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0099.0733",
+          "name": "Транспортное обслуживание населения, пассажирские перевозки",
+          "similarity": 0.808,
+          "rerank_score": 0.874928,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0099.0733.0061",
+          "name": "автомобильный транспорт",
+          "similarity": 0.806,
+          "rerank_score": 0.871717,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0100.0762",
+          "name": "Инфраструктура связи",
+          "similarity": 0.806,
+          "rerank_score": 0.870707,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 1.243
+    },
+    {
+      "id": "ii25_test_010",
+      "source_file": "03-742-3.docx",
+      "expected_code": "0003.0009.0099.0742",
+      "expected_name": "Эксплуатация и сохранность автомобильных дорог",
+      "dense_rank": 7,
+      "lexical_rank": null,
+      "merged_rank": 7,
+      "reranked_rank": 6,
+      "dense_recall_at_10": true,
+      "dense_recall_at_50": true,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": true,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": true,
+      "reranked_prefix_level1": true,
+      "reranked_prefix_level2": true,
+      "reranked_prefix_level3": true,
+      "top_reranked_codes": [
+        "0003.0009.0099.0742.0110",
+        "0003.0009.0099.0740",
+        "0003.0009.0097.0699",
+        "0003.0009.0099.0742.0111",
+        "0003.0009.0099.0742.0109"
+      ],
+      "top_reranked": [
+        {
+          "code": "0003.0009.0099.0742.0110",
+          "name": "ремонт автомобильных дорог",
+          "similarity": 0.823,
+          "rerank_score": 0.893063,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0099.0740",
+          "name": "Работа спецавтохозяйства",
+          "similarity": 0.819,
+          "rerank_score": 0.888903,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0097.0699",
+          "name": "Благоустройство и ремонт подъездных дорог, в том числе тротуаров",
+          "similarity": 0.818,
+          "rerank_score": 0.887703,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0099.0742.0111",
+          "name": "содержание автомобильных дорог",
+          "similarity": 0.816,
+          "rerank_score": 0.886063,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0099.0742.0109",
+          "name": "капитальный ремонт автомобильных дорог",
+          "similarity": 0.814,
+          "rerank_score": 0.884063,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.771
+    },
+    {
+      "id": "ii25_test_011",
+      "source_file": "03-744.docx",
+      "expected_code": "0003.0009.0099.0744",
+      "expected_name": "Дорожные знаки и дорожная разметка",
+      "dense_rank": 1,
+      "lexical_rank": 12,
+      "merged_rank": 1,
+      "reranked_rank": 1,
+      "dense_recall_at_10": true,
+      "dense_recall_at_50": true,
+      "lexical_recall_at_30": true,
+      "merged_recall_at_50": true,
+      "reranked_top1": true,
+      "reranked_top3": true,
+      "reranked_top5": true,
+      "reranked_recall_at_10": true,
+      "reranked_prefix_level1": true,
+      "reranked_prefix_level2": true,
+      "reranked_prefix_level3": true,
+      "top_reranked_codes": [
+        "0003.0009.0099.0744",
+        "0003.0009.0099.0741",
+        "0003.0009.0099.0743",
+        "0003.0009.0099.0742.0111",
+        "0003.0009.0099.0742"
+      ],
+      "top_reranked": [
+        {
+          "code": "0003.0009.0099.0744",
+          "name": "Дорожные знаки и дорожная разметка",
+          "similarity": 0.814,
+          "rerank_score": 0.877259,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0099.0741",
+          "name": "О строительстве, размещении гаражей, стоянок, автопарковок",
+          "similarity": 0.81,
+          "rerank_score": 0.868259,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0099.0743",
+          "name": "Борьба с аварийностью. Безопасность дорожного движения",
+          "similarity": 0.805,
+          "rerank_score": 0.868259,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0099.0742.0111",
+          "name": "содержание автомобильных дорог",
+          "similarity": 0.802,
+          "rerank_score": 0.862799,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0099.0742",
+          "name": "Эксплуатация и сохранность автомобильных дорог",
+          "similarity": 0.802,
+          "rerank_score": 0.862759,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 1.024
+    },
+    {
+      "id": "ii25_test_012",
+      "source_file": "03-779.docx",
+      "expected_code": "0003.0009.0104.0779",
+      "expected_name": "Содержание кладбищ и мест захоронений",
+      "dense_rank": 1,
+      "lexical_rank": 7,
+      "merged_rank": 1,
+      "reranked_rank": null,
+      "dense_recall_at_10": true,
+      "dense_recall_at_50": true,
+      "lexical_recall_at_30": true,
+      "merged_recall_at_50": true,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": false,
+      "reranked_prefix_level2": false,
+      "reranked_prefix_level3": false,
+      "top_reranked_codes": [
+        "0004.0015.0155.0947.0065",
+        "0004.0015.0155.0947.0068",
+        "0004.0015.0155.0947.0070",
+        "0004.0015.0155.0947.0064",
+        "0004.0015.0155.0947.0069"
+      ],
+      "top_reranked": [
+        {
+          "code": "0004.0015.0155.0947.0065",
+          "name": "МЧС России",
+          "similarity": 0.801,
+          "rerank_score": 0.861915,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0015.0155.0947.0068",
+          "name": "СВР России",
+          "similarity": 0.799,
+          "rerank_score": 0.859915,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0015.0155.0947.0070",
+          "name": "СК России",
+          "similarity": 0.795,
+          "rerank_score": 0.855915,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0015.0155.0947.0064",
+          "name": "Минобороны России",
+          "similarity": 0.794,
+          "rerank_score": 0.854915,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0015.0155.0947.0069",
+          "name": "Росгвардия",
+          "similarity": 0.793,
+          "rerank_score": 0.853915,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.653
+    },
+    {
+      "id": "ii25_test_013",
+      "source_file": "04-1005.docx",
+      "expected_code": "0004.0016.0162.1005",
+      "expected_name": "Ответственность за нарушение законодательства",
+      "dense_rank": null,
+      "lexical_rank": null,
+      "merged_rank": null,
+      "reranked_rank": null,
+      "dense_recall_at_10": false,
+      "dense_recall_at_50": false,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": false,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": false,
+      "reranked_prefix_level2": false,
+      "reranked_prefix_level3": false,
+      "top_reranked_codes": [
+        "0005.0005.0054.1119",
+        "0005.0005.0056.1154",
+        "0005.0005.0056.1160",
+        "0005.0005.0056.1155",
+        "0002.0004.0048.0232"
+      ],
+      "top_reranked": [
+        {
+          "code": "0005.0005.0054.1119",
+          "name": "Вопросы частного домовладения",
+          "similarity": 0.815,
+          "rerank_score": 0.86633,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0056.1154",
+          "name": "Перебои в водоснабжении",
+          "similarity": 0.811,
+          "rerank_score": 0.86213,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0056.1160",
+          "name": "Обращение с твердыми коммунальными отходами",
+          "similarity": 0.811,
+          "rerank_score": 0.86213,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0056.1155",
+          "name": "Перебои в газоснабжении",
+          "similarity": 0.809,
+          "rerank_score": 0.86013,
+          "source": "dense"
+        },
+        {
+          "code": "0002.0004.0048.0232",
+          "name": "Алиментные обязательства членов семьи",
+          "similarity": 0.808,
+          "rerank_score": 0.858556,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 1.002
+    },
+    {
+      "id": "ii25_test_014",
+      "source_file": "05-1122-2.docx",
+      "expected_code": "0005.0005.0055.1122",
+      "expected_name": "Переселение из подвалов, бараков, коммуналок, общежитий, аварийных домов, ветхого жилья, санитарно-защитной зоны",
+      "dense_rank": 26,
+      "lexical_rank": 1,
+      "merged_rank": 26,
+      "reranked_rank": 1,
+      "dense_recall_at_10": false,
+      "dense_recall_at_50": true,
+      "lexical_recall_at_30": true,
+      "merged_recall_at_50": true,
+      "reranked_top1": true,
+      "reranked_top3": true,
+      "reranked_top5": true,
+      "reranked_recall_at_10": true,
+      "reranked_prefix_level1": true,
+      "reranked_prefix_level2": true,
+      "reranked_prefix_level3": true,
+      "top_reranked_codes": [
+        "0005.0005.0055.1122",
+        "0005.0005.0055.1124",
+        "0005.0005.0055.1137",
+        "0005.0005.0055.1123",
+        "0005.0005.0055.1131"
+      ],
+      "top_reranked": [
+        {
+          "code": "0005.0005.0055.1122",
+          "name": "Переселение из подвалов, бараков, коммуналок, общежитий, аварийных домов, ветхого жилья, санитарно-защитной зоны",
+          "similarity": 0.826,
+          "rerank_score": 0.935268,
+          "source": "lexical"
+        },
+        {
+          "code": "0005.0005.0055.1124",
+          "name": "Несогласие граждан с вариантами предоставления жилья, взамен признанного в установленном порядке аварийным",
+          "similarity": 0.829,
+          "rerank_score": 0.92768,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0055.1137",
+          "name": "Обследование жилого фонда на предмет пригодности для проживания (ветхое и аварийное жилье)",
+          "similarity": 0.819,
+          "rerank_score": 0.924738,
+          "source": "lexical"
+        },
+        {
+          "code": "0005.0005.0055.1123",
+          "name": "Несвоевременное предоставление благоустроенного жилого помещения в связи с признанием жилья аварийным",
+          "similarity": 0.82,
+          "rerank_score": 0.91515,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0055.1131",
+          "name": "Выделение жилья молодым семьям, специалистам",
+          "similarity": 0.819,
+          "rerank_score": 0.91415,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.518
+    },
+    {
+      "id": "ii25_test_015",
+      "source_file": "05-1154-2.docx",
+      "expected_code": "0005.0005.0056.1154",
+      "expected_name": "Перебои в водоснабжении",
+      "dense_rank": 3,
+      "lexical_rank": null,
+      "merged_rank": 3,
+      "reranked_rank": 3,
+      "dense_recall_at_10": true,
+      "dense_recall_at_50": true,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": true,
+      "reranked_top1": false,
+      "reranked_top3": true,
+      "reranked_top5": true,
+      "reranked_recall_at_10": true,
+      "reranked_prefix_level1": true,
+      "reranked_prefix_level2": true,
+      "reranked_prefix_level3": true,
+      "top_reranked_codes": [
+        "0005.0005.0056.1156",
+        "0005.0005.0056.1153",
+        "0005.0005.0056.1154",
+        "0005.0005.0056.1155",
+        "0005.0005.0056.1157"
+      ],
+      "top_reranked": [
+        {
+          "code": "0005.0005.0056.1156",
+          "name": "Перебои в теплоснабжении",
+          "similarity": 0.839,
+          "rerank_score": 0.906786,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0056.1153",
+          "name": "Перебои в электроснабжении",
+          "similarity": 0.837,
+          "rerank_score": 0.904786,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0056.1154",
+          "name": "Перебои в водоснабжении",
+          "similarity": 0.833,
+          "rerank_score": 0.900786,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0056.1155",
+          "name": "Перебои в газоснабжении",
+          "similarity": 0.832,
+          "rerank_score": 0.899786,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0056.1157",
+          "name": "Перебои в водоотведении и канализовании",
+          "similarity": 0.827,
+          "rerank_score": 0.894786,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.425
+    },
+    {
+      "id": "ii25_test_016",
+      "source_file": "05-1170.docx",
+      "expected_code": "0005.0005.0056.1170",
+      "expected_name": "Капитальный ремонт общего имущества",
+      "dense_rank": 17,
+      "lexical_rank": null,
+      "merged_rank": 17,
+      "reranked_rank": null,
+      "dense_recall_at_10": false,
+      "dense_recall_at_50": true,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": true,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": false,
+      "reranked_prefix_level2": false,
+      "reranked_prefix_level3": false,
+      "top_reranked_codes": [
+        "0004.0015.0155.0947.0065",
+        "0005.0005.0054.1119",
+        "0004.0015.0158.0953.0065",
+        "0004.0015.0158.0952.0065",
+        "0004.0015.0155.0947.0070"
+      ],
+      "top_reranked": [
+        {
+          "code": "0004.0015.0155.0947.0065",
+          "name": "МЧС России",
+          "similarity": 0.812,
+          "rerank_score": 0.877059,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0054.1119",
+          "name": "Вопросы частного домовладения",
+          "similarity": 0.814,
+          "rerank_score": 0.873846,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0015.0158.0953.0065",
+          "name": "МЧС России",
+          "similarity": 0.807,
+          "rerank_score": 0.872059,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0015.0158.0952.0065",
+          "name": "МЧС России",
+          "similarity": 0.804,
+          "rerank_score": 0.868513,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0015.0155.0947.0070",
+          "name": "СК России",
+          "similarity": 0.804,
+          "rerank_score": 0.86751,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 1.288
+    },
+    {
+      "id": "ii25_test_017",
+      "source_file": "1-151.docx",
+      "expected_code": "0001.0002.0027.0151",
+      "expected_name": "Благодарности, приглашения, поздравления органам исполнительной власти субъектов Российской Федерации",
+      "dense_rank": null,
+      "lexical_rank": null,
+      "merged_rank": null,
+      "reranked_rank": null,
+      "dense_recall_at_10": false,
+      "dense_recall_at_50": false,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": false,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": false,
+      "reranked_prefix_level2": false,
+      "reranked_prefix_level3": false,
+      "top_reranked_codes": [
+        "0003.0009.0093.0634",
+        "0003.0009.0093.0629",
+        "0003.0009.0093.0631",
+        "0003.0009.0093.0637",
+        "0003.0009.0093.0657"
+      ],
+      "top_reranked": [
+        {
+          "code": "0003.0009.0093.0634",
+          "name": "Железнодорожное машиностроение",
+          "similarity": 0.818,
+          "rerank_score": 0.874556,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0093.0629",
+          "name": "Стандарты, требования, системы менеджмента качества, нормативы в сфере промышленности",
+          "similarity": 0.808,
+          "rerank_score": 0.867866,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0093.0631",
+          "name": "Станкостроение и инвестиционное машиностроение",
+          "similarity": 0.811,
+          "rerank_score": 0.867556,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0093.0637",
+          "name": "Радиоэлектронная промышленность",
+          "similarity": 0.81,
+          "rerank_score": 0.867383,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0093.0657",
+          "name": "Инновационная политика, внедрение высоких технологий. Изобретательская деятельность",
+          "similarity": 0.808,
+          "rerank_score": 0.866211,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 1.206
+    },
+    {
+      "id": "ii25_test_018",
+      "source_file": "1-37.docx",
+      "expected_code": "0001.0001.0010.0037",
+      "expected_name": "Общественное обсуждение проектов законов и иных нормативных правовых актов, принятых законов и иных нормативных правовых актов (в том числе в сети «Интернет»)",
+      "dense_rank": null,
+      "lexical_rank": null,
+      "merged_rank": null,
+      "reranked_rank": null,
+      "dense_recall_at_10": false,
+      "dense_recall_at_50": false,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": false,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": false,
+      "reranked_prefix_level2": false,
+      "reranked_prefix_level3": false,
+      "top_reranked_codes": [
+        "0003.0009.0098.0708",
+        "0003.0009.0093.0666",
+        "0003.0009.0093.0661",
+        "0003.0009.0098.1197",
+        "0003.0009.0093.0665"
+      ],
+      "top_reranked": [
+        {
+          "code": "0003.0009.0098.0708",
+          "name": "Личные подсобные хозяйства",
+          "similarity": 0.818,
+          "rerank_score": 0.880855,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0093.0666",
+          "name": "Открытые горные работы",
+          "similarity": 0.815,
+          "rerank_score": 0.877975,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0093.0661",
+          "name": "Добыча полезных ископаемых",
+          "similarity": 0.814,
+          "rerank_score": 0.876975,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0098.1197",
+          "name": "Обеспечение топливом",
+          "similarity": 0.814,
+          "rerank_score": 0.876855,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0093.0665",
+          "name": "Угольная промышленность",
+          "similarity": 0.813,
+          "rerank_score": 0.875975,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 1.027
+    },
+    {
+      "id": "ii25_test_019",
+      "source_file": "2-330.docx",
+      "expected_code": "0002.0013.0139.0330",
+      "expected_name": "Питание обучающихся",
+      "dense_rank": 1,
+      "lexical_rank": null,
+      "merged_rank": 1,
+      "reranked_rank": null,
+      "dense_recall_at_10": true,
+      "dense_recall_at_50": true,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": true,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": true,
+      "reranked_prefix_level2": true,
+      "reranked_prefix_level3": true,
+      "top_reranked_codes": [
+        "0002.0013.0139.0330.0032",
+        "0002.0013.0139.0330.0033",
+        "0002.0013.0139.0330.0034",
+        "0002.0013.0139.0335.0033",
+        "0002.0013.0139.0335.0032"
+      ],
+      "top_reranked": [
+        {
+          "code": "0002.0013.0139.0330.0032",
+          "name": "начальное общее образование",
+          "similarity": 0.819,
+          "rerank_score": 0.882488,
+          "source": "dense"
+        },
+        {
+          "code": "0002.0013.0139.0330.0033",
+          "name": "основное общее образование",
+          "similarity": 0.819,
+          "rerank_score": 0.882488,
+          "source": "dense"
+        },
+        {
+          "code": "0002.0013.0139.0330.0034",
+          "name": "среднее общее образование",
+          "similarity": 0.811,
+          "rerank_score": 0.874488,
+          "source": "dense"
+        },
+        {
+          "code": "0002.0013.0139.0335.0033",
+          "name": "основное общее образование",
+          "similarity": 0.81,
+          "rerank_score": 0.872808,
+          "source": "dense"
+        },
+        {
+          "code": "0002.0013.0139.0335.0032",
+          "name": "начальное общее образование",
+          "similarity": 0.809,
+          "rerank_score": 0.871808,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.696
+    },
+    {
+      "id": "ii25_test_020",
+      "source_file": "2-333.docx",
+      "expected_code": "0002.0013.0139.0333",
+      "expected_name": "Обеспечение дошкольных, общеобразовательных учреждений, профессиональных образовательных организаций и организаций высшего образования электро-, водо-, теплоснабжением",
+      "dense_rank": null,
+      "lexical_rank": null,
+      "merged_rank": null,
+      "reranked_rank": null,
+      "dense_recall_at_10": false,
+      "dense_recall_at_50": false,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": false,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": true,
+      "reranked_prefix_level2": false,
+      "reranked_prefix_level3": false,
+      "top_reranked_codes": [
+        "0002.0004.0047.0230",
+        "0002.0004.0047.0000",
+        "0002.0004.0049.0233",
+        "0002.0004.0051.0239",
+        "0002.0004.0047.0231"
+      ],
+      "top_reranked": [
+        {
+          "code": "0002.0004.0047.0230",
+          "name": "Права и обязанности родителей и детей",
+          "similarity": 0.809,
+          "rerank_score": 0.867785,
+          "source": "dense"
+        },
+        {
+          "code": "0002.0004.0047.0000",
+          "name": "Права и обязанности родителей и детей",
+          "similarity": 0.81,
+          "rerank_score": 0.858265,
+          "source": "dense"
+        },
+        {
+          "code": "0002.0004.0049.0233",
+          "name": "Семейные формы устройства детей-сирот. Приемные семьи",
+          "similarity": 0.797,
+          "rerank_score": 0.853259,
+          "source": "dense"
+        },
+        {
+          "code": "0002.0004.0051.0239",
+          "name": "Многодетные семьи. Малоимущие семьи. Неполные семьи. Молодые семьи",
+          "similarity": 0.802,
+          "rerank_score": 0.85308,
+          "source": "dense"
+        },
+        {
+          "code": "0002.0004.0047.0231",
+          "name": "Лишение родительских прав",
+          "similarity": 0.797,
+          "rerank_score": 0.852092,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.422
+    },
+    {
+      "id": "ii25_test_021",
+      "source_file": "3-1-684.docx",
+      "expected_code": "0003.0009.0096.0684",
+      "expected_name": "Строительство и реконструкция дорог",
+      "dense_rank": null,
+      "lexical_rank": null,
+      "merged_rank": null,
+      "reranked_rank": null,
+      "dense_recall_at_10": false,
+      "dense_recall_at_50": false,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": false,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": false,
+      "reranked_prefix_level2": false,
+      "reranked_prefix_level3": false,
+      "top_reranked_codes": [
+        "0004.0019.0178.1102",
+        "0004.0019.0179.1111",
+        "0004.0019.0179.1112",
+        "0005.0005.0055.1128",
+        "0004.0019.0178.1103"
+      ],
+      "top_reranked": [
+        {
+          "code": "0004.0019.0178.1102",
+          "name": "Иски органов прокуратуры в суды по вопросам защиты прав человека",
+          "similarity": 0.822,
+          "rerank_score": 0.882747,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0019.0179.1111",
+          "name": "Вопросы сотрудников ФСИН России",
+          "similarity": 0.819,
+          "rerank_score": 0.874287,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0019.0179.1112",
+          "name": "Вопросы сотрудников ФССП России",
+          "similarity": 0.819,
+          "rerank_score": 0.874287,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0055.1128",
+          "name": "Улучшение жилищных условий, предоставление жилого помещения по договору социального найма гражданам, состоящим на учете в органе местного самоуправления в качестве нуждающихся в жилых помещениях",
+          "similarity": 0.804,
+          "rerank_score": 0.871968,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0019.0178.1103",
+          "name": "Обеспечение жильем работников прокуратуры",
+          "similarity": 0.814,
+          "rerank_score": 0.870431,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.896
+    },
+    {
+      "id": "ii25_test_022",
+      "source_file": "3-675-1.docx",
+      "expected_code": "0003.0009.0096.0675",
+      "expected_name": "Выполнение государственных требований при осуществлении строительной деятельности, соблюдение СНИПов",
+      "dense_rank": null,
+      "lexical_rank": null,
+      "merged_rank": null,
+      "reranked_rank": null,
+      "dense_recall_at_10": false,
+      "dense_recall_at_50": false,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": false,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": false,
+      "reranked_prefix_level2": false,
+      "reranked_prefix_level3": false,
+      "top_reranked_codes": [
+        "0005.0005.0058.1181",
+        "0003.0009.0096.0681",
+        "0003.0009.0096.0679",
+        "0005.0005.0058.0000",
+        "0003.0009.0096.0676"
+      ],
+      "top_reranked": [
+        {
+          "code": "0005.0005.0058.1181",
+          "name": "Нежилые помещения",
+          "similarity": 0.822,
+          "rerank_score": 0.887057,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0096.0681",
+          "name": "Строительные организации, застройщики",
+          "similarity": 0.815,
+          "rerank_score": 0.87418,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0096.0679",
+          "name": "Государственный кадастровый учет недвижимого имущества",
+          "similarity": 0.821,
+          "rerank_score": 0.873864,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0058.0000",
+          "name": "Нежилые помещения. Административные здания (в жилищном фонде)",
+          "similarity": 0.815,
+          "rerank_score": 0.873015,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0096.0676",
+          "name": "Государственный контроль и надзор в области долевого строительства",
+          "similarity": 0.807,
+          "rerank_score": 0.872496,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.395
+    },
+    {
+      "id": "ii25_test_023",
+      "source_file": "3-717.docx",
+      "expected_code": "0003.0009.0098.0717",
+      "expected_name": "Работа ветеринарной службы",
+      "dense_rank": 1,
+      "lexical_rank": 16,
+      "merged_rank": 1,
+      "reranked_rank": 1,
+      "dense_recall_at_10": true,
+      "dense_recall_at_50": true,
+      "lexical_recall_at_30": true,
+      "merged_recall_at_50": true,
+      "reranked_top1": true,
+      "reranked_top3": true,
+      "reranked_top5": true,
+      "reranked_recall_at_10": true,
+      "reranked_prefix_level1": true,
+      "reranked_prefix_level2": true,
+      "reranked_prefix_level3": true,
+      "top_reranked_codes": [
+        "0003.0009.0098.0717",
+        "0003.0009.0098.0718",
+        "0003.0009.0098.0727",
+        "0003.0009.0098.0725",
+        "0003.0009.0098.0728"
+      ],
+      "top_reranked": [
+        {
+          "code": "0003.0009.0098.0717",
+          "name": "Работа ветеринарной службы",
+          "similarity": 0.825,
+          "rerank_score": 0.881306,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0098.0718",
+          "name": "Нарушения в области ветеринарии",
+          "similarity": 0.821,
+          "rerank_score": 0.874268,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0098.0727",
+          "name": "Содержание домашних животных",
+          "similarity": 0.817,
+          "rerank_score": 0.871787,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0098.0725",
+          "name": "Животноводство",
+          "similarity": 0.818,
+          "rerank_score": 0.871268,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0098.0728",
+          "name": "Ненадлежащее содержание домашних животных",
+          "similarity": 0.816,
+          "rerank_score": 0.870787,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.92
+    },
+    {
+      "id": "ii25_test_024",
+      "source_file": "3-742-2.docx",
+      "expected_code": "0003.0009.0099.0742",
+      "expected_name": "Эксплуатация и сохранность автомобильных дорог",
+      "dense_rank": 9,
+      "lexical_rank": null,
+      "merged_rank": 9,
+      "reranked_rank": 6,
+      "dense_recall_at_10": true,
+      "dense_recall_at_50": true,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": true,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": true,
+      "reranked_prefix_level1": true,
+      "reranked_prefix_level2": true,
+      "reranked_prefix_level3": true,
+      "top_reranked_codes": [
+        "0003.0009.0099.0742.0109",
+        "0003.0009.0096.0684",
+        "0003.0009.0096.0684.0108",
+        "0003.0009.0099.0742.0110",
+        "0003.0009.0096.0684.0107"
+      ],
+      "top_reranked": [
+        {
+          "code": "0003.0009.0099.0742.0109",
+          "name": "капитальный ремонт автомобильных дорог",
+          "similarity": 0.808,
+          "rerank_score": 0.875599,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0096.0684",
+          "name": "Строительство и реконструкция дорог",
+          "similarity": 0.806,
+          "rerank_score": 0.870898,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0096.0684.0108",
+          "name": "реконструкция дорог",
+          "similarity": 0.802,
+          "rerank_score": 0.866168,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0099.0742.0110",
+          "name": "ремонт автомобильных дорог",
+          "similarity": 0.801,
+          "rerank_score": 0.866018,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0096.0684.0107",
+          "name": "строительство дорог",
+          "similarity": 0.797,
+          "rerank_score": 0.862458,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.527
+    },
+    {
+      "id": "ii25_test_025",
+      "source_file": "4-1022.docx",
+      "expected_code": "0004.0016.0162.1022",
+      "expected_name": "Противопожарная служба, соблюдение норм противопожарной безопасности",
+      "dense_rank": null,
+      "lexical_rank": null,
+      "merged_rank": null,
+      "reranked_rank": null,
+      "dense_recall_at_10": false,
+      "dense_recall_at_50": false,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": false,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": false,
+      "reranked_prefix_level2": false,
+      "reranked_prefix_level3": false,
+      "top_reranked_codes": [
+        "0003.0009.0098.0708",
+        "0003.0009.0098.0709",
+        "0003.0009.0098.0713",
+        "0003.0009.0098.0000",
+        "0003.0009.0096.0682"
+      ],
+      "top_reranked": [
+        {
+          "code": "0003.0009.0098.0708",
+          "name": "Личные подсобные хозяйства",
+          "similarity": 0.801,
+          "rerank_score": 0.865153,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0098.0709",
+          "name": "Сельскохозяйственная продукция",
+          "similarity": 0.797,
+          "rerank_score": 0.861153,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0098.0713",
+          "name": "Мелиорация",
+          "similarity": 0.796,
+          "rerank_score": 0.860153,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0098.0000",
+          "name": "Сельское хозяйство",
+          "similarity": 0.799,
+          "rerank_score": 0.858527,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0096.0682",
+          "name": "Жилищное строительство",
+          "similarity": 0.798,
+          "rerank_score": 0.856698,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.328
+    },
+    {
+      "id": "ii25_test_026",
+      "source_file": "4-1028.docx",
+      "expected_code": "0004.0016.0163.1028",
+      "expected_name": "Конфликты на бытовой почве",
+      "dense_rank": 30,
+      "lexical_rank": null,
+      "merged_rank": 30,
+      "reranked_rank": null,
+      "dense_recall_at_10": false,
+      "dense_recall_at_50": true,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": true,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": false,
+      "reranked_prefix_level2": false,
+      "reranked_prefix_level3": false,
+      "top_reranked_codes": [
+        "0005.0005.0056.1160",
+        "0005.0005.0056.1161",
+        "0001.0002.0028.0159.0074",
+        "0001.0002.0028.0159.0075",
+        "0001.0002.0028.0159.0072"
+      ],
+      "top_reranked": [
+        {
+          "code": "0005.0005.0056.1160",
+          "name": "Обращение с твердыми коммунальными отходами",
+          "similarity": 0.82,
+          "rerank_score": 0.877834,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0056.1161",
+          "name": "Несанкционированная свалка мусора, биоотходы",
+          "similarity": 0.816,
+          "rerank_score": 0.866977,
+          "source": "dense"
+        },
+        {
+          "code": "0001.0002.0028.0159.0074",
+          "name": "Законодательство Российской Федерации",
+          "similarity": 0.804,
+          "rerank_score": 0.859439,
+          "source": "dense"
+        },
+        {
+          "code": "0001.0002.0028.0159.0075",
+          "name": "Законодательство субъектов Российской Федерации",
+          "similarity": 0.803,
+          "rerank_score": 0.858439,
+          "source": "dense"
+        },
+        {
+          "code": "0001.0002.0028.0159.0072",
+          "name": "Законодательство РСФСР",
+          "similarity": 0.8,
+          "rerank_score": 0.855439,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.38
+    },
+    {
+      "id": "ii25_test_027",
+      "source_file": "4-990 -1.docx",
+      "expected_code": "0004.0016.0161.0990",
+      "expected_name": "Государственная безопасность, борьба с терроризмом и экстремизмом",
+      "dense_rank": null,
+      "lexical_rank": null,
+      "merged_rank": null,
+      "reranked_rank": null,
+      "dense_recall_at_10": false,
+      "dense_recall_at_50": false,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": false,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": true,
+      "reranked_prefix_level2": false,
+      "reranked_prefix_level3": false,
+      "top_reranked_codes": [
+        "0004.0018.0172.1089",
+        "0004.0018.0173.1090",
+        "0001.0001.0014.0041",
+        "0001.0001.0001.0002",
+        "0001.0020.0190.0172.0074"
+      ],
+      "top_reranked": [
+        {
+          "code": "0004.0018.0172.1089",
+          "name": "Конституционное судопроизводство",
+          "similarity": 0.817,
+          "rerank_score": 0.867642,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0018.0173.1090",
+          "name": "Гражданское судопроизводство",
+          "similarity": 0.816,
+          "rerank_score": 0.866322,
+          "source": "dense"
+        },
+        {
+          "code": "0001.0001.0014.0041",
+          "name": "Законодательная инициатива органов государственной власти по вопросам своего ведения",
+          "similarity": 0.81,
+          "rerank_score": 0.864873,
+          "source": "dense"
+        },
+        {
+          "code": "0001.0001.0001.0002",
+          "name": "Конституции, уставы субъектов Российской Федерации",
+          "similarity": 0.809,
+          "rerank_score": 0.863593,
+          "source": "dense"
+        },
+        {
+          "code": "0001.0020.0190.0172.0074",
+          "name": "Законодательство Российской Федерации",
+          "similarity": 0.808,
+          "rerank_score": 0.863538,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.342
+    },
+    {
+      "id": "ii25_test_028",
+      "source_file": "5-1136.docx",
+      "expected_code": "0005.0005.0055.1136",
+      "expected_name": "Правила пользования жилыми помещениями (перепланировки, реконструкции, переоборудование, использование не по назначению)",
+      "dense_rank": null,
+      "lexical_rank": null,
+      "merged_rank": null,
+      "reranked_rank": null,
+      "dense_recall_at_10": false,
+      "dense_recall_at_50": false,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": false,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": false,
+      "reranked_prefix_level2": false,
+      "reranked_prefix_level3": false,
+      "top_reranked_codes": [
+        "0003.0009.0096.0686",
+        "0003.0009.0097.0701",
+        "0003.0009.0097.0702",
+        "0003.0009.0096.0685",
+        "0003.0009.0096.0678"
+      ],
+      "top_reranked": [
+        {
+          "code": "0003.0009.0096.0686",
+          "name": "Устранение строительных недоделок",
+          "similarity": 0.819,
+          "rerank_score": 0.871751,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0097.0701",
+          "name": "Канализование поселений",
+          "similarity": 0.812,
+          "rerank_score": 0.864591,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0097.0702",
+          "name": "Электрификация поселений",
+          "similarity": 0.811,
+          "rerank_score": 0.863591,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0096.0685",
+          "name": "Прохождение разрешительных процедур на капитальное строительство",
+          "similarity": 0.809,
+          "rerank_score": 0.861751,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0096.0678",
+          "name": "Согласование строительства",
+          "similarity": 0.809,
+          "rerank_score": 0.861751,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.916
+    },
+    {
+      "id": "ii25_test_029",
+      "source_file": "5-1148-1.docx",
+      "expected_code": "0005.0005.0056.1148",
+      "expected_name": "Устранение аварийных ситуаций на магистральных коммуникациях. Работа аварийных коммунальных служб",
+      "dense_rank": 6,
+      "lexical_rank": null,
+      "merged_rank": 6,
+      "reranked_rank": null,
+      "dense_recall_at_10": true,
+      "dense_recall_at_50": true,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": true,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": true,
+      "reranked_prefix_level2": true,
+      "reranked_prefix_level3": true,
+      "top_reranked_codes": [
+        "0005.0005.0056.1155",
+        "0003.0009.0099.0733",
+        "0005.0005.0056.1156",
+        "0003.0009.0099.0738",
+        "0003.0009.0099.0733.0059"
+      ],
+      "top_reranked": [
+        {
+          "code": "0005.0005.0056.1155",
+          "name": "Перебои в газоснабжении",
+          "similarity": 0.823,
+          "rerank_score": 0.878174,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0099.0733",
+          "name": "Транспортное обслуживание населения, пассажирские перевозки",
+          "similarity": 0.809,
+          "rerank_score": 0.875255,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0056.1156",
+          "name": "Перебои в теплоснабжении",
+          "similarity": 0.82,
+          "rerank_score": 0.875174,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0099.0738",
+          "name": "Содержание транспортной инфраструктуры",
+          "similarity": 0.808,
+          "rerank_score": 0.874255,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0099.0733.0059",
+          "name": "железнодорожный транспорт",
+          "similarity": 0.805,
+          "rerank_score": 0.871615,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.289
+    },
+    {
+      "id": "ii25_test_030",
+      "source_file": "5-1156.docx",
+      "expected_code": "0005.0005.0056.1156",
+      "expected_name": "Перебои в теплоснабжении",
+      "dense_rank": 11,
+      "lexical_rank": null,
+      "merged_rank": 11,
+      "reranked_rank": 6,
+      "dense_recall_at_10": false,
+      "dense_recall_at_50": true,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": true,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": true,
+      "reranked_prefix_level1": true,
+      "reranked_prefix_level2": true,
+      "reranked_prefix_level3": true,
+      "top_reranked_codes": [
+        "0005.0005.0056.1160",
+        "0004.0015.0155.0947.0065",
+        "0004.0015.0155.0947.0070",
+        "0005.0005.0056.1174",
+        "0005.0005.0056.1169"
+      ],
+      "top_reranked": [
+        {
+          "code": "0005.0005.0056.1160",
+          "name": "Обращение с твердыми коммунальными отходами",
+          "similarity": 0.814,
+          "rerank_score": 0.870021,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0015.0155.0947.0065",
+          "name": "МЧС России",
+          "similarity": 0.81,
+          "rerank_score": 0.862362,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0015.0155.0947.0070",
+          "name": "СК России",
+          "similarity": 0.809,
+          "rerank_score": 0.861362,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0056.1174",
+          "name": "Нормативы потребления коммунальных услуг",
+          "similarity": 0.804,
+          "rerank_score": 0.855577,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0056.1169",
+          "name": "Предоставление коммунальных услуг ненадлежащего качества",
+          "similarity": 0.803,
+          "rerank_score": 0.854577,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.499
+    },
+    {
+      "id": "ii25_test_031",
+      "source_file": "5-1171.docx",
+      "expected_code": "0005.0005.0056.1171",
+      "expected_name": "Включение многоквартирного дома в региональную программу капитального ремонта многоквартирных домов",
+      "dense_rank": 1,
+      "lexical_rank": 1,
+      "merged_rank": 1,
+      "reranked_rank": 1,
+      "dense_recall_at_10": true,
+      "dense_recall_at_50": true,
+      "lexical_recall_at_30": true,
+      "merged_recall_at_50": true,
+      "reranked_top1": true,
+      "reranked_top3": true,
+      "reranked_top5": true,
+      "reranked_recall_at_10": true,
+      "reranked_prefix_level1": true,
+      "reranked_prefix_level2": true,
+      "reranked_prefix_level3": true,
+      "top_reranked_codes": [
+        "0005.0005.0056.1171",
+        "0005.0005.0056.1170",
+        "0005.0005.0056.1168",
+        "0005.0005.0056.1149",
+        "0005.0005.0054.1121"
+      ],
+      "top_reranked": [
+        {
+          "code": "0005.0005.0056.1171",
+          "name": "Включение многоквартирного дома в региональную программу капитального ремонта многоквартирных домов",
+          "similarity": 0.836,
+          "rerank_score": 0.939116,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0056.1170",
+          "name": "Капитальный ремонт общего имущества",
+          "similarity": 0.831,
+          "rerank_score": 0.924516,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0056.1168",
+          "name": "Содержание общего имущества (канализация, вентиляция, кровля, ограждающие конструкции, инженерное оборудование, места общего пользования, придомовая территория)",
+          "similarity": 0.81,
+          "rerank_score": 0.903516,
+          "source": "lexical"
+        },
+        {
+          "code": "0005.0005.0056.1149",
+          "name": "Оплата жилищно-коммунальных услуг (ЖКХ), взносов в Фонд капитального ремонта",
+          "similarity": 0.81,
+          "rerank_score": 0.898716,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0054.1121",
+          "name": "Реновация жилого фонда",
+          "similarity": 0.82,
+          "rerank_score": 0.894276,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.458
+    },
+    {
+      "id": "ii25_test_032",
+      "source_file": "21-2-325.docx",
+      "expected_code": "0002.0013.0139.0325",
+      "expected_name": "Образовательные стандарты, требования к образовательному процессу",
+      "dense_rank": null,
+      "lexical_rank": null,
+      "merged_rank": null,
+      "reranked_rank": null,
+      "dense_recall_at_10": false,
+      "dense_recall_at_50": false,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": false,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": false,
+      "reranked_prefix_level2": false,
+      "reranked_prefix_level3": false,
+      "top_reranked_codes": [
+        "0004.0015.0158.0974",
+        "0004.0015.0158.0973",
+        "0004.0015.0158.0972",
+        "0004.0015.0158.0971",
+        "0004.0015.0158.0960"
+      ],
+      "top_reranked": [
+        {
+          "code": "0004.0015.0158.0974",
+          "name": "Выплаты за участие в боевых действиях, выдача удостоверения ветерана боевых действий",
+          "similarity": 0.821,
+          "rerank_score": 0.919738,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0015.0158.0973",
+          "name": "Предоставление грантов выпускникам высших учебных заведений, прошедшим военную службу по призыву, на обучение в российских и зарубежных бизнес-школах",
+          "similarity": 0.834,
+          "rerank_score": 0.916186,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0015.0158.0972",
+          "name": "Предоставление гражданам, прошедшим военную службу по призыву, дополнительных льгот при поступлении в высшие учебные заведения",
+          "similarity": 0.832,
+          "rerank_score": 0.914186,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0015.0158.0971",
+          "name": "Предоставление преференций гражданам, прошедшим военную службу по призыву, при поступлении на государственную гражданскую службу (при включении их в резерв управленческих кадров)",
+          "similarity": 0.826,
+          "rerank_score": 0.908186,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0015.0158.0960",
+          "name": "Предоставление жилья в собственность военнослужащим, гражданам, уволенным с военной службы, членам их семей и гражданскому персоналу Вооруженных Сил Российской Федерации, других войск и органов",
+          "similarity": 0.821,
+          "rerank_score": 0.903186,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.295
+    },
+    {
+      "id": "ii25_test_033",
+      "source_file": "21-2-327.docx",
+      "expected_code": "0002.0013.0139.0327",
+      "expected_name": "Контроль качества и надзор в сфере образования",
+      "dense_rank": null,
+      "lexical_rank": null,
+      "merged_rank": null,
+      "reranked_rank": null,
+      "dense_recall_at_10": false,
+      "dense_recall_at_50": false,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": false,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": true,
+      "reranked_prefix_level2": false,
+      "reranked_prefix_level3": false,
+      "top_reranked_codes": [
+        "0002.0004.0047.0230",
+        "0002.0004.0047.0231",
+        "0002.0004.0051.0239",
+        "0002.0004.0049.0233",
+        "0002.0004.0047.0000"
+      ],
+      "top_reranked": [
+        {
+          "code": "0002.0004.0047.0230",
+          "name": "Права и обязанности родителей и детей",
+          "similarity": 0.818,
+          "rerank_score": 0.87281,
+          "source": "dense"
+        },
+        {
+          "code": "0002.0004.0047.0231",
+          "name": "Лишение родительских прав",
+          "similarity": 0.816,
+          "rerank_score": 0.868826,
+          "source": "dense"
+        },
+        {
+          "code": "0002.0004.0051.0239",
+          "name": "Многодетные семьи. Малоимущие семьи. Неполные семьи. Молодые семьи",
+          "similarity": 0.812,
+          "rerank_score": 0.864426,
+          "source": "dense"
+        },
+        {
+          "code": "0002.0004.0049.0233",
+          "name": "Семейные формы устройства детей-сирот. Приемные семьи",
+          "similarity": 0.81,
+          "rerank_score": 0.863578,
+          "source": "dense"
+        },
+        {
+          "code": "0002.0004.0047.0000",
+          "name": "Права и обязанности родителей и детей",
+          "similarity": 0.818,
+          "rerank_score": 0.86249,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.73
+    },
+    {
+      "id": "ii25_test_034",
+      "source_file": "21-2-330.docx",
+      "expected_code": "0002.0013.0139.0330",
+      "expected_name": "Питание обучающихся",
+      "dense_rank": null,
+      "lexical_rank": null,
+      "merged_rank": null,
+      "reranked_rank": null,
+      "dense_recall_at_10": false,
+      "dense_recall_at_50": false,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": false,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": false,
+      "reranked_prefix_level2": false,
+      "reranked_prefix_level3": false,
+      "top_reranked_codes": [
+        "0004.0015.0158.0959.0070",
+        "0004.0015.0158.0959.0071",
+        "0004.0015.0158.0959.0066",
+        "0004.0015.0158.0959.0064",
+        "0004.0015.0158.0959.0068"
+      ],
+      "top_reranked": [
+        {
+          "code": "0004.0015.0158.0959.0070",
+          "name": "СК России",
+          "similarity": 0.832,
+          "rerank_score": 0.898101,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0015.0158.0959.0071",
+          "name": "иные войска и органы",
+          "similarity": 0.83,
+          "rerank_score": 0.896101,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0015.0158.0959.0066",
+          "name": "ФСБ России, в том числе Пограничная служба",
+          "similarity": 0.822,
+          "rerank_score": 0.893815,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0015.0158.0959.0064",
+          "name": "Минобороны России",
+          "similarity": 0.827,
+          "rerank_score": 0.893101,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0015.0158.0959.0068",
+          "name": "СВР России",
+          "similarity": 0.827,
+          "rerank_score": 0.893101,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.368
+    },
+    {
+      "id": "ii25_test_035",
+      "source_file": "21-2-331-2.docx",
+      "expected_code": "0002.0013.0139.0331",
+      "expected_name": "Материально-техническое и информационное обеспечение образовательного процесса",
+      "dense_rank": null,
+      "lexical_rank": null,
+      "merged_rank": null,
+      "reranked_rank": null,
+      "dense_recall_at_10": false,
+      "dense_recall_at_50": false,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": false,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": true,
+      "reranked_prefix_level2": true,
+      "reranked_prefix_level3": false,
+      "top_reranked_codes": [
+        "0002.0013.0000.0000",
+        "0003.0008.0087.0592",
+        "0001.0001.0019.0057",
+        "0002.0013.0141.0368.0045",
+        "0003.0008.0087.0590"
+      ],
+      "top_reranked": [
+        {
+          "code": "0002.0013.0000.0000",
+          "name": "Образование. Наука. Культура",
+          "similarity": 0.816,
+          "rerank_score": 0.857451,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0008.0087.0592",
+          "name": "Кредитная история",
+          "similarity": 0.804,
+          "rerank_score": 0.853635,
+          "source": "dense"
+        },
+        {
+          "code": "0001.0001.0019.0057",
+          "name": "Государственные и иные премии",
+          "similarity": 0.799,
+          "rerank_score": 0.852387,
+          "source": "dense"
+        },
+        {
+          "code": "0002.0013.0141.0368.0045",
+          "name": "музейное дело",
+          "similarity": 0.799,
+          "rerank_score": 0.851703,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0008.0087.0590",
+          "name": "Интернет-банкинг",
+          "similarity": 0.799,
+          "rerank_score": 0.848635,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.897
+    },
+    {
+      "id": "ii25_test_036",
+      "source_file": "21-2-331.docx",
+      "expected_code": "0002.0013.0139.0331",
+      "expected_name": "Материально-техническое и информационное обеспечение образовательного процесса",
+      "dense_rank": null,
+      "lexical_rank": null,
+      "merged_rank": null,
+      "reranked_rank": null,
+      "dense_recall_at_10": false,
+      "dense_recall_at_50": false,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": false,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": false,
+      "reranked_prefix_level2": false,
+      "reranked_prefix_level3": false,
+      "top_reranked_codes": [
+        "0005.0005.0056.1156",
+        "0003.0009.0099.0733.0059",
+        "0002.0004.0047.0230",
+        "0005.0005.0056.1197",
+        "0005.0005.0056.1160"
+      ],
+      "top_reranked": [
+        {
+          "code": "0005.0005.0056.1156",
+          "name": "Перебои в теплоснабжении",
+          "similarity": 0.813,
+          "rerank_score": 0.864913,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0099.0733.0059",
+          "name": "железнодорожный транспорт",
+          "similarity": 0.801,
+          "rerank_score": 0.85948,
+          "source": "dense"
+        },
+        {
+          "code": "0002.0004.0047.0230",
+          "name": "Права и обязанности родителей и детей",
+          "similarity": 0.803,
+          "rerank_score": 0.855342,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0056.1197",
+          "name": "Обеспечение топливом",
+          "similarity": 0.803,
+          "rerank_score": 0.854913,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0056.1160",
+          "name": "Обращение с твердыми коммунальными отходами",
+          "similarity": 0.8,
+          "rerank_score": 0.851913,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.373
+    },
+    {
+      "id": "ii25_test_037",
+      "source_file": "21-2-675.docx",
+      "expected_code": "0003.0009.0096.0675",
+      "expected_name": "Выполнение государственных требований при осуществлении строительной деятельности, соблюдение СНИПов",
+      "dense_rank": null,
+      "lexical_rank": null,
+      "merged_rank": null,
+      "reranked_rank": null,
+      "dense_recall_at_10": false,
+      "dense_recall_at_50": false,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": false,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": true,
+      "reranked_prefix_level2": true,
+      "reranked_prefix_level3": true,
+      "top_reranked_codes": [
+        "0003.0009.0096.0686",
+        "0003.0009.0096.0681",
+        "0005.0005.0056.1155",
+        "0005.0005.0056.1156",
+        "0005.0005.0056.1162"
+      ],
+      "top_reranked": [
+        {
+          "code": "0003.0009.0096.0686",
+          "name": "Устранение строительных недоделок",
+          "similarity": 0.8,
+          "rerank_score": 0.860203,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0096.0681",
+          "name": "Строительные организации, застройщики",
+          "similarity": 0.792,
+          "rerank_score": 0.852203,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0056.1155",
+          "name": "Перебои в газоснабжении",
+          "similarity": 0.799,
+          "rerank_score": 0.851528,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0056.1156",
+          "name": "Перебои в теплоснабжении",
+          "similarity": 0.799,
+          "rerank_score": 0.851528,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0056.1162",
+          "name": "Условия проживания в связи со строительством или работой объектов коммунального обслуживания",
+          "similarity": 0.786,
+          "rerank_score": 0.85116,
+          "source": "lexical"
+        }
+      ],
+      "elapsed": 0.309
+    },
+    {
+      "id": "ii25_test_038",
+      "source_file": "21-2-689-2.docx",
+      "expected_code": "0003.0009.0097.0689",
+      "expected_name": "Комплексное благоустройство",
+      "dense_rank": null,
+      "lexical_rank": null,
+      "merged_rank": null,
+      "reranked_rank": null,
+      "dense_recall_at_10": false,
+      "dense_recall_at_50": false,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": false,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": false,
+      "reranked_prefix_level2": false,
+      "reranked_prefix_level3": false,
+      "top_reranked_codes": [
+        "0005.0005.0054.1119",
+        "0002.0014.0143.0427.0051",
+        "0005.0005.0056.1160",
+        "0005.0005.0061.1186",
+        "0004.0015.0155.0947.0070"
+      ],
+      "top_reranked": [
+        {
+          "code": "0005.0005.0054.1119",
+          "name": "Вопросы частного домовладения",
+          "similarity": 0.807,
+          "rerank_score": 0.861809,
+          "source": "dense"
+        },
+        {
+          "code": "0002.0014.0143.0427.0051",
+          "name": "медицинская помощь и лечение",
+          "similarity": 0.793,
+          "rerank_score": 0.854286,
+          "source": "lexical"
+        },
+        {
+          "code": "0005.0005.0056.1160",
+          "name": "Обращение с твердыми коммунальными отходами",
+          "similarity": 0.796,
+          "rerank_score": 0.850849,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0061.1186",
+          "name": "Дачное хозяйство",
+          "similarity": 0.794,
+          "rerank_score": 0.848969,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0015.0155.0947.0070",
+          "name": "СК России",
+          "similarity": 0.796,
+          "rerank_score": 0.84589,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.319
+    },
+    {
+      "id": "ii25_test_039",
+      "source_file": "21-2-689-3.docx",
+      "expected_code": "0003.0009.0097.0689",
+      "expected_name": "Комплексное благоустройство",
+      "dense_rank": 10,
+      "lexical_rank": null,
+      "merged_rank": 10,
+      "reranked_rank": 7,
+      "dense_recall_at_10": true,
+      "dense_recall_at_50": true,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": true,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": true,
+      "reranked_prefix_level1": true,
+      "reranked_prefix_level2": true,
+      "reranked_prefix_level3": true,
+      "top_reranked_codes": [
+        "0003.0009.0097.0695",
+        "0005.0005.0054.1119",
+        "0005.0005.0054.1120",
+        "0003.0009.0096.0681",
+        "0003.0009.0096.0682"
+      ],
+      "top_reranked": [
+        {
+          "code": "0003.0009.0097.0695",
+          "name": "Организация выгула собак",
+          "similarity": 0.822,
+          "rerank_score": 0.884267,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0054.1119",
+          "name": "Вопросы частного домовладения",
+          "similarity": 0.821,
+          "rerank_score": 0.878088,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0054.1120",
+          "name": "Индивидуальное жилищное строительство",
+          "similarity": 0.823,
+          "rerank_score": 0.87602,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0096.0681",
+          "name": "Строительные организации, застройщики",
+          "similarity": 0.817,
+          "rerank_score": 0.875319,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0096.0682",
+          "name": "Жилищное строительство",
+          "similarity": 0.819,
+          "rerank_score": 0.873251,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.486
+    },
+    {
+      "id": "ii25_test_040",
+      "source_file": "21-2-689.docx",
+      "expected_code": "0003.0009.0097.0689",
+      "expected_name": "Комплексное благоустройство",
+      "dense_rank": 30,
+      "lexical_rank": null,
+      "merged_rank": 30,
+      "reranked_rank": null,
+      "dense_recall_at_10": false,
+      "dense_recall_at_50": true,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": true,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": true,
+      "reranked_prefix_level2": true,
+      "reranked_prefix_level3": false,
+      "top_reranked_codes": [
+        "0003.0009.0098.0709",
+        "0003.0009.0098.0713",
+        "0003.0009.0098.1197",
+        "0003.0009.0098.0708",
+        "0002.0014.0000.0000"
+      ],
+      "top_reranked": [
+        {
+          "code": "0003.0009.0098.0709",
+          "name": "Сельскохозяйственная продукция",
+          "similarity": 0.806,
+          "rerank_score": 0.8618,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0098.0713",
+          "name": "Мелиорация",
+          "similarity": 0.804,
+          "rerank_score": 0.8598,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0098.1197",
+          "name": "Обеспечение топливом",
+          "similarity": 0.801,
+          "rerank_score": 0.8568,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0098.0708",
+          "name": "Личные подсобные хозяйства",
+          "similarity": 0.801,
+          "rerank_score": 0.8568,
+          "source": "dense"
+        },
+        {
+          "code": "0002.0014.0000.0000",
+          "name": "Здравоохранение. Физическая культура и спорт. Туризм",
+          "similarity": 0.804,
+          "rerank_score": 0.838859,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.636
+    },
+    {
+      "id": "ii25_test_041",
+      "source_file": "21-2-692.docx",
+      "expected_code": "0003.0009.0097.0692",
+      "expected_name": "Озеленение",
+      "dense_rank": 1,
+      "lexical_rank": null,
+      "merged_rank": 1,
+      "reranked_rank": 1,
+      "dense_recall_at_10": true,
+      "dense_recall_at_50": true,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": true,
+      "reranked_top1": true,
+      "reranked_top3": true,
+      "reranked_top5": true,
+      "reranked_recall_at_10": true,
+      "reranked_prefix_level1": true,
+      "reranked_prefix_level2": true,
+      "reranked_prefix_level3": true,
+      "top_reranked_codes": [
+        "0003.0009.0097.0692",
+        "0003.0009.0096.0682",
+        "0003.0009.0096.0679",
+        "0003.0009.0096.0686",
+        "0003.0009.0097.0703"
+      ],
+      "top_reranked": [
+        {
+          "code": "0003.0009.0097.0692",
+          "name": "Озеленение",
+          "similarity": 0.818,
+          "rerank_score": 0.87388,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0096.0682",
+          "name": "Жилищное строительство",
+          "similarity": 0.814,
+          "rerank_score": 0.871076,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0096.0679",
+          "name": "Государственный кадастровый учет недвижимого имущества",
+          "similarity": 0.815,
+          "rerank_score": 0.871,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0096.0686",
+          "name": "Устранение строительных недоделок",
+          "similarity": 0.813,
+          "rerank_score": 0.869,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0097.0703",
+          "name": "Газификация поселений",
+          "similarity": 0.81,
+          "rerank_score": 0.86588,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.952
+    },
+    {
+      "id": "ii25_test_042",
+      "source_file": "21-2-693.docx",
+      "expected_code": "0003.0009.0097.0693",
+      "expected_name": "Парковки автотранспорта вне организованных автостоянок",
+      "dense_rank": 4,
+      "lexical_rank": null,
+      "merged_rank": 4,
+      "reranked_rank": null,
+      "dense_recall_at_10": true,
+      "dense_recall_at_50": true,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": true,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": false,
+      "reranked_prefix_level2": false,
+      "reranked_prefix_level3": false,
+      "top_reranked_codes": [
+        "0005.0005.0054.1119",
+        "0004.0015.0155.0947.0065",
+        "0005.0005.0056.1170",
+        "0004.0015.0155.0947.0064",
+        "0005.0005.0056.1165"
+      ],
+      "top_reranked": [
+        {
+          "code": "0005.0005.0054.1119",
+          "name": "Вопросы частного домовладения",
+          "similarity": 0.821,
+          "rerank_score": 0.879656,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0015.0155.0947.0065",
+          "name": "МЧС России",
+          "similarity": 0.819,
+          "rerank_score": 0.877171,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0056.1170",
+          "name": "Капитальный ремонт общего имущества",
+          "similarity": 0.813,
+          "rerank_score": 0.871816,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0015.0155.0947.0064",
+          "name": "Минобороны России",
+          "similarity": 0.812,
+          "rerank_score": 0.870171,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0056.1165",
+          "name": "Частный жилищный фонд",
+          "similarity": 0.811,
+          "rerank_score": 0.869816,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.353
+    },
+    {
+      "id": "ii25_test_043",
+      "source_file": "21-3-694-2.docx",
+      "expected_code": "0003.0009.0097.0694",
+      "expected_name": "Уборка снега, опавших листьев, мусора и посторонних предметов",
+      "dense_rank": 2,
+      "lexical_rank": null,
+      "merged_rank": 2,
+      "reranked_rank": null,
+      "dense_recall_at_10": true,
+      "dense_recall_at_50": true,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": true,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": true,
+      "reranked_prefix_level2": true,
+      "reranked_prefix_level3": false,
+      "top_reranked_codes": [
+        "0003.0009.0099.0742.0110",
+        "0003.0009.0099.0744",
+        "0003.0009.0099.0742.0109",
+        "0003.0009.0099.0742.0111",
+        "0003.0009.0096.0684.0108"
+      ],
+      "top_reranked": [
+        {
+          "code": "0003.0009.0099.0742.0110",
+          "name": "ремонт автомобильных дорог",
+          "similarity": 0.788,
+          "rerank_score": 0.842455,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0099.0744",
+          "name": "Дорожные знаки и дорожная разметка",
+          "similarity": 0.788,
+          "rerank_score": 0.842415,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0099.0742.0109",
+          "name": "капитальный ремонт автомобильных дорог",
+          "similarity": 0.784,
+          "rerank_score": 0.838455,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0099.0742.0111",
+          "name": "содержание автомобильных дорог",
+          "similarity": 0.783,
+          "rerank_score": 0.837455,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0096.0684.0108",
+          "name": "реконструкция дорог",
+          "similarity": 0.782,
+          "rerank_score": 0.836495,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.41
+    },
+    {
+      "id": "ii25_test_044",
+      "source_file": "21-3-694.docx",
+      "expected_code": "0003.0009.0097.0694",
+      "expected_name": "Уборка снега, опавших листьев, мусора и посторонних предметов",
+      "dense_rank": null,
+      "lexical_rank": null,
+      "merged_rank": null,
+      "reranked_rank": null,
+      "dense_recall_at_10": false,
+      "dense_recall_at_50": false,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": false,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": true,
+      "reranked_prefix_level2": true,
+      "reranked_prefix_level3": true,
+      "top_reranked_codes": [
+        "0003.0009.0097.0699",
+        "0003.0009.0096.0684",
+        "0003.0009.0099.0742.0110",
+        "0003.0009.0096.0684.0108",
+        "0003.0009.0096.0684.0107"
+      ],
+      "top_reranked": [
+        {
+          "code": "0003.0009.0097.0699",
+          "name": "Благоустройство и ремонт подъездных дорог, в том числе тротуаров",
+          "similarity": 0.818,
+          "rerank_score": 0.88611,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0096.0684",
+          "name": "Строительство и реконструкция дорог",
+          "similarity": 0.818,
+          "rerank_score": 0.880616,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0099.0742.0110",
+          "name": "ремонт автомобильных дорог",
+          "similarity": 0.816,
+          "rerank_score": 0.878616,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0096.0684.0108",
+          "name": "реконструкция дорог",
+          "similarity": 0.815,
+          "rerank_score": 0.877976,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0096.0684.0107",
+          "name": "строительство дорог",
+          "similarity": 0.814,
+          "rerank_score": 0.876976,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.343
+    },
+    {
+      "id": "ii25_test_045",
+      "source_file": "21-3-699.docx",
+      "expected_code": "0003.0009.0097.0699",
+      "expected_name": "Благоустройство и ремонт подъездных дорог, в том числе тротуаров",
+      "dense_rank": 9,
+      "lexical_rank": null,
+      "merged_rank": 9,
+      "reranked_rank": null,
+      "dense_recall_at_10": true,
+      "dense_recall_at_50": true,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": true,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": false,
+      "reranked_prefix_level2": false,
+      "reranked_prefix_level3": false,
+      "top_reranked_codes": [
+        "0002.0007.0074.0312",
+        "0004.0015.0158.0959.0070",
+        "0004.0015.0155.0947.0068",
+        "0004.0015.0158.0953.0070",
+        "0004.0015.0158.0953.0065"
+      ],
+      "top_reranked": [
+        {
+          "code": "0002.0007.0074.0312",
+          "name": "Предоставление дополнительных льгот отдельным категориям граждан, установленных законодательством субъекта Российской Федерации (в том числе предоставление земельных участков многодетным семьям и др.)",
+          "similarity": 0.828,
+          "rerank_score": 0.878784,
+          "source": "lexical"
+        },
+        {
+          "code": "0004.0015.0158.0959.0070",
+          "name": "СК России",
+          "similarity": 0.805,
+          "rerank_score": 0.866761,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0015.0155.0947.0068",
+          "name": "СВР России",
+          "similarity": 0.808,
+          "rerank_score": 0.866318,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0015.0158.0953.0070",
+          "name": "СК России",
+          "similarity": 0.801,
+          "rerank_score": 0.865884,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0015.0158.0953.0065",
+          "name": "МЧС России",
+          "similarity": 0.801,
+          "rerank_score": 0.865884,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.324
+    },
+    {
+      "id": "ii25_test_046",
+      "source_file": "21-3-700-2.docx",
+      "expected_code": "0003.0009.0097.0700",
+      "expected_name": "Водоснабжение поселений",
+      "dense_rank": 7,
+      "lexical_rank": null,
+      "merged_rank": 7,
+      "reranked_rank": null,
+      "dense_recall_at_10": true,
+      "dense_recall_at_50": true,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": true,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": false,
+      "reranked_prefix_level2": false,
+      "reranked_prefix_level3": false,
+      "top_reranked_codes": [
+        "0005.0005.0056.1154",
+        "0005.0005.0056.1157",
+        "0005.0005.0056.1156",
+        "0005.0005.0056.1155",
+        "0005.0005.0056.1153"
+      ],
+      "top_reranked": [
+        {
+          "code": "0005.0005.0056.1154",
+          "name": "Перебои в водоснабжении",
+          "similarity": 0.829,
+          "rerank_score": 0.879925,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0056.1157",
+          "name": "Перебои в водоотведении и канализовании",
+          "similarity": 0.819,
+          "rerank_score": 0.869925,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0056.1156",
+          "name": "Перебои в теплоснабжении",
+          "similarity": 0.818,
+          "rerank_score": 0.868925,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0056.1155",
+          "name": "Перебои в газоснабжении",
+          "similarity": 0.816,
+          "rerank_score": 0.866925,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0056.1153",
+          "name": "Перебои в электроснабжении",
+          "similarity": 0.815,
+          "rerank_score": 0.865925,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.398
+    },
+    {
+      "id": "ii25_test_047",
+      "source_file": "21-3-700.docx",
+      "expected_code": "0003.0009.0097.0700",
+      "expected_name": "Водоснабжение поселений",
+      "dense_rank": 8,
+      "lexical_rank": null,
+      "merged_rank": 8,
+      "reranked_rank": null,
+      "dense_recall_at_10": true,
+      "dense_recall_at_50": true,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": true,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": false,
+      "reranked_prefix_level2": false,
+      "reranked_prefix_level3": false,
+      "top_reranked_codes": [
+        "0005.0005.0056.1154",
+        "0005.0005.0056.1158",
+        "0005.0005.0056.1157",
+        "0005.0005.0054.1119",
+        "0005.0005.0056.1155"
+      ],
+      "top_reranked": [
+        {
+          "code": "0005.0005.0056.1154",
+          "name": "Перебои в водоснабжении",
+          "similarity": 0.826,
+          "rerank_score": 0.882572,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0056.1158",
+          "name": "Ремонт и эксплуатация ливневой канализации",
+          "similarity": 0.821,
+          "rerank_score": 0.877572,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0056.1157",
+          "name": "Перебои в водоотведении и канализовании",
+          "similarity": 0.822,
+          "rerank_score": 0.877239,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0054.1119",
+          "name": "Вопросы частного домовладения",
+          "similarity": 0.819,
+          "rerank_score": 0.874119,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0056.1155",
+          "name": "Перебои в газоснабжении",
+          "similarity": 0.814,
+          "rerank_score": 0.869239,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 1.063
+    },
+    {
+      "id": "ii25_test_048",
+      "source_file": "21-3-717.docx",
+      "expected_code": "0003.0009.0098.0717",
+      "expected_name": "Работа ветеринарной службы",
+      "dense_rank": 12,
+      "lexical_rank": null,
+      "merged_rank": 12,
+      "reranked_rank": 10,
+      "dense_recall_at_10": false,
+      "dense_recall_at_50": true,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": true,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": true,
+      "reranked_prefix_level1": true,
+      "reranked_prefix_level2": true,
+      "reranked_prefix_level3": true,
+      "top_reranked_codes": [
+        "0003.0009.0098.0727",
+        "0003.0009.0098.0725",
+        "0003.0009.0098.0718",
+        "0003.0009.0098.0726",
+        "0003.0009.0098.0728"
+      ],
+      "top_reranked": [
+        {
+          "code": "0003.0009.0098.0727",
+          "name": "Содержание домашних животных",
+          "similarity": 0.821,
+          "rerank_score": 0.893809,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0098.0725",
+          "name": "Животноводство",
+          "similarity": 0.821,
+          "rerank_score": 0.886309,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0098.0718",
+          "name": "Нарушения в области ветеринарии",
+          "similarity": 0.813,
+          "rerank_score": 0.885809,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0098.0726",
+          "name": "Правила содержания домашних животных",
+          "similarity": 0.812,
+          "rerank_score": 0.884809,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0098.0728",
+          "name": "Ненадлежащее содержание домашних животных",
+          "similarity": 0.811,
+          "rerank_score": 0.883809,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.342
+    },
+    {
+      "id": "ii25_test_049",
+      "source_file": "21-3-742.docx",
+      "expected_code": "0003.0009.0099.0742",
+      "expected_name": "Эксплуатация и сохранность автомобильных дорог",
+      "dense_rank": 14,
+      "lexical_rank": 17,
+      "merged_rank": 14,
+      "reranked_rank": 8,
+      "dense_recall_at_10": false,
+      "dense_recall_at_50": true,
+      "lexical_recall_at_30": true,
+      "merged_recall_at_50": true,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": true,
+      "reranked_prefix_level1": true,
+      "reranked_prefix_level2": true,
+      "reranked_prefix_level3": true,
+      "top_reranked_codes": [
+        "0003.0009.0099.0747",
+        "0003.0009.0099.0742.0110",
+        "0003.0009.0099.0740",
+        "0003.0009.0096.0684",
+        "0003.0009.0099.0743"
+      ],
+      "top_reranked": [
+        {
+          "code": "0003.0009.0099.0747",
+          "name": "Эвакуация транспортных средств",
+          "similarity": 0.824,
+          "rerank_score": 0.88844,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0099.0742.0110",
+          "name": "ремонт автомобильных дорог",
+          "similarity": 0.818,
+          "rerank_score": 0.884833,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0099.0740",
+          "name": "Работа спецавтохозяйства",
+          "similarity": 0.82,
+          "rerank_score": 0.88444,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0096.0684",
+          "name": "Строительство и реконструкция дорог",
+          "similarity": 0.815,
+          "rerank_score": 0.881633,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0099.0743",
+          "name": "Борьба с аварийностью. Безопасность дорожного движения",
+          "similarity": 0.817,
+          "rerank_score": 0.88144,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.54
+    },
+    {
+      "id": "ii25_test_050",
+      "source_file": "21-3-749.docx",
+      "expected_code": "0003.0009.0099.0749",
+      "expected_name": "Программа по утилизации старых автомобилей",
+      "dense_rank": 2,
+      "lexical_rank": null,
+      "merged_rank": 2,
+      "reranked_rank": 4,
+      "dense_recall_at_10": true,
+      "dense_recall_at_50": true,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": true,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": true,
+      "reranked_recall_at_10": true,
+      "reranked_prefix_level1": true,
+      "reranked_prefix_level2": true,
+      "reranked_prefix_level3": true,
+      "top_reranked_codes": [
+        "0003.0009.0099.0747",
+        "0003.0009.0099.0740",
+        "0003.0009.0099.0744",
+        "0003.0009.0099.0749",
+        "0003.0009.0099.0742.0110"
+      ],
+      "top_reranked": [
+        {
+          "code": "0003.0009.0099.0747",
+          "name": "Эвакуация транспортных средств",
+          "similarity": 0.831,
+          "rerank_score": 0.903764,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0099.0740",
+          "name": "Работа спецавтохозяйства",
+          "similarity": 0.82,
+          "rerank_score": 0.892764,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0099.0744",
+          "name": "Дорожные знаки и дорожная разметка",
+          "similarity": 0.818,
+          "rerank_score": 0.890764,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0099.0749",
+          "name": "Программа по утилизации старых автомобилей",
+          "similarity": 0.823,
+          "rerank_score": 0.888907,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0099.0742.0110",
+          "name": "ремонт автомобильных дорог",
+          "similarity": 0.82,
+          "rerank_score": 0.886187,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.347
+    },
+    {
+      "id": "ii25_test_051",
+      "source_file": "21-3-830.docx",
+      "expected_code": "0003.0011.0122.0830",
+      "expected_name": "Требования в области охраны окружающей среды при осуществлении хозяйственной и иной деятельности",
+      "dense_rank": null,
+      "lexical_rank": null,
+      "merged_rank": null,
+      "reranked_rank": null,
+      "dense_recall_at_10": false,
+      "dense_recall_at_50": false,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": false,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": true,
+      "reranked_prefix_level2": false,
+      "reranked_prefix_level3": false,
+      "top_reranked_codes": [
+        "0003.0009.0099.0747",
+        "0005.0005.0056.1161",
+        "0003.0009.0099.0743",
+        "0003.0009.0099.0741",
+        "0003.0009.0097.0697"
+      ],
+      "top_reranked": [
+        {
+          "code": "0003.0009.0099.0747",
+          "name": "Эвакуация транспортных средств",
+          "similarity": 0.8,
+          "rerank_score": 0.858731,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0056.1161",
+          "name": "Несанкционированная свалка мусора, биоотходы",
+          "similarity": 0.806,
+          "rerank_score": 0.856573,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0099.0743",
+          "name": "Борьба с аварийностью. Безопасность дорожного движения",
+          "similarity": 0.797,
+          "rerank_score": 0.855731,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0099.0741",
+          "name": "О строительстве, размещении гаражей, стоянок, автопарковок",
+          "similarity": 0.797,
+          "rerank_score": 0.855731,
+          "source": "dense"
+        },
+        {
+          "code": "0003.0009.0097.0697",
+          "name": "Акарицидная обработка",
+          "similarity": 0.796,
+          "rerank_score": 0.854891,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.35
+    },
+    {
+      "id": "ii25_test_052",
+      "source_file": "21-4-898.docx",
+      "expected_code": "0004.0015.0148.0898",
+      "expected_name": "Мобилизация",
+      "dense_rank": null,
+      "lexical_rank": null,
+      "merged_rank": null,
+      "reranked_rank": null,
+      "dense_recall_at_10": false,
+      "dense_recall_at_50": false,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": false,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": true,
+      "reranked_prefix_level2": true,
+      "reranked_prefix_level3": false,
+      "top_reranked_codes": [
+        "0004.0015.0155.0947.0070",
+        "0004.0015.0158.0953.0070",
+        "0004.0015.0155.0947.0068",
+        "0004.0015.0158.0952.0070",
+        "0004.0015.0155.0947.0064"
+      ],
+      "top_reranked": [
+        {
+          "code": "0004.0015.0155.0947.0070",
+          "name": "СК России",
+          "similarity": 0.843,
+          "rerank_score": 0.926874,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0015.0158.0953.0070",
+          "name": "СК России",
+          "similarity": 0.837,
+          "rerank_score": 0.920794,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0015.0155.0947.0068",
+          "name": "СВР России",
+          "similarity": 0.836,
+          "rerank_score": 0.919874,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0015.0158.0952.0070",
+          "name": "СК России",
+          "similarity": 0.837,
+          "rerank_score": 0.919398,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0015.0155.0947.0064",
+          "name": "Минобороны России",
+          "similarity": 0.831,
+          "rerank_score": 0.914874,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.447
+    },
+    {
+      "id": "ii25_test_053",
+      "source_file": "21-5-1022.docx",
+      "expected_code": "0004.0016.0162.1022",
+      "expected_name": "Противопожарная служба, соблюдение норм противопожарной безопасности",
+      "dense_rank": null,
+      "lexical_rank": null,
+      "merged_rank": null,
+      "reranked_rank": null,
+      "dense_recall_at_10": false,
+      "dense_recall_at_50": false,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": false,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": false,
+      "reranked_prefix_level2": false,
+      "reranked_prefix_level3": false,
+      "top_reranked_codes": [
+        "0005.0005.0063.1188",
+        "0004.0015.0155.0947.0065",
+        "0001.0002.0027.0126",
+        "0004.0015.0155.0947.0069",
+        "0004.0015.0155.0947.0070"
+      ],
+      "top_reranked": [
+        {
+          "code": "0005.0005.0063.1188",
+          "name": "Разрешение жилищных споров. Ответственность за нарушение жилищного законодательства",
+          "similarity": 0.814,
+          "rerank_score": 0.87053,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0015.0155.0947.0065",
+          "name": "МЧС России",
+          "similarity": 0.817,
+          "rerank_score": 0.870154,
+          "source": "dense"
+        },
+        {
+          "code": "0001.0002.0027.0126",
+          "name": "Отсутствует адресат обращения",
+          "similarity": 0.813,
+          "rerank_score": 0.870101,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0015.0155.0947.0069",
+          "name": "Росгвардия",
+          "similarity": 0.815,
+          "rerank_score": 0.868154,
+          "source": "dense"
+        },
+        {
+          "code": "0004.0015.0155.0947.0070",
+          "name": "СК России",
+          "similarity": 0.815,
+          "rerank_score": 0.868154,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.381
+    },
+    {
+      "id": "ii25_test_054",
+      "source_file": "21-5-1117.docx",
+      "expected_code": "0005.0005.0053.1117",
+      "expected_name": "Государственный жилищный контроль",
+      "dense_rank": null,
+      "lexical_rank": null,
+      "merged_rank": null,
+      "reranked_rank": null,
+      "dense_recall_at_10": false,
+      "dense_recall_at_50": false,
+      "lexical_recall_at_30": false,
+      "merged_recall_at_50": false,
+      "reranked_top1": false,
+      "reranked_top3": false,
+      "reranked_top5": false,
+      "reranked_recall_at_10": false,
+      "reranked_prefix_level1": true,
+      "reranked_prefix_level2": true,
+      "reranked_prefix_level3": false,
+      "top_reranked_codes": [
+        "0005.0005.0056.1154",
+        "0005.0005.0056.1153",
+        "0005.0005.0056.1155",
+        "0005.0005.0056.1156",
+        "0005.0005.0054.1119"
+      ],
+      "top_reranked": [
+        {
+          "code": "0005.0005.0056.1154",
+          "name": "Перебои в водоснабжении",
+          "similarity": 0.834,
+          "rerank_score": 0.886571,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0056.1153",
+          "name": "Перебои в электроснабжении",
+          "similarity": 0.827,
+          "rerank_score": 0.879571,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0056.1155",
+          "name": "Перебои в газоснабжении",
+          "similarity": 0.826,
+          "rerank_score": 0.878571,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0056.1156",
+          "name": "Перебои в теплоснабжении",
+          "similarity": 0.826,
+          "rerank_score": 0.878571,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0054.1119",
+          "name": "Вопросы частного домовладения",
+          "similarity": 0.826,
+          "rerank_score": 0.878491,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.449
+    },
+    {
+      "id": "ii25_test_055",
+      "source_file": "21-5-1122.docx",
+      "expected_code": "0005.0005.0055.1122",
+      "expected_name": "Переселение из подвалов, бараков, коммуналок, общежитий, аварийных домов, ветхого жилья, санитарно-защитной зоны",
+      "dense_rank": 1,
+      "lexical_rank": 7,
+      "merged_rank": 1,
+      "reranked_rank": 1,
+      "dense_recall_at_10": true,
+      "dense_recall_at_50": true,
+      "lexical_recall_at_30": true,
+      "merged_recall_at_50": true,
+      "reranked_top1": true,
+      "reranked_top3": true,
+      "reranked_top5": true,
+      "reranked_recall_at_10": true,
+      "reranked_prefix_level1": true,
+      "reranked_prefix_level2": true,
+      "reranked_prefix_level3": true,
+      "top_reranked_codes": [
+        "0005.0005.0055.1122",
+        "0005.0005.0054.1119",
+        "0005.0005.0055.1124",
+        "0005.0005.0055.1134",
+        "0005.0005.0055.1137"
+      ],
+      "top_reranked": [
+        {
+          "code": "0005.0005.0055.1122",
+          "name": "Переселение из подвалов, бараков, коммуналок, общежитий, аварийных домов, ветхого жилья, санитарно-защитной зоны",
+          "similarity": 0.836,
+          "rerank_score": 0.906156,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0054.1119",
+          "name": "Вопросы частного домовладения",
+          "similarity": 0.836,
+          "rerank_score": 0.895993,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0055.1124",
+          "name": "Несогласие граждан с вариантами предоставления жилья, взамен признанного в установленном порядке аварийным",
+          "similarity": 0.829,
+          "rerank_score": 0.895222,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0055.1134",
+          "name": "Обеспечение жильем инвалидов и семей, имеющих детей-инвалидов",
+          "similarity": 0.82,
+          "rerank_score": 0.89409,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0055.1137",
+          "name": "Обследование жилого фонда на предмет пригодности для проживания (ветхое и аварийное жилье)",
+          "similarity": 0.821,
+          "rerank_score": 0.891156,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.511
+    },
+    {
+      "id": "ii25_test_056",
+      "source_file": "21-5-1125 с приложениями.docx",
+      "expected_code": "0005.0005.0055.1125",
+      "expected_name": "Распределение жилых помещений, предоставляемых по договору социального найма",
+      "dense_rank": 3,
+      "lexical_rank": 8,
+      "merged_rank": 3,
+      "reranked_rank": 3,
+      "dense_recall_at_10": true,
+      "dense_recall_at_50": true,
+      "lexical_recall_at_30": true,
+      "merged_recall_at_50": true,
+      "reranked_top1": false,
+      "reranked_top3": true,
+      "reranked_top5": true,
+      "reranked_recall_at_10": true,
+      "reranked_prefix_level1": true,
+      "reranked_prefix_level2": true,
+      "reranked_prefix_level3": true,
+      "top_reranked_codes": [
+        "0005.0005.0055.1133",
+        "0005.0005.0055.1128",
+        "0005.0005.0055.1125",
+        "0005.0005.0055.1136",
+        "0005.0005.0055.1143"
+      ],
+      "top_reranked": [
+        {
+          "code": "0005.0005.0055.1133",
+          "name": "Обмен жилых помещений. Оформление договора социального найма (найма) жилого помещения",
+          "similarity": 0.859,
+          "rerank_score": 0.942855,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0055.1128",
+          "name": "Улучшение жилищных условий, предоставление жилого помещения по договору социального найма гражданам, состоящим на учете в органе местного самоуправления в качестве нуждающихся в жилых помещениях",
+          "similarity": 0.849,
+          "rerank_score": 0.932213,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0055.1125",
+          "name": "Распределение жилых помещений, предоставляемых по договору социального найма",
+          "similarity": 0.84,
+          "rerank_score": 0.920005,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0055.1136",
+          "name": "Правила пользования жилыми помещениями (перепланировки, реконструкции, переоборудование, использование не по назначению)",
+          "similarity": 0.836,
+          "rerank_score": 0.91793,
+          "source": "dense"
+        },
+        {
+          "code": "0005.0005.0055.1143",
+          "name": "Предоставление жилого помещения по договору коммерческого найма",
+          "similarity": 0.836,
+          "rerank_score": 0.916646,
+          "source": "dense"
+        }
+      ],
+      "elapsed": 0.984
+    }
+  ]
+}
