@@ -29,6 +29,8 @@
   --shadow-hover: 0 8px 24px rgba(1,12,28,.10);
   --radius:       10px;
   --radius-sm:    6px;
+  --header-height: 56px;
+  --sidebar-width: 224px;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -343,3 +345,355 @@ tr:nth-child(even) td { background: var(--surface2); }
 #ip-stats { margin-top: 16px; }
 #ip-stats th.sort-asc::after  { content: ' ↑'; color: var(--orange); }
 #ip-stats th.sort-desc::after { content: ' ↓'; color: var(--orange); }
+
+/* ── Unified Directum RX shell ─────────────────────────────────────────────── */
+.app-header {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 120;
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr) auto;
+  align-items: center;
+  height: var(--header-height);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  height: 100%;
+  padding: 0 20px;
+  border-right: 1px solid var(--border);
+  color: var(--orange);
+  font-size: 20px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.brand-logo {
+  display: block;
+  max-width: 136px;
+  height: 26px;
+}
+
+.brand-fallback { display: none; }
+
+.app-title {
+  min-width: 0;
+  padding: 0 24px;
+}
+
+.eyebrow {
+  margin: 0 0 2px;
+  color: var(--subtle);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.app-title h1 {
+  margin: 0;
+  color: var(--title);
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.app-header > .btn { margin-right: 24px; }
+
+.app-sidebar {
+  top: var(--header-height);
+  width: var(--sidebar-width);
+  padding: 18px 0 24px;
+  overflow: auto;
+}
+
+.status {
+  margin: 0 16px 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface2);
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.nav-list {
+  display: grid;
+  gap: 4px;
+}
+
+.app-sidebar .nav-item {
+  min-height: 40px;
+  border-left: 3px solid transparent;
+}
+
+.app-sidebar .nav-item.active {
+  border-left-color: var(--orange);
+}
+
+.result-section {
+  margin-top: 24px;
+  padding: 0 16px;
+}
+
+.result-section h2,
+.tool-section h2 {
+  margin: 0 0 12px;
+  color: var(--navy);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.result-list {
+  display: grid;
+  gap: 8px;
+}
+
+.result-card {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface2);
+  color: var(--text);
+  overflow-wrap: anywhere;
+  box-shadow: var(--shadow-sm);
+}
+
+.appeal-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  margin-left: var(--sidebar-width);
+  padding-top: var(--header-height);
+}
+
+.prompt-panel {
+  padding: 16px 24px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.prompt-panel-heading,
+.section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.prompt-panel-heading h2 {
+  margin: 0;
+  color: var(--navy);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.llm-inline-status,
+.section-heading p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.runtime-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.2fr) minmax(150px, .6fr) minmax(220px, 1fr);
+  gap: 10px;
+  align-items: end;
+}
+
+.field {
+  display: grid;
+  gap: 5px;
+}
+
+.field span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.field input,
+.field select,
+.field textarea {
+  min-width: 0;
+  min-height: 40px;
+  padding: 9px 10px;
+}
+
+.field input:focus,
+.field select:focus,
+.field textarea:focus {
+  border-color: var(--orange);
+  outline: 2px solid var(--orange-light);
+}
+
+.appeal-workspace {
+  display: grid;
+  grid-template-columns: minmax(360px, .9fr) minmax(420px, 1.1fr);
+  gap: 18px;
+  padding: 24px;
+}
+
+.tool-section {
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow .2s;
+}
+
+.tool-section:hover { box-shadow: var(--shadow-hover); }
+
+.appeal-text-field textarea {
+  resize: vertical;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  line-height: 1.45;
+}
+
+.file-field {
+  margin-bottom: 14px;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.button-row .btn {
+  min-height: 36px;
+}
+
+.loading-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.result-panel {
+  align-self: start;
+}
+
+.meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 16px;
+  font-size: 13px;
+}
+
+.meta-item {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface2);
+}
+
+.meta-label {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.questions-list {
+  margin-bottom: 16px;
+}
+
+.json-details {
+  margin-top: 16px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.json-details summary {
+  cursor: pointer;
+}
+
+.toast {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 999;
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 10px 16px;
+  border-radius: var(--radius-sm);
+  background: var(--navy);
+  color: #fff;
+  box-shadow: var(--shadow-md);
+  font-size: 13px;
+}
+
+@media (max-width: 920px) {
+  .app-header {
+    position: static;
+    grid-template-columns: 1fr;
+    height: auto;
+    gap: 10px;
+    padding: 12px 16px;
+  }
+
+  .brand {
+    height: auto;
+    padding: 0;
+    border-right: 0;
+  }
+
+  .app-title {
+    padding: 0;
+  }
+
+  .app-header > .btn {
+    justify-self: start;
+    margin-right: 0;
+  }
+
+  .app-sidebar {
+    position: static;
+    width: auto;
+  }
+
+  .appeal-shell {
+    margin-left: 0;
+    padding-top: 0;
+  }
+
+  .runtime-grid,
+  .appeal-workspace,
+  .meta-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .prompt-panel,
+  .appeal-workspace {
+    padding: 16px;
+  }
+
+  .prompt-panel-heading,
+  .section-heading,
+  .button-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

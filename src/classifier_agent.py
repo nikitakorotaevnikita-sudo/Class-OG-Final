@@ -14,6 +14,7 @@ sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
 import json
 import os
+import re
 # Set HF mirror before importing sentence_transformers (fixes SSL issues in corporate networks)
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 os.environ["HF_HUB_DISABLE_SSL"] = "1"
@@ -36,7 +37,7 @@ from typing import Optional
 from config import (
     GROQ_API_KEY, GROQ_MODEL,
     VECTOR_DB_DIR, EMBEDDING_MODEL,
-    TOP_K_CANDIDATES, TOP_K_RESULT, MIN_CONFIDENCE,
+    TOP_K_CANDIDATES, TOP_K_RESULT, MIN_CONFIDENCE, RETRIEVAL_POOL_SIZE, LEXICAL_POOL_SIZE,
     LLM_PROVIDER, GEMINI_API_KEY,
     OLLAMA_MODEL, OLLAMA_BASE_URL,
     ARIO_API_KEY, ARIO_BASE_URL, ARIO_MODEL,
@@ -44,7 +45,153 @@ from config import (
 from appeals_logger import get_logger
 
 
+_WORD_RE = re.compile(r"[a-zа-яё0-9]{3,}", re.IGNORECASE)
+_STOP_WORDS = {
+    "это", "как", "или", "для", "при", "над", "под", "без", "уже", "еще",
+    "прошу", "жалуюсь", "жалоба", "заявление", "обращение", "сообщить",
+    "разъяснить", "провести", "проверку", "принять", "меры", "ситуацию",
+    "дом", "дома", "улица", "улице", "года", "год", "лет", "день", "дней",
+}
+
+# ── Маркеры вопросов в обращении ───────────────────────────────────────────────
+# Numbered: "1." "2)" "3 -" в начале строки
+_NUMBERED_MARKER_RE = re.compile(r"(?m)^[ \t]*(\d{1,2})[ \t]*[\.\)][ \t]*")
+# Bullets: "• * - ·" в начале строки
+_BULLET_MARKER_RE = re.compile(r"(?m)^[ \t]*[•·∙\*\-][ \t]+")
+# Вербальные маркеры начала нового вопроса
+_VERBAL_MARKER_RE = re.compile(
+    r"(?i)(?:^|[\.!\?]\s+|\n\s*)("
+    r"во-первых|во-вторых|в-третьих|в-четвёртых|в-четвертых|в-пятых"
+    r"|кроме того|помимо этого|также прошу|также жалуюсь|также сообщ"
+    r"|во-первых,|во-вторых,|в-третьих,"
+    r")",
+    re.MULTILINE,
+)
+_PARAGRAPH_BREAK_RE = re.compile(r"\n[ \t]*\n+")
+# Если фрагмент содержит хотя бы один из этих корней — это «содержательный» вопрос
+_VERB_INDICATORS = (
+    "прошу", "жалу", "жалоб", "заявл", "сообщ", "разъясн", "разобрат",
+    "необходим", "требу", "помоч", "помощ", "оказан", "оказать", "оказыва",
+    "вышл", "доставит", "доставк", "выясн", "уведомл", "обращ", "содейств",
+    "снят", "лиш", "восстанов", "включ", "исключ", "выдать", "выдач",
+    "пенс", "льгот", "субсид", "пособ", "оплат", "проезд", "транспорт",
+    "лекарств", "инсулин", "инвалид", "телефон", "цифров", "обслуж",
+)
+_RUSSIAN_SUFFIXES = (
+    "иями", "ями", "ами", "ого", "его", "ому", "ему", "ыми", "ими",
+    "ая", "яя", "ое", "ее", "ые", "ие", "ых", "их", "ой", "ей",
+    "ам", "ям", "ах", "ях", "ов", "ев", "ий", "ый", "ом", "ем",
+    "а", "я", "ы", "и", "е", "у", "ю",
+)
+_QUERY_ALIASES = (
+    ({"детск", "сад"}, {"дошкольн", "образован", "поступлен", "мест"}),
+    ({"детск", "саду"}, {"дошкольн", "образован", "поступлен", "мест"}),
+    ({"очеред", "сад"}, {"дошкольн", "образован", "поступлен", "мест"}),
+    ({"очередь", "сад"}, {"дошкольн", "образован", "поступлен", "мест"}),
+    ({"ижс"}, {"индивидуальн", "жилищн", "строительств"}),
+    ({"земельн", "участк"}, {"земл", "геолог", "геодез"}),
+    ({"стройк"}, {"строительств", "реконструкц"}),
+)
+
+
+# ── Сегментация обращения ──────────────────────────────────────────────────────
+
+def _has_verb_indicator(text: str) -> bool:
+    lower = text.lower()
+    return any(v in lower for v in _VERB_INDICATORS)
+
+
+def split_appeal_questions(text: str, max_segments: int = 7) -> list["AppealQuestion"]:
+    """Conservative deterministic segmenter.
+
+    Возвращает список вопросов. Один вопрос — если явных маркеров нет.
+    Маркеры: "1." "2)" "•", "во-первых", "кроме того", и т.п.
+    Преамбулу без глаголов-просьб клеит к первому вопросу.
+    Хвост без явного маркера, если содержит ≥2 содержательных абзаца — разбивает на абзацы.
+    """
+    if not text or not text.strip():
+        return []
+
+    text = text.strip()
+
+    primary_positions: set[int] = set()
+    for m in _NUMBERED_MARKER_RE.finditer(text):
+        primary_positions.add(m.start())
+    for m in _BULLET_MARKER_RE.finditer(text):
+        primary_positions.add(m.start())
+    for m in _VERBAL_MARKER_RE.finditer(text):
+        primary_positions.add(m.start(1))
+
+    positions = sorted(primary_positions)
+
+    if not positions:
+        paragraphs = [p.strip() for p in _PARAGRAPH_BREAK_RE.split(text) if p.strip()]
+        substantive = [p for p in paragraphs if len(p) >= 30 and _has_verb_indicator(p)]
+        if len(substantive) >= 2:
+            segs = substantive[:max_segments]
+            return [
+                AppealQuestion(text=s, ordinal=i + 1, evidence="paragraph")
+                for i, s in enumerate(segs)
+            ]
+        return [AppealQuestion(text=text, ordinal=1, evidence="single")]
+
+    # Каждый chunk начинается ОТ позиции маркера и идёт до следующего
+    preamble = text[: positions[0]].strip() if positions[0] > 0 else ""
+    segments_raw: list[str] = []
+    for i, pos in enumerate(positions):
+        end = positions[i + 1] if i + 1 < len(positions) else len(text)
+        segments_raw.append(text[pos:end].strip())
+
+    if preamble:
+        has_verb = _has_verb_indicator(preamble)
+        if not has_verb or len(preamble) < 40:
+            if segments_raw:
+                segments_raw[0] = (preamble + " " + segments_raw[0]).strip()
+            else:
+                segments_raw = [preamble]
+        else:
+            segments_raw = [preamble] + segments_raw
+
+    # Если последний сегмент длинный — пробуем разбить его по абзацам
+    if segments_raw and len(segments_raw[-1]) > 200 and "\n\n" in segments_raw[-1]:
+        last = segments_raw[-1]
+        sub_parts = [p.strip() for p in _PARAGRAPH_BREAK_RE.split(last) if p.strip()]
+        substantive_subs = [p for p in sub_parts if len(p) >= 30 and _has_verb_indicator(p)]
+        if len(substantive_subs) >= 2:
+            segments_raw = segments_raw[:-1] + substantive_subs
+
+    cleaned: list[str] = []
+    for raw in segments_raw:
+        s = raw.strip()
+        s = _NUMBERED_MARKER_RE.sub("", s, count=1)
+        s = _BULLET_MARKER_RE.sub("", s, count=1)
+        s = s.strip()
+        if len(s) >= 5:
+            cleaned.append(s)
+
+    if not cleaned:
+        return [AppealQuestion(text=text, ordinal=1, evidence="single")]
+
+    if len(cleaned) > max_segments:
+        head = cleaned[: max_segments - 1]
+        tail = " ".join(cleaned[max_segments - 1 :])
+        cleaned = head + [tail]
+
+    return [
+        AppealQuestion(text=s, ordinal=i + 1, evidence="marker")
+        for i, s in enumerate(cleaned)
+    ]
+
+
 # ── Модели данных ──────────────────────────────────────────────────────────────
+
+@dataclass
+class AppealQuestion:
+    """Один выделенный вопрос в обращении (после сегментации)."""
+    text: str
+    ordinal: int
+    evidence: str  # "single" | "marker" | "paragraph"
+
 
 @dataclass
 class ClassifiedQuestion:
@@ -71,6 +218,8 @@ class ClassificationResult:
     needs_verification: bool
     raw_appeal: str
     log_id: Optional[str] = field(default=None)  # ID записи в appeals_log.jsonl
+    llm_provider: str = field(default="")
+    llm_model: str = field(default="")
 
 
 # ── Промпты ────────────────────────────────────────────────────────────────────
@@ -100,25 +249,33 @@ SYSTEM_PROMPT = """Ты — эксперт по классификации об�
 
 CLASSIFICATION_PROMPT_TEMPLATE = """Классифицируй следующее обращение гражданина.
 
-ТЕКСТ ОБРАЩЕНИЯ:
+ТЕКСТ ОБРАЩЕНИЯ (полный):
 {appeal_text}
 
-КАНДИДАТЫ ИЗ КЛАССИФИКАТОРА (для каждого выявленного вопроса):
-{candidates_json}
+ВЫЯВЛЕННЫЕ ВОПРОСЫ С КАНДИДАТАМИ ИЗ КЛАССИФИКАТОРА:
+{questions_json}
 
-Верни JSON в следующем формате:
+ПРАВИЛА ВЫБОРА КОДА:
+1. Для каждого вопроса (ordinal) выбирай код ТОЛЬКО из его списка "candidates".
+2. НЕ выбирай код "0001.0002.0027.0126" (Отсутствует адресат обращения) если хоть один другой кандидат соответствует теме вопроса — это резервная категория только для случаев, когда заявитель совсем не указал, к кому обращается.
+3. Запрещено присваивать ОДИН И ТОТ ЖЕ код разным вопросам, если темы вопросов разные.
+4. Предпочитай более глубокий код (level 4-5) над общим (level 1-3), если оба применимы.
+5. Если ни один кандидат не подходит — выбери ближайший по смыслу и понизь confidence до <= 0.5.
+
+Верни JSON строго в формате:
 {{
   "vid_obrascheniya": "Жалоба|Заявление|Предложение",
   "tip_obrascheniya": "Индивидуальное|Коллективное|Анонимное",
   "is_ustnoe": false,
   "questions": [
     {{
-      "question_text": "Краткая формулировка вопроса из обращения",
+      "ordinal": 1,
+      "question_text": "Краткая формулировка вопроса (1 строка)",
       "selected_code": "XXXX.XXXX.XXXX.XXXX",
       "predmet_vedeniya": "...",
       "confidence": 0.87,
-      "reasoning": "Обоснование выбора категории (1-2 предложения)",
-      "alternative_codes": ["XXXX.XXXX.XXXX.XXXX", "XXXX.XXXX.XXXX.XXXX"]
+      "reasoning": "Обоснование (1-2 предложения, ссылка на тему вопроса)",
+      "alternative_codes": ["XXXX.XXXX.XXXX.XXXX"]
     }}
   ]
 }}"""
@@ -131,22 +288,19 @@ class ClassifierAgent:
         print("Инициализация агента классификации...")
 
         # LLM client (Groq, Gemini, Ollama или Ario)
-        if LLM_PROVIDER == "gemini":
-            self.llm = "gemini"
+        self.llm = LLM_PROVIDER if LLM_PROVIDER in {"groq", "gemini", "ollama", "ario"} else "groq"
+        if self.llm == "gemini":
             self.gemini = genai_client.Client(api_key=GEMINI_API_KEY)
             print(f"  Model LLM: gemini-2.5-flash (Google Gemini)")
-        elif LLM_PROVIDER == "ollama":
-            self.llm = "ollama"
+        elif self.llm == "ollama":
             import httpx
             self._ollama_client = httpx.Client(base_url=OLLAMA_BASE_URL, timeout=120)
             print(f"  Model LLM: {OLLAMA_MODEL} (Ollama)")
-        elif LLM_PROVIDER == "ario":
-            self.llm = "ario"
+        elif self.llm == "ario":
             import httpx
             # Per-call httpx client (avoid sharing state with HF Hub)
             print(f"  Model LLM: {ARIO_MODEL} (Ario)")
         else:
-            self.llm = "groq"
             self.groq = Groq(api_key=GROQ_API_KEY)
             print(f"  Model LLM: {GROQ_MODEL} (Groq)")
 
@@ -164,34 +318,206 @@ class ClassifierAgent:
         self.code_index = {m["code"]: m for m in self.metadata}
         print(f"  Готово. База содержит {len(self.metadata)} записей.")
 
+    def _resolve_llm(self, llm_provider: str | None = None, llm_model: str | None = None) -> tuple[str, str]:
+        """Return provider/model for a request, falling back to .env defaults."""
+        provider = (llm_provider or self.llm or "groq").strip().lower()
+        defaults = {
+            "groq": GROQ_MODEL,
+            "gemini": "gemini-2.5-flash",
+            "ollama": OLLAMA_MODEL,
+            "ario": ARIO_MODEL,
+        }
+        if provider not in defaults:
+            raise ValueError(f"Неподдерживаемый LLM provider: {provider}")
+        model = (llm_model or defaults[provider]).strip()
+        return provider, model
+
+    def _get_groq_client(self):
+        if not hasattr(self, "groq"):
+            self.groq = Groq(api_key=GROQ_API_KEY)
+        return self.groq
+
+    def _get_gemini_client(self):
+        if not hasattr(self, "gemini"):
+            self.gemini = genai_client.Client(api_key=GEMINI_API_KEY)
+        return self.gemini
+
+    def _get_ollama_client(self):
+        if not hasattr(self, "_ollama_client"):
+            import httpx
+            self._ollama_client = httpx.Client(base_url=OLLAMA_BASE_URL, timeout=120)
+        return self._ollama_client
+
     def _embed_query(self, text: str) -> np.ndarray:
         """Векторизация запроса с префиксом для multilingual-e5"""
         return self.embedder.encode(f"query: {text}", normalize_embeddings=True)
 
-    def _search_candidates(self, query_text: str) -> list:
+    def _split_appeal_questions(self, text: str, max_segments: int = 7) -> list[AppealQuestion]:
+        """Делегирует module-level функции — позволяет тестировать без агента."""
+        return split_appeal_questions(text, max_segments=max_segments)
+
+    def _normalize_token(self, token: str) -> str:
+        token = token.lower().replace("ё", "е")
+        for suffix in _RUSSIAN_SUFFIXES:
+            if len(token) > len(suffix) + 3 and token.endswith(suffix):
+                return token[: -len(suffix)]
+        return token
+
+    def _tokenize_for_rerank(self, text: str) -> set[str]:
+        tokens = set()
+        for raw in _WORD_RE.findall(text or ""):
+            token = self._normalize_token(raw)
+            if token and token not in _STOP_WORDS:
+                tokens.add(token)
+        return tokens
+
+    def _query_tokens_for_rerank(self, query_text: str) -> set[str]:
+        tokens = self._tokenize_for_rerank(query_text)
+        for required, aliases in _QUERY_ALIASES:
+            if required.issubset(tokens):
+                tokens.update(aliases)
+        return tokens
+
+    def _lexical_score(self, query_tokens: set[str], candidate: dict) -> float:
+        if not query_tokens:
+            return 0.0
+
+        candidate_text = " ".join([
+            str(candidate.get("name", "")),
+            str(candidate.get("full_path", "")),
+        ])
+        candidate_tokens = self._tokenize_for_rerank(candidate_text)
+        if not candidate_tokens:
+            return 0.0
+
+        overlap = query_tokens & candidate_tokens
+        if not overlap:
+            return 0.0
+
+        name_tokens = self._tokenize_for_rerank(str(candidate.get("name", "")))
+        weighted_overlap = sum(2.0 if token in name_tokens else 1.0 for token in overlap)
+        return min(1.0, weighted_overlap / max(len(query_tokens), 1))
+
+    def _rerank_candidates(self, query_text: str, candidates: list, top_k: int = TOP_K_CANDIDATES) -> list:
+        """Compress a wider dense pool with a cheap lexical signal before LLM."""
+        query_tokens = self._query_tokens_for_rerank(query_text)
+        scored = []
+        for idx, candidate in enumerate(candidates):
+            dense_score = float(candidate.get("similarity", 0.0))
+            lexical_score = self._lexical_score(query_tokens, candidate)
+            level_bonus = 0.01 if int(candidate.get("level", 0) or 0) >= 4 else 0.0
+            combined_score = dense_score + 0.12 * lexical_score + level_bonus
+            scored.append((combined_score, idx, candidate))
+
+        scored.sort(key=lambda item: (-item[0], item[1]))
+        return [candidate for _, _, candidate in scored[:top_k]]
+
+    def _candidate_from_metadata(self, meta: dict, similarity: float, source: str = "dense") -> dict:
+        return {
+            "code":       meta["code"],
+            "name":       meta["name"],
+            "level":      meta["level"],
+            "full_path":  meta["full_path"],
+            "similarity": round(float(similarity), 3),
+            "source":     source,
+        }
+
+    def _search_lexical_candidates(self, query_text: str, top_k: int = LEXICAL_POOL_SIZE) -> list:
+        """Find candidates by token overlap across the full classifier."""
+        query_tokens = self._query_tokens_for_rerank(query_text)
+        if not query_tokens:
+            return []
+
+        scored = []
+        for idx, meta in enumerate(self.metadata):
+            score = self._lexical_score(query_tokens, meta)
+            if score <= 0:
+                continue
+            scored.append((score, idx, meta))
+
+        scored.sort(key=lambda item: (-item[0], item[1]))
+        candidates = []
+        for score, _, meta in scored[:top_k]:
+            synthetic_similarity = 0.76 + 0.25 * score
+            candidates.append(self._candidate_from_metadata(meta, synthetic_similarity, source="lexical"))
+        return candidates
+
+    def _merge_candidate_pools(self, *pools: list) -> list:
+        """Merge candidate pools by code while keeping the strongest score."""
+        merged: dict[str, dict] = {}
+        order: list[str] = []
+        for pool in pools:
+            for candidate in pool:
+                code = candidate["code"]
+                if code not in merged:
+                    merged[code] = candidate
+                    order.append(code)
+                    continue
+                if float(candidate.get("similarity", 0.0)) > float(merged[code].get("similarity", 0.0)):
+                    merged[code] = candidate
+        return [merged[code] for code in order]
+
+    def _search_candidates(self, query_text: str, top_k: int | None = None) -> list:
         """Семантический поиск кандидатов через cosine similarity (numpy)"""
         query_vec = self._embed_query(query_text)
         similarities = self.embeddings @ query_vec
-        top_indices = np.argsort(similarities)[::-1][:TOP_K_CANDIDATES]
+        limit = top_k or TOP_K_CANDIDATES
+        top_indices = np.argsort(similarities)[::-1][:limit]
 
         candidates = []
         for idx in top_indices:
             meta = self.metadata[idx]
-            candidates.append({
-                "code":       meta["code"],
-                "name":       meta["name"],
-                "level":      meta["level"],
-                "full_path":  meta["full_path"],
-                "similarity": round(float(similarities[idx]), 3),
-            })
+            candidates.append(self._candidate_from_metadata(meta, similarities[idx]))
         return candidates
 
-    def _classify_with_llm(self, appeal_text: str, all_candidates: list) -> dict:
-        """Вызов LLM для финальной классификации с retry-логикой (Groq или Gemini)"""
-        candidates_json = json.dumps(all_candidates, ensure_ascii=False, indent=2)
+    def _retrieve_for_segment(self, segment_text: str) -> list[dict]:
+        """Per-question retrieval: dense + lexical + rerank → top-K."""
+        dense_pool = self._search_candidates(
+            segment_text,
+            top_k=max(RETRIEVAL_POOL_SIZE, TOP_K_CANDIDATES),
+        )
+        lexical_pool = self._search_lexical_candidates(segment_text, top_k=LEXICAL_POOL_SIZE)
+        merged = self._merge_candidate_pools(dense_pool, lexical_pool)
+        return self._rerank_candidates(segment_text, merged, top_k=TOP_K_CANDIDATES)
+
+    def _classify_with_llm(
+        self,
+        appeal_text: str,
+        questions_with_candidates: list[dict],
+        llm_provider: str | None = None,
+        llm_model: str | None = None,
+    ) -> dict:
+        """LLM classification across multiple pre-segmented questions.
+
+        `questions_with_candidates` — список {ordinal, question_text, candidates[]} —
+        каждый вопрос имеет свой пул кандидатов из per-question retrieval.
+        """
+        provider, model = self._resolve_llm(llm_provider, llm_model)
+
+        # Сжимаем кандидатов до минимума (code, name, full_path, level) — экономия токенов
+        compact_questions = []
+        total_candidates = 0
+        for q in questions_with_candidates:
+            compact_candidates = [
+                {
+                    "code": c["code"],
+                    "name": c["name"],
+                    "level": c.get("level", 0),
+                    "full_path": c.get("full_path", ""),
+                }
+                for c in q["candidates"]
+            ]
+            total_candidates += len(compact_candidates)
+            compact_questions.append({
+                "ordinal": q["ordinal"],
+                "question_text": q["question_text"],
+                "candidates": compact_candidates,
+            })
+
+        questions_json = json.dumps(compact_questions, ensure_ascii=False, indent=2)
         user_message = CLASSIFICATION_PROMPT_TEMPLATE.format(
             appeal_text=appeal_text[:4000],
-            candidates_json=candidates_json
+            questions_json=questions_json,
         )
 
         max_retries = 5
@@ -201,9 +527,9 @@ class ClassifierAgent:
             try:
                 start_time = time.time()
 
-                if self.llm == "gemini":
-                    response = self.gemini.models.generate_content(
-                        model="gemini-2.5-flash",
+                if provider == "gemini":
+                    response = self._get_gemini_client().models.generate_content(
+                        model=model,
                         contents=user_message,
                         config=GenerateContentConfig(
                             system_instruction=SYSTEM_PROMPT,
@@ -211,11 +537,11 @@ class ClassifierAgent:
                         ),
                     )
                     raw = response.text.strip()
-                elif self.llm == "ollama":
-                    response = self._ollama_client.post(
+                elif provider == "ollama":
+                    response = self._get_ollama_client().post(
                         "/chat/completions",
                         json={
-                            "model": OLLAMA_MODEL,
+                            "model": model,
                             "messages": [
                                 {"role": "system", "content": SYSTEM_PROMPT},
                                 {"role": "user",   "content": user_message},
@@ -225,7 +551,7 @@ class ClassifierAgent:
                     )
                     response.raise_for_status()
                     raw = response.json()["choices"][0]["message"]["content"].strip()
-                elif self.llm == "ario":
+                elif provider == "ario":
                     import httpx
                     client = httpx.Client(
                         base_url=ARIO_BASE_URL,
@@ -236,7 +562,7 @@ class ClassifierAgent:
                         response = client.post(
                             "/chat/completions",
                             json={
-                                "model": ARIO_MODEL,
+                                "model": model,
                                 "messages": [
                                     {"role": "system", "content": SYSTEM_PROMPT},
                                     {"role": "user",   "content": user_message},
@@ -257,8 +583,8 @@ class ClassifierAgent:
                     finally:
                         client.close()
                 else:
-                    response = self.groq.chat.completions.create(
-                        model=GROQ_MODEL,
+                    response = self._get_groq_client().chat.completions.create(
+                        model=model,
                         messages=[
                             {"role": "system", "content": SYSTEM_PROMPT},
                             {"role": "user",   "content": user_message},
@@ -277,21 +603,21 @@ class ClassifierAgent:
                     elapsed=elapsed,
                     confidence=None,
                     error=None,
-                    candidates_count=len(all_candidates)
+                    candidates_count=total_candidates,
                 )
                 return result
 
             except RateLimitError as e:
                 last_error = f"Rate limit: {e}"
                 wait_time = min(2 ** attempt, 60)  # не более 60 секунд
-                print(f"  [Groq] Rate limit, попытка {attempt}/{max_retries}. Ждём {wait_time}с...")
+                print(f"  [{provider}] Rate limit, попытка {attempt}/{max_retries}. Ждём {wait_time}с...")
                 time.sleep(wait_time)
 
             except APIError as e:
                 last_error = f"API error: {e}"
                 if attempt < max_retries:
                     wait_time = 2 ** attempt
-                    print(f"  [Groq] API error, попытка {attempt}/{max_retries}. Ждём {wait_time}с...")
+                    print(f"  [{provider}] API error, попытка {attempt}/{max_retries}. Ждём {wait_time}с...")
                     time.sleep(wait_time)
 
             except json.JSONDecodeError as e:
@@ -317,9 +643,9 @@ class ClassifierAgent:
             elapsed=None,
             confidence=None,
             error=last_error,
-            candidates_count=len(all_candidates)
+            candidates_count=total_candidates,
         )
-        raise RuntimeError(f"LLM ({self.llm}) недоступен после {max_retries} попыток: {last_error}")
+        raise RuntimeError(f"LLM ({provider}/{model}) недоступен после {max_retries} попыток: {last_error}")
 
     def _log_request(self, success: bool, attempt: int, elapsed: float | None,
                      confidence: float | None, error: str | None, candidates_count: int):
@@ -344,32 +670,72 @@ class ClassifierAgent:
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
 
-    def classify(self, appeal_text: str) -> ClassificationResult:
-        """Основной метод классификации обращения."""
+    def classify(
+        self,
+        appeal_text: str,
+        llm_provider: str | None = None,
+        llm_model: str | None = None,
+    ) -> ClassificationResult:
+        """Основной метод классификации обращения с per-question retrieval."""
+        provider, model = self._resolve_llm(llm_provider, llm_model)
 
-        # Шаг 1: Поиск кандидатов (с замером времени)
+        # Шаг 1: Сегментация обращения на отдельные вопросы
+        segments = split_appeal_questions(appeal_text)
+        if not segments:
+            segments = [AppealQuestion(text=appeal_text.strip(), ordinal=1, evidence="single")]
+        print(f"  [Сегментация] Выделено {len(segments)} вопрос(ов)")
+
+        # Шаг 2: Per-question retrieval — для каждого вопроса свой пул кандидатов
         search_start = time.time()
-        candidates = self._search_candidates(appeal_text)
+        questions_with_candidates: list[dict] = []
+        valid_code_sets: dict[int, set[str]] = {}
+        for seg in segments:
+            seg_candidates = self._retrieve_for_segment(seg.text)
+            questions_with_candidates.append({
+                "ordinal": seg.ordinal,
+                "question_text": seg.text,
+                "candidates": seg_candidates,
+            })
+            valid_code_sets[seg.ordinal] = {c["code"] for c in seg_candidates}
         search_elapsed = time.time() - search_start
 
-        # Логируем поиск
+        total_candidates = sum(len(q["candidates"]) for q in questions_with_candidates)
         self._log_request(
             success=True,
             attempt=1,
             elapsed=search_elapsed,
             confidence=None,
             error=None,
-            candidates_count=len(candidates)
+            candidates_count=total_candidates,
         )
-        print(f"  [Поиск] Найдено {len(candidates)} кандидатов за {search_elapsed:.2f}с")
+        print(
+            f"  [Поиск] Per-question retrieval: {total_candidates} кандидатов "
+            f"для {len(segments)} вопросов за {search_elapsed:.2f}с"
+        )
 
-        # Шаг 2: Классификация через Groq
-        groq_result = self._classify_with_llm(appeal_text, candidates)
+        # Шаг 3: Классификация через LLM (один вызов, кандидаты разнесены по вопросам)
+        llm_result = self._classify_with_llm(appeal_text, questions_with_candidates, provider, model)
 
-        # Шаг 3: Обогащение результатов
+        # Шаг 4: Обогащение результатов + строгая валидация выбранных кодов
         classified_questions = []
-        for q in groq_result.get("questions", []):
-            code = q["selected_code"]
+        for q in llm_result.get("questions", []):
+            ordinal = int(q.get("ordinal") or len(classified_questions) + 1)
+            code = q.get("selected_code", "")
+            allowed_codes = valid_code_sets.get(ordinal, set())
+
+            # Strict validation: если LLM выбрал код, которого нет в кандидатах ЭТОГО вопроса —
+            # подменяем на топ-1 кандидата и помечаем низкой confidence
+            invalid_code = False
+            if allowed_codes and code not in allowed_codes:
+                invalid_code = True
+                # Найти топ-1 кандидата этого вопроса
+                fallback_candidate = next(
+                    (qc for qc in questions_with_candidates if qc["ordinal"] == ordinal),
+                    None,
+                )
+                if fallback_candidate and fallback_candidate["candidates"]:
+                    code = fallback_candidate["candidates"][0]["code"]
+
             entry = self.code_index.get(code)
 
             alt_entries = []
@@ -382,6 +748,13 @@ class ClassifierAgent:
                         "full_path": alt_entry["full_path"],
                     })
 
+            confidence_val = float(q.get("confidence", 0.0))
+            if invalid_code:
+                confidence_val = min(confidence_val, 0.45)
+                reasoning = q.get("reasoning", "") + " [LLM выбрал код вне кандидатов — подменён на top-1]"
+            else:
+                reasoning = q.get("reasoning", "")
+
             classified_questions.append(ClassifiedQuestion(
                 question_text=q.get("question_text", ""),
                 code=code,
@@ -389,10 +762,19 @@ class ClassifierAgent:
                 level=entry["level"] if entry else 0,
                 full_path=entry["full_path"] if entry else "",
                 predmet_vedeniya=q.get("predmet_vedeniya", ""),
-                confidence=float(q.get("confidence", 0.0)),
-                reasoning=q.get("reasoning", ""),
+                confidence=confidence_val,
+                reasoning=reasoning,
                 alternatives=alt_entries,
             ))
+
+        # Защита: если LLM всем вопросам присвоил один и тот же код, а вопросов >1 → нужен оператор
+        if len(classified_questions) > 1:
+            unique_codes = {q.code for q in classified_questions}
+            if len(unique_codes) == 1:
+                for q in classified_questions:
+                    q.confidence = min(q.confidence, 0.5)
+                    if "[все вопросы получили один код]" not in q.reasoning:
+                        q.reasoning = (q.reasoning + " [все вопросы получили один код — требуется верификация]").strip()
 
         # Шаг 4: Итоговая уверенность
         confidences = [q.confidence for q in classified_questions]
@@ -400,13 +782,15 @@ class ClassifierAgent:
         needs_verification = overall_confidence < MIN_CONFIDENCE
 
         result = ClassificationResult(
-            vid_obrascheniya=groq_result.get("vid_obrascheniya", ""),
-            tip_obrascheniya=groq_result.get("tip_obrascheniya", ""),
-            is_ustное=groq_result.get("is_ustnoe", False),
+            vid_obrascheniya=llm_result.get("vid_obrascheniya", ""),
+            tip_obrascheniya=llm_result.get("tip_obrascheniya", ""),
+            is_ustное=llm_result.get("is_ustnoe", False),
             questions=classified_questions,
             overall_confidence=round(overall_confidence, 3),
             needs_verification=needs_verification,
             raw_appeal=appeal_text,
+            llm_provider=provider,
+            llm_model=model,
         )
 
         # Логируем для накопления данных дообучения
@@ -420,10 +804,18 @@ class ClassifierAgent:
                 }
                 for q in classified_questions
             ]
-            log_candidates = [
-                {"code": c["code"], "name": c["name"], "similarity": c["similarity"]}
-                for c in candidates
-            ]
+            # Логируем union всех кандидатов по всем вопросам (для дообучения)
+            seen_codes: set[str] = set()
+            log_candidates: list[dict] = []
+            for qc in questions_with_candidates:
+                for c in qc["candidates"]:
+                    if c["code"] not in seen_codes:
+                        seen_codes.add(c["code"])
+                        log_candidates.append({
+                            "code": c["code"],
+                            "name": c["name"],
+                            "similarity": c.get("similarity", 0.0),
+                        })
             result.log_id = get_logger().log(
                 appeal_text=appeal_text,
                 candidates=log_candidates,

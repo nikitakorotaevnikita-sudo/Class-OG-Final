@@ -45,6 +45,8 @@ EMBEDDING_MODEL: str = os.getenv(
 
 # ── Параметры поиска ───────────────────────────────────────────────────────────
 TOP_K_CANDIDATES: int = int(os.getenv("TOP_K_CANDIDATES", "10"))
+RETRIEVAL_POOL_SIZE: int = int(os.getenv("RETRIEVAL_POOL_SIZE", "50"))
+LEXICAL_POOL_SIZE: int = int(os.getenv("LEXICAL_POOL_SIZE", "30"))
 TOP_K_RESULT:     int = 3
 MIN_CONFIDENCE:  float = float(os.getenv("MIN_CONFIDENCE", "0.65"))
 

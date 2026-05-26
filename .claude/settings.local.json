@@ -37,7 +37,14 @@
       "Bash(venv/Scripts/python.exe -c \"import openai; print\\('openai:', openai.__version__\\)\")",
       "Bash(venv/Scripts/python.exe -c \"import sys; print\\([p.key for p in sys.modules.keys\\(\\) if 'openai' in p.lower\\(\\)]\\)\")",
       "Bash(venv/Scripts/python.exe -c \"import httpx; print\\('httpx:', httpx.__version__\\)\")",
-      "Bash(timeout 120 venv/Scripts/python.exe -c ' *)"
+      "Bash(timeout 120 venv/Scripts/python.exe -c ' *)",
+      "Bash(./venv/Scripts/python.exe tests/debug_failing_appeal.py)",
+      "Bash(./venv/Scripts/python.exe -m pytest tests/test_question_segmentation.py -v)",
+      "Bash(./venv/Scripts/python.exe -c ' *)",
+      "Bash(./venv/Scripts/python.exe tests/verify_5question_fix.py)",
+      "Bash(./venv/Scripts/python.exe tests/eval_accuracy.py)",
+      "Bash(./venv/Scripts/python.exe -m pytest tests/test_question_segmentation.py tests/test_eval_metrics_helpers.py -v)",
+      "Bash(git add *)"
     ]
   }
 }
