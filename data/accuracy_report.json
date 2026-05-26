@@ -29,13 +29,13 @@
       "reranked_recall_at_10": true,
       "first_expected_rank_dense": 2,
       "first_expected_rank_reranked": 1,
-      "elapsed": 7.81,
+      "elapsed": 14.58,
       "stage_timings": {
         "segmentation": null,
-        "dense_retrieval": 0.425,
+        "dense_retrieval": 0.515,
         "rerank": null,
-        "classification": 7.387,
-        "total": 7.812
+        "classification": 14.07,
+        "total": 14.585
       },
       "debug": {
         "expected_codes": [
@@ -963,10 +963,10 @@
         "first_expected_rank_reranked": 1,
         "stage_timings": {
           "segmentation": null,
-          "dense_retrieval": 0.425,
+          "dense_retrieval": 0.515,
           "rerank": null,
-          "classification": 7.387,
-          "total": 7.812
+          "classification": 14.07,
+          "total": 14.585
         }
       }
     },
@@ -999,13 +999,13 @@
       "reranked_recall_at_10": true,
       "first_expected_rank_dense": 2,
       "first_expected_rank_reranked": 1,
-      "elapsed": 7.48,
+      "elapsed": 28.71,
       "stage_timings": {
         "segmentation": null,
-        "dense_retrieval": 0.29,
+        "dense_retrieval": 0.332,
         "rerank": null,
-        "classification": 7.189,
-        "total": 7.479
+        "classification": 28.379,
+        "total": 28.711
       },
       "debug": {
         "expected_codes": [
@@ -1933,10 +1933,10 @@
         "first_expected_rank_reranked": 1,
         "stage_timings": {
           "segmentation": null,
-          "dense_retrieval": 0.29,
+          "dense_retrieval": 0.332,
           "rerank": null,
-          "classification": 7.189,
-          "total": 7.479
+          "classification": 28.379,
+          "total": 28.711
         }
       }
     },
@@ -1970,13 +1970,13 @@
       "reranked_recall_at_10": true,
       "first_expected_rank_dense": 1,
       "first_expected_rank_reranked": 1,
-      "elapsed": 9.11,
+      "elapsed": 14.64,
       "stage_timings": {
         "segmentation": null,
-        "dense_retrieval": 0.297,
+        "dense_retrieval": 0.484,
         "rerank": null,
-        "classification": 8.818,
-        "total": 9.115
+        "classification": 14.158,
+        "total": 14.641
       },
       "debug": {
         "expected_codes": [
@@ -2905,10 +2905,10 @@
         "first_expected_rank_reranked": 1,
         "stage_timings": {
           "segmentation": null,
-          "dense_retrieval": 0.297,
+          "dense_retrieval": 0.484,
           "rerank": null,
-          "classification": 8.818,
-          "total": 9.115
+          "classification": 14.158,
+          "total": 14.641
         }
       }
     },
@@ -2941,13 +2941,13 @@
       "reranked_recall_at_10": true,
       "first_expected_rank_dense": 34,
       "first_expected_rank_reranked": 1,
-      "elapsed": 7.31,
+      "elapsed": 12.62,
       "stage_timings": {
         "segmentation": null,
-        "dense_retrieval": 0.292,
+        "dense_retrieval": 0.475,
         "rerank": null,
-        "classification": 7.018,
-        "total": 7.309
+        "classification": 12.145,
+        "total": 12.62
       },
       "debug": {
         "expected_codes": [
@@ -3875,10 +3875,10 @@
         "first_expected_rank_reranked": 1,
         "stage_timings": {
           "segmentation": null,
-          "dense_retrieval": 0.292,
+          "dense_retrieval": 0.475,
           "rerank": null,
-          "classification": 7.018,
-          "total": 7.309
+          "classification": 12.145,
+          "total": 12.62
         }
       }
     },
@@ -3892,13 +3892,13 @@
       "top5_correct": false,
       "prefix_correct": true,
       "prefix_level1": true,
-      "prefix_level2": false,
+      "prefix_level2": true,
       "prefix_level3": false,
       "questions_count_match": null,
       "questions_count": 1,
       "agent_vid": "Заявление",
       "agent_codes": [
-        "0003.0011.0123.0849"
+        "0003.0009.0096.0682"
       ],
       "expected_codes": [
         "0003.0009.0094.0671"
@@ -3911,13 +3911,13 @@
       "reranked_recall_at_10": false,
       "first_expected_rank_dense": 42,
       "first_expected_rank_reranked": null,
-      "elapsed": 7.78,
+      "elapsed": 14.11,
       "stage_timings": {
         "segmentation": null,
-        "dense_retrieval": 0.308,
+        "dense_retrieval": 0.422,
         "rerank": null,
-        "classification": 7.476,
-        "total": 7.784
+        "classification": 13.683,
+        "total": 14.107
       },
       "debug": {
         "expected_codes": [
@@ -4839,16 +4839,16 @@
           }
         ],
         "llm_codes": [
-          "0003.0011.0123.0849"
+          "0003.0009.0096.0682"
         ],
         "first_expected_rank_dense": 42,
         "first_expected_rank_reranked": null,
         "stage_timings": {
           "segmentation": null,
-          "dense_retrieval": 0.308,
+          "dense_retrieval": 0.422,
           "rerank": null,
-          "classification": 7.476,
-          "total": 7.784
+          "classification": 13.683,
+          "total": 14.107
         }
       }
     },
@@ -4857,9 +4857,9 @@
       "title": "Очередь в детский сад",
       "status": "OK",
       "vid_correct": true,
-      "top1_correct": true,
-      "top3_correct": true,
-      "top5_correct": true,
+      "top1_correct": false,
+      "top3_correct": false,
+      "top5_correct": false,
       "prefix_correct": true,
       "prefix_level1": true,
       "prefix_level2": true,
@@ -4868,7 +4868,7 @@
       "questions_count": 1,
       "agent_vid": "Заявление",
       "agent_codes": [
-        "0002.0013.0139.0328.0031"
+        "0002.0013.0139.0329"
       ],
       "expected_codes": [
         "0002.0013.0139.0328.0031"
@@ -4881,13 +4881,13 @@
       "reranked_recall_at_10": true,
       "first_expected_rank_dense": null,
       "first_expected_rank_reranked": 1,
-      "elapsed": 7.1,
+      "elapsed": 13.01,
       "stage_timings": {
         "segmentation": null,
-        "dense_retrieval": 0.274,
+        "dense_retrieval": 0.45,
         "rerank": null,
-        "classification": 6.821,
-        "total": 7.096
+        "classification": 12.558,
+        "total": 13.007
       },
       "debug": {
         "expected_codes": [
@@ -5809,16 +5809,16 @@
           }
         ],
         "llm_codes": [
-          "0002.0013.0139.0328.0031"
+          "0002.0013.0139.0329"
         ],
         "first_expected_rank_dense": null,
         "first_expected_rank_reranked": 1,
         "stage_timings": {
           "segmentation": null,
-          "dense_retrieval": 0.274,
+          "dense_retrieval": 0.45,
           "rerank": null,
-          "classification": 6.821,
-          "total": 7.096
+          "classification": 12.558,
+          "total": 13.007
         }
       }
     },
@@ -5851,13 +5851,13 @@
       "reranked_recall_at_10": true,
       "first_expected_rank_dense": 42,
       "first_expected_rank_reranked": 7,
-      "elapsed": 9.37,
+      "elapsed": 24.97,
       "stage_timings": {
         "segmentation": null,
-        "dense_retrieval": 0.388,
+        "dense_retrieval": 0.467,
         "rerank": null,
-        "classification": 8.978,
-        "total": 9.366
+        "classification": 24.503,
+        "total": 24.97
       },
       "debug": {
         "expected_codes": [
@@ -6785,10 +6785,10 @@
         "first_expected_rank_reranked": 7,
         "stage_timings": {
           "segmentation": null,
-          "dense_retrieval": 0.388,
+          "dense_retrieval": 0.467,
           "rerank": null,
-          "classification": 8.978,
-          "total": 9.366
+          "classification": 24.503,
+          "total": 24.97
         }
       }
     },
@@ -6797,9 +6797,9 @@
       "title": "Задержка пенсии",
       "status": "OK",
       "vid_correct": true,
-      "top1_correct": true,
-      "top3_correct": true,
-      "top5_correct": true,
+      "top1_correct": false,
+      "top3_correct": false,
+      "top5_correct": false,
       "prefix_correct": true,
       "prefix_level1": true,
       "prefix_level2": true,
@@ -6808,7 +6808,7 @@
       "questions_count": 1,
       "agent_vid": "Жалоба",
       "agent_codes": [
-        "0002.0007.0071.0282"
+        "0002.0007.0071.0284.0028"
       ],
       "expected_codes": [
         "0002.0007.0071.0282"
@@ -6821,13 +6821,13 @@
       "reranked_recall_at_10": true,
       "first_expected_rank_dense": 19,
       "first_expected_rank_reranked": 1,
-      "elapsed": 8.86,
+      "elapsed": 16.53,
       "stage_timings": {
         "segmentation": null,
-        "dense_retrieval": 0.49,
+        "dense_retrieval": 0.411,
         "rerank": null,
-        "classification": 8.37,
-        "total": 8.859
+        "classification": 16.123,
+        "total": 16.534
       },
       "debug": {
         "expected_codes": [
@@ -7749,16 +7749,16 @@
           }
         ],
         "llm_codes": [
-          "0002.0007.0071.0282"
+          "0002.0007.0071.0284.0028"
         ],
         "first_expected_rank_dense": 19,
         "first_expected_rank_reranked": 1,
         "stage_timings": {
           "segmentation": null,
-          "dense_retrieval": 0.49,
+          "dense_retrieval": 0.411,
           "rerank": null,
-          "classification": 8.37,
-          "total": 8.859
+          "classification": 16.123,
+          "total": 16.534
         }
       }
     },
@@ -7791,13 +7791,13 @@
       "reranked_recall_at_10": true,
       "first_expected_rank_dense": 1,
       "first_expected_rank_reranked": 1,
-      "elapsed": 7.85,
+      "elapsed": 13.01,
       "stage_timings": {
         "segmentation": null,
-        "dense_retrieval": 0.359,
+        "dense_retrieval": 0.382,
         "rerank": null,
-        "classification": 7.488,
-        "total": 7.848
+        "classification": 12.626,
+        "total": 13.008
       },
       "debug": {
         "expected_codes": [
@@ -8725,10 +8725,10 @@
         "first_expected_rank_reranked": 1,
         "stage_timings": {
           "segmentation": null,
-          "dense_retrieval": 0.359,
+          "dense_retrieval": 0.382,
           "rerank": null,
-          "classification": 7.488,
-          "total": 7.848
+          "classification": 12.626,
+          "total": 13.008
         }
       }
     },
@@ -8766,13 +8766,13 @@
       "reranked_recall_at_10": true,
       "first_expected_rank_dense": 5,
       "first_expected_rank_reranked": 7,
-      "elapsed": 21.0,
+      "elapsed": 44.49,
       "stage_timings": {
         "segmentation": null,
-        "dense_retrieval": 0.36,
+        "dense_retrieval": 0.603,
         "rerank": null,
-        "classification": 20.638,
-        "total": 20.998
+        "classification": 43.883,
+        "total": 44.485
       },
       "debug": {
         "expected_codes": [
@@ -9705,10 +9705,10 @@
         "first_expected_rank_reranked": 7,
         "stage_timings": {
           "segmentation": null,
-          "dense_retrieval": 0.36,
+          "dense_retrieval": 0.603,
           "rerank": null,
-          "classification": 20.638,
-          "total": 20.998
+          "classification": 43.883,
+          "total": 44.485
         }
       }
     },
@@ -9717,8 +9717,8 @@
       "title": "Регрессия: 5 вопросов с преамбулой и хвостовыми абзацами",
       "status": "OK",
       "vid_correct": true,
-      "top1_correct": true,
-      "top3_correct": true,
+      "top1_correct": false,
+      "top3_correct": false,
       "top5_correct": true,
       "prefix_correct": true,
       "prefix_level1": true,
@@ -9728,11 +9728,11 @@
       "questions_count": 5,
       "agent_vid": "Заявление",
       "agent_codes": [
-        "0002.0014.0143.0422",
-        "0002.0007.0067.0273",
-        "0003.0009.0100.0760",
+        "0002.0014.0143.0420",
+        "0002.0007.0073.0295",
+        "0002.0014.0143.0414",
         "0002.0007.0070.0281",
-        "0002.0007.0071.0282.0026"
+        "0002.0007.0071.0282.0025"
       ],
       "expected_codes": [
         "0002.0014.0143.0422",
@@ -9740,7 +9740,7 @@
         "0002.0007.0070.0281",
         "0002.0007.0074.0320"
       ],
-      "confidence": 0.86,
+      "confidence": 0.884,
       "needs_verification": false,
       "invalid_llm_codes": [],
       "retrieval_recall_at_10": false,
@@ -9748,13 +9748,13 @@
       "reranked_recall_at_10": false,
       "first_expected_rank_dense": 32,
       "first_expected_rank_reranked": null,
-      "elapsed": 56.06,
+      "elapsed": 95.88,
       "stage_timings": {
         "segmentation": null,
-        "dense_retrieval": 0.467,
+        "dense_retrieval": 0.613,
         "rerank": null,
-        "classification": 55.597,
-        "total": 56.064
+        "classification": 95.263,
+        "total": 95.877
       },
       "debug": {
         "expected_codes": [
@@ -10679,20 +10679,20 @@
           }
         ],
         "llm_codes": [
-          "0002.0014.0143.0422",
-          "0002.0007.0067.0273",
-          "0003.0009.0100.0760",
+          "0002.0014.0143.0420",
+          "0002.0007.0073.0295",
+          "0002.0014.0143.0414",
           "0002.0007.0070.0281",
-          "0002.0007.0071.0282.0026"
+          "0002.0007.0071.0282.0025"
         ],
         "first_expected_rank_dense": 32,
         "first_expected_rank_reranked": null,
         "stage_timings": {
           "segmentation": null,
-          "dense_retrieval": 0.467,
+          "dense_retrieval": 0.613,
           "rerank": null,
-          "classification": 55.597,
-          "total": 56.064
+          "classification": 95.263,
+          "total": 95.877
         }
       }
     }
@@ -10702,19 +10702,19 @@
     "errors": 0,
     "ok": 11,
     "vid_correct": 10,
-    "top1_correct": 8,
-    "top3_correct": 8,
-    "top5_correct": 9,
+    "top1_correct": 5,
+    "top3_correct": 5,
+    "top5_correct": 7,
     "prefix_correct": 11,
     "prefix_level1": 11,
-    "prefix_level2": 10,
+    "prefix_level2": 11,
     "prefix_level3": 9,
     "retrieval_recall_at_10": 5,
     "retrieval_recall_at_50": 10,
     "reranked_recall_at_10": 9,
     "needs_verification": 0,
     "invalid_llm_code_count": 0,
-    "avg_confidence": 0.9169999999999999,
-    "avg_time": 13.611818181818181
+    "avg_confidence": 0.9191818181818182,
+    "avg_time": 26.595454545454547
   }
 }

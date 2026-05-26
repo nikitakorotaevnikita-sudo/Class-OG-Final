@@ -72,6 +72,13 @@ HIERARCHY_PARENT_WEIGHT: float = float(os.getenv("HIERARCHY_PARENT_WEIGHT", "0.0
 ENABLE_HIERARCHY_PRUNING: bool = os.getenv("ENABLE_HIERARCHY_PRUNING", "false").lower() == "true"
 HIERARCHY_PRUNE_THRESHOLD: float = float(os.getenv("HIERARCHY_PRUNE_THRESHOLD", "0.70"))
 
+# ── Section routing (coarse-to-fine с явным выбором тематического раздела) ──────
+# Если включён — перед retrieval делается отдельный LLM-вызов: «Какие разделы (L1)
+# и тематики (L2) подходят этому обращению?». Кандидаты фильтруются по выбранным.
+ENABLE_SECTION_ROUTING: bool = os.getenv("ENABLE_SECTION_ROUTING", "false").lower() == "true"
+# Максимальное число L2-тематик которые LLM может выбрать (3 = широко, 1 = жёсткое сужение)
+SECTION_ROUTING_MAX_TOPICS: int = int(os.getenv("SECTION_ROUTING_MAX_TOPICS", "3"))
+
 # ── Пути к файлам классификатора ───────────────────────────────────────────────
 CLASSIFIER_FLAT_PATH: str = os.getenv(
     "CLASSIFIER_FLAT_PATH", str(_data_dir / "classifier_flat.json")

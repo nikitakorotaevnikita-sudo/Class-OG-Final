@@ -45,10 +45,15 @@ from config import (
     ENABLE_QUERY_EXPANSION,
     HIERARCHY_BRANCH_WEIGHT, HIERARCHY_PARENT_WEIGHT,
     ENABLE_HIERARCHY_PRUNING, HIERARCHY_PRUNE_THRESHOLD,
+    ENABLE_SECTION_ROUTING, SECTION_ROUTING_MAX_TOPICS,
 )
 from hierarchy import (
     branch_agreement_scores, parent_similarity_boost,
     dominant_l1_sections, prefix_at_level,
+)
+from section_router import (
+    build_routing_prompt, parse_routing_response,
+    filter_candidates_by_l2,
 )
 from appeals_logger import get_logger
 
@@ -534,6 +539,87 @@ class ClassifierAgent:
             candidates.append(self._candidate_from_metadata(meta, similarities[idx]))
         return candidates
 
+    def _route_to_sections(self, appeal_text: str, provider: str, model: str) -> list[str]:
+        """Coarse-to-fine: LLM выбирает 1-3 L2-тематик на основе официальной методички.
+
+        Returns list of L2 codes (XXXX.XXXX). Empty list = router failed → no filtering.
+        Один дешёвый LLM-вызов с фиксированным catalog в промпте.
+        """
+        sys_msg, user_msg = build_routing_prompt(appeal_text, max_topics=SECTION_ROUTING_MAX_TOPICS)
+        try:
+            if provider == "gemini":
+                response = self._get_gemini_client().models.generate_content(
+                    model=model,
+                    contents=user_msg,
+                    config=GenerateContentConfig(
+                        system_instruction=sys_msg,
+                        temperature=0.0,
+                        max_output_tokens=200,
+                    ),
+                )
+                raw = (response.text or "").strip()
+            elif provider == "ollama":
+                r = self._get_ollama_client().post(
+                    "/chat/completions",
+                    json={
+                        "model": model,
+                        "messages": [
+                            {"role": "system", "content": sys_msg},
+                            {"role": "user", "content": user_msg},
+                        ],
+                        "temperature": 0.0,
+                        "max_tokens": 200,
+                    },
+                )
+                r.raise_for_status()
+                raw = r.json()["choices"][0]["message"]["content"].strip()
+            elif provider == "ario":
+                import httpx
+                client = httpx.Client(
+                    base_url=ARIO_BASE_URL,
+                    headers={"Authorization": f"Bearer {ARIO_API_KEY}"},
+                    timeout=60,
+                )
+                try:
+                    r = client.post(
+                        "/chat/completions",
+                        json={
+                            "model": model,
+                            "messages": [
+                                {"role": "system", "content": sys_msg},
+                                {"role": "user", "content": user_msg},
+                            ],
+                            "temperature": 0.0,
+                            "max_tokens": 200,
+                        },
+                    )
+                    r.raise_for_status()
+                    raw = r.json()["choices"][0]["message"]["content"].strip()
+                finally:
+                    client.close()
+            else:
+                r = self._get_groq_client().chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": sys_msg},
+                        {"role": "user", "content": user_msg},
+                    ],
+                    temperature=0.0,
+                    max_tokens=200,
+                    response_format={"type": "json_object"},
+                )
+                raw = r.choices[0].message.content.strip()
+        except Exception as e:
+            print(f"  [Router] error: {e}")
+            return []
+
+        topics = parse_routing_response(raw)
+        if topics:
+            print(f"  [Router] выбрано: {topics}")
+        else:
+            print(f"  [Router] не распознан ответ → fallback без фильтрации: {raw[:120]}")
+        return topics
+
     def _expand_query(self, question_text: str, provider: str, model: str) -> str:
         """LLM query expansion — переформулировать вопрос в терминах классификатора.
 
@@ -614,22 +700,47 @@ class ClassifierAgent:
             print(f"  [QE] expansion failed: {e}")
             return ""
 
-    def _retrieve_for_segment(self, segment_text: str, expanded: str = "") -> list[dict]:
+    def _retrieve_for_segment(
+        self,
+        segment_text: str,
+        expanded: str = "",
+        allowed_l2: list[str] | None = None,
+    ) -> list[dict]:
         """Per-question retrieval: dense + lexical + heuristic rerank → (CE rerank?) → top-K.
 
-        Если есть expanded query — ищем по объединённому тексту "original. expansion".
+        Если allowed_l2 непустой — кандидаты фильтруются по этим L2-тематикам (coarse-to-fine).
+        Если expanded query задан — embedding ищется по объединённому тексту.
         """
         query = segment_text if not expanded else f"{segment_text}. {expanded}"
 
-        dense_pool = self._search_candidates(
-            query,
-            top_k=max(RETRIEVAL_POOL_SIZE, TOP_K_CANDIDATES),
-        )
-        lexical_pool = self._search_lexical_candidates(query, top_k=LEXICAL_POOL_SIZE)
+        # Расширяем пулы если фильтрация активна, чтобы было что отбирать
+        dense_top_k = max(RETRIEVAL_POOL_SIZE * 2, 100) if allowed_l2 else max(RETRIEVAL_POOL_SIZE, TOP_K_CANDIDATES)
+        lex_top_k = max(LEXICAL_POOL_SIZE * 2, 60) if allowed_l2 else LEXICAL_POOL_SIZE
+
+        dense_pool = self._search_candidates(query, top_k=dense_top_k)
+        lexical_pool = self._search_lexical_candidates(query, top_k=lex_top_k)
         merged = self._merge_candidate_pools(dense_pool, lexical_pool)
 
+        # Coarse-to-fine: фильтрация по L2-разделам ПЕРЕД rerank
+        if allowed_l2:
+            before = len(merged)
+            merged = filter_candidates_by_l2(merged, allowed_l2)
+            print(f"  [Router] фильтр L2 {allowed_l2}: {before} → {len(merged)} кандидатов")
+            # Если после фильтра мало кандидатов — ДОЗАПОЛНЯЕМ кодами из той же L2-ветки
+            # (направленный поиск во всех 2108 кодах с этим L2-префиксом), а НЕ откатываемся на полный пул
+            if len(merged) < TOP_K_CANDIDATES:
+                allowed = set(allowed_l2)
+                direct_codes = []
+                for meta in self.metadata:
+                    code = meta["code"]
+                    parts = code.split(".")
+                    if len(parts) >= 2 and ".".join(parts[:2]) in allowed:
+                        if code not in {c["code"] for c in merged}:
+                            direct_codes.append(self._candidate_from_metadata(meta, 0.5, source="l2-direct"))
+                merged = merged + direct_codes
+                print(f"  [Router] добавлено {len(direct_codes)} кодов из L2 напрямую → {len(merged)} кандидатов")
+
         if self.ce_reranker is not None:
-            # Heuristic rerank на широкий пул (top-30) — это вход в CE
             heuristic_top = self._rerank_candidates(query, merged, top_k=30)
             return self.ce_reranker.rerank(query, heuristic_top, top_k=TOP_K_CANDIDATES)
 
@@ -863,12 +974,23 @@ class ClassifierAgent:
                 f"  [QE] Query expansion для {len(segments)} сегментов за {time.time() - qe_start:.2f}с"
             )
 
+        # Шаг 1c: Опциональное section routing — coarse-to-fine выбор тематик из методички
+        allowed_l2: list[str] = []
+        if ENABLE_SECTION_ROUTING:
+            route_start = time.time()
+            allowed_l2 = self._route_to_sections(appeal_text, provider, model)
+            print(f"  [Router] выбор тематик за {time.time() - route_start:.2f}с")
+
         # Шаг 2: Per-question retrieval — для каждого вопроса свой пул кандидатов
         search_start = time.time()
         questions_with_candidates: list[dict] = []
         valid_code_sets: dict[int, set[str]] = {}
         for seg in segments:
-            seg_candidates = self._retrieve_for_segment(seg.text, expanded=expansions.get(seg.ordinal, ""))
+            seg_candidates = self._retrieve_for_segment(
+                seg.text,
+                expanded=expansions.get(seg.ordinal, ""),
+                allowed_l2=allowed_l2 or None,
+            )
             questions_with_candidates.append({
                 "ordinal": seg.ordinal,
                 "question_text": seg.text,
