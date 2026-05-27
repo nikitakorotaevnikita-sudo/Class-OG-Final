@@ -11,6 +11,7 @@ services:
       - ./data/historical_verified.jsonl:/app/data/historical_verified.jsonl
       - ./data/classifier_annotations.json:/app/data/classifier_annotations.json
       - ./data/vector_db:/app/data/vector_db
+      - ./data/vector_db_adapted:/app/data/vector_db_adapted
       - ./models:/app/models
       - C:/Users/Korotaev_NO/.cache/huggingface:/root/.cache/huggingface:ro
     env_file:

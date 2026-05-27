@@ -89,6 +89,16 @@ L3_ROUTING_MAX_THEMES: int = int(os.getenv("L3_ROUTING_MAX_THEMES", "3"))
 ENABLE_MULTI_QUERY_EXPAND: bool = os.getenv("ENABLE_MULTI_QUERY_EXPAND", "false").lower() == "true"
 MQE_N_VARIANTS: int = int(os.getenv("MQE_N_VARIANTS", "4"))
 
+# ── Allowed codes whitelist (опц.) — ограничение пула «горячими» кодами ────────
+# Если включено и список загружается, retrieval/rerank возвращают только коды
+# из этого списка (плюс их L4-родителей если включён soft mode). По данным НОР
+# эти 69 кодов покрывают 60% реальных обращений.
+ENABLE_ALLOWED_CODES: bool = os.getenv("ENABLE_ALLOWED_CODES", "false").lower() == "true"
+ALLOWED_CODES_PATH: str = os.getenv(
+    "ALLOWED_CODES_PATH",
+    str(Path(__file__).parent.parent / "data" / "allowed_codes_top69.json"),
+)
+
 # ── Learning-to-Rank reranker (опциональный) ────────────────────────────────────
 # Sklearn LogReg обучен на ii25_train: предсказывает вероятность что candidate -
 # правильный код. Score добавляется в combined_score reranker'а.

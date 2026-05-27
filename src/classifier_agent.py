@@ -51,6 +51,7 @@ from config import (
     ENABLE_EMBEDDING_ADAPTER, ADAPTER_PATH,
     ENABLE_L3_ROUTING, L3_ROUTING_MAX_THEMES,
     ENABLE_MULTI_QUERY_EXPAND, MQE_N_VARIANTS,
+    ENABLE_ALLOWED_CODES, ALLOWED_CODES_PATH,
 )
 from hierarchy import (
     branch_agreement_scores, parent_similarity_boost,
@@ -224,6 +225,8 @@ class ClassifiedQuestion:
     confidence: float
     reasoning: str
     alternatives: list
+    # Служебные причины снижения confidence (для логов/отладки, НЕ показывать оператору)
+    verification_reasons: list = field(default_factory=list)
 
 
 @dataclass
@@ -319,9 +322,8 @@ CLASSIFICATION_PROMPT_TEMPLATE = """Классифицируй следующе�
 
 1. Для каждого вопроса (ordinal) выбирай код ТОЛЬКО из его списка "candidates".
 
-2. **2-STAGE THINKING** (главное правило): сначала выбери ТЕМУ (поле "l3_theme"), потом конкретный код:
-   - Шаг A: посмотри ВСЕ уникальные "l3_theme" в списке candidates вопроса. Выбери ОДНУ тему, которая лучше всего соответствует сути вопроса.
-   - Шаг B: из кандидатов с выбранной l3_theme выбери код, чьё "name" точнее всего описывает вопрос.
+2. **СНАЧАЛА определи тему, потом код.** Внутренне (про себя) сначала выбери одну подходящую "l3_theme" из списка кандидатов вопроса, затем из кандидатов с этой темой выбери код, чьё "name" точнее всего описывает суть вопроса.
+   ВАЖНО: в поле "reasoning" пиши ТОЛЬКО конечное обоснование в 1-2 предложениях на естественном русском (без слов «Шаг A», «Шаг B», без упоминания внутренней логики). Пример хорошего reasoning: «Заявитель просит провести ремонт асфальтового покрытия — это благоустройство подъездных дорог и тротуаров».
 
 3. ТИПОВЫЕ L3-РАЗГРАНИЧЕНИЯ (правильное соотнесение темы — критично для точности):
    • «Строительство и реконструкция» (0003.0009.0096) vs «Градостроительство и архитектура. Благоустройство» (0003.0009.0097):
@@ -422,6 +424,19 @@ class ClassifierAgent:
                 print(f"  LtR reranker enabled: {ltr_path.name} (weight={LTR_WEIGHT})")
             else:
                 print(f"  LtR enabled but model not found at {ltr_path} — disabled")
+
+        # Allowed codes whitelist — ограничение пула «горячими» кодами (60% обращений в НОР)
+        self.allowed_codes: set[str] | None = None
+        if ENABLE_ALLOWED_CODES:
+            allowed_path = Path(ALLOWED_CODES_PATH)
+            if allowed_path.exists():
+                with open(allowed_path, encoding="utf-8") as f:
+                    data = json.load(f)
+                codes_list = data.get("codes", []) if isinstance(data, dict) else data
+                self.allowed_codes = {c for c in codes_list if isinstance(c, str)}
+                print(f"  Allowed codes whitelist enabled: {len(self.allowed_codes)} кодов из {allowed_path.name}")
+            else:
+                print(f"  Allowed codes enabled but file not found at {allowed_path}")
 
         # Embedding adapter — Linear(768, 768) обученный на ii25_train с InfoNCE
         # Применяется к query embedding ПОСЛЕ e5. Vector DB должна быть пересобрана
@@ -1127,6 +1142,33 @@ class ClassifierAgent:
             merged = self._merge_candidate_pools(*all_pools)
             print(f"  [MQE] union {len(multi_queries)+1} запросов: {before_mqe} -> {len(merged)} кандидатов")
 
+        # Whitelist (опц.): оставить только «горячие» коды + их L4-родителей в случае L5-кодов
+        if self.allowed_codes:
+            before_wl = len(merged)
+            filtered = []
+            for c in merged:
+                code = c["code"]
+                # Полный код в списке ИЛИ его 4-сегментный префикс (L5 → L4 родитель)
+                parts = code.split(".")
+                l4_prefix = ".".join(parts[:4]) if len(parts) >= 4 else code
+                if code in self.allowed_codes or l4_prefix in self.allowed_codes:
+                    filtered.append(c)
+            if len(filtered) >= TOP_K_CANDIDATES:
+                merged = filtered
+                print(f"  [Whitelist] {before_wl} -> {len(merged)} кодов из топ-{len(self.allowed_codes)}")
+            else:
+                # Если whitelist срезал слишком много — расширяем direct-fetch'ем всех allowed codes
+                seen_codes = {c["code"] for c in filtered}
+                direct_codes = []
+                for meta in self.metadata:
+                    code = meta["code"]
+                    parts = code.split(".")
+                    l4_prefix = ".".join(parts[:4]) if len(parts) >= 4 else code
+                    if (code in self.allowed_codes or l4_prefix in self.allowed_codes) and code not in seen_codes:
+                        direct_codes.append(self._candidate_from_metadata(meta, 0.5, source="whitelist-direct"))
+                merged = filtered + direct_codes
+                print(f"  [Whitelist] dense={before_wl}, фильтрован={len(filtered)}, добавлено direct-fetch={len(direct_codes)}, итого={len(merged)}")
+
         # Coarse-to-fine: фильтрация по L2-разделам ПЕРЕД rerank
         if allowed_l2:
             before = len(merged)
@@ -1519,12 +1561,11 @@ class ClassifierAgent:
                 invalid_code=invalid_code,
                 duplicate_code=duplicate_code,
             )
-            reasoning = q.get("reasoning", "")
+            reasoning = (q.get("reasoning") or "").strip()
+            # Служебные маркеры в отдельное поле — НЕ в reasoning для оператора
+            tech_reasons = list(verification_reasons)
             if invalid_code:
-                reasoning += " [LLM выбрал код вне кандидатов — подменён на top-1]"
-            if verification_reasons:
-                reasoning += f" [verification: {', '.join(verification_reasons)}]"
-            reasoning = reasoning.strip()
+                tech_reasons.append("llm_code_replaced_with_top1")
 
             classified_questions.append(ClassifiedQuestion(
                 question_text=q.get("question_text", ""),
@@ -1536,6 +1577,7 @@ class ClassifierAgent:
                 confidence=confidence_val,
                 reasoning=reasoning,
                 alternatives=alt_entries,
+                verification_reasons=tech_reasons,
             ))
 
         # Защита: если LLM всем вопросам присвоил один и тот же код, а вопросов >1 → нужен оператор
@@ -1544,8 +1586,8 @@ class ClassifierAgent:
             if len(unique_codes) == 1:
                 for q in classified_questions:
                     q.confidence = min(q.confidence, 0.5)
-                    if "[все вопросы получили один код]" not in q.reasoning:
-                        q.reasoning = (q.reasoning + " [все вопросы получили один код — требуется верификация]").strip()
+                    if "all_questions_same_code" not in q.verification_reasons:
+                        q.verification_reasons.append("all_questions_same_code")
 
         # Шаг 4: Итоговая уверенность
         confidences = [q.confidence for q in classified_questions]

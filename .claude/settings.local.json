@@ -89,7 +89,13 @@
       "Bash(PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe scripts/train_ltr.py)",
       "PowerShell(Get-Process python -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep -Seconds 3; $os = Get-CimInstance Win32_OperatingSystem; $freeMB = [math]::Round\\($os.FreePhysicalMemory / 1024\\); Write-Output \"Free RAM: $freeMB MB\")",
       "Bash(HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe -u tests/eval_ii25_with_ce.py)",
-      "Bash(PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe -u scripts/finetune_ce_direct.py)"
+      "Bash(PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe -u scripts/finetune_ce_direct.py)",
+      "PowerShell(docker-compose down 2>&1)",
+      "PowerShell(docker-compose up -d --build 2>&1)",
+      "Bash(curl -s -m 30 http://localhost:8005/health)",
+      "Bash(curl -s -m 5 http://localhost:8005/health)",
+      "Bash(curl -s -X POST -m 90 http://localhost:8005/classify -H \"Content-Type: application/json\" -d '{\"appeal_text\": \"Прошу провести ремонт дорожного покрытия по улице Ленина у дома 15. На проезжей части образовалась глубокая яма.\"}')",
+      "PowerShell($body = @{appeal_text=\"Прошу провести ремонт дорожного покрытия по улице Ленина у дома 15. На проезжей части образовалась глубокая яма.\"} | ConvertTo-Json; Invoke-RestMethod -Uri \"http://localhost:8005/classify\" -Method Post -ContentType \"application/json; charset=utf-8\" -Body \\([System.Text.Encoding]::UTF8.GetBytes\\($body\\)\\) -TimeoutSec 120 | ConvertTo-Json -Depth 10 | Select-Object -First 50)"
     ]
   }
 }
