@@ -149,6 +149,58 @@ def evaluate_record_reranker(
     }
 
 
+def evaluate_record_final(
+    agent: ClassifierAgent, record: dict[str, Any]
+) -> dict[str, Any]:
+    """Full pipeline including LLM final pick."""
+    text = record["appeal_text"]
+    gold_code = record["assigned_code"]
+    gold_codes = [gold_code]
+
+    started = time.time()
+
+    # Pre-LLM stages (collect for attribution)
+    dense_candidates = agent._search_candidates(text, top_k=50)
+    lexical_candidates = agent._search_lexical_candidates(text, top_k=30)
+    merged = agent._merge_candidate_pools(dense_candidates, lexical_candidates)
+    reranked = agent._rerank_candidates(text, merged, top_k=10)
+
+    # LLM final
+    try:
+        result = agent.classify(text)
+        final_codes = [q.code for q in result.questions if q.code]
+        final_top1 = final_codes[0] if final_codes else None
+        llm_error = None
+    except Exception as exc:  # noqa: BLE001
+        final_codes = []
+        final_top1 = None
+        llm_error = str(exc)
+
+    elapsed = round(time.time() - started, 3)
+
+    dense_codes = [c["code"] for c in dense_candidates]
+    reranked_codes = [c["code"] for c in reranked]
+    dense_rank = first_expected_rank(dense_codes, gold_codes)
+    reranked_rank = first_expected_rank(reranked_codes, gold_codes)
+
+    return {
+        "case_id": record["id"],
+        "gold_code": gold_code,
+        "dense_top50_codes": dense_codes[:50],
+        "dense_top10_codes": dense_codes[:10],
+        "dense_rank": dense_rank,
+        "dense_recall_at_10": (dense_rank is not None and dense_rank <= 10),
+        "dense_recall_at_50": (dense_rank is not None and dense_rank <= 50),
+        "reranked_top10_codes": reranked_codes,
+        "reranked_rank": reranked_rank,
+        "reranked_recall_at_10": (reranked_rank is not None and reranked_rank <= 10),
+        "final_top1_code": final_top1,
+        "final_codes": final_codes,
+        "llm_error": llm_error,
+        "elapsed": elapsed,
+    }
+
+
 def main() -> int:
     args = parse_args()
     print(f"[eval_hierarchical] dataset={args.dataset.name} stage={args.stage}")
@@ -168,8 +220,10 @@ def main() -> int:
             row = evaluate_record_retrieval(agent, record)
         elif args.stage == "reranker":
             row = evaluate_record_reranker(agent, record)
+        elif args.stage in ("final", "all"):
+            row = evaluate_record_final(agent, record)
         else:
-            raise NotImplementedError(f"stage={args.stage} not yet implemented")
+            raise NotImplementedError(f"stage={args.stage}")
         rows.append(row)
         print(f"rank={row.get('dense_rank')} t={row['elapsed']}s")
 
