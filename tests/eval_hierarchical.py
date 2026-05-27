@@ -157,6 +157,22 @@ def write_summary_md(
     return out_path
 
 
+def save_baseline(summary: dict[str, Any], stage: str, tag: str, dataset_path: Path) -> Path:
+    """Save baseline snapshot (tracked in git) for future diff comparisons."""
+    BASELINES_DIR.mkdir(parents=True, exist_ok=True)
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    out_path = BASELINES_DIR / f"{date_str}_{tag}_{stage}.json"
+    snapshot = {
+        "timestamp": datetime.now().isoformat(),
+        "dataset": str(dataset_path.relative_to(REPO_ROOT)),
+        "stage": stage,
+        "tag": tag,
+        "summary": summary,
+    }
+    out_path.write_text(json.dumps(snapshot, indent=2, ensure_ascii=False), encoding="utf-8")
+    return out_path
+
+
 def evaluate_record_retrieval(
     agent: ClassifierAgent, record: dict[str, Any], dense_top_k: int = 50
 ) -> dict[str, Any]:
@@ -319,6 +335,10 @@ def main() -> int:
 
     md_path = write_summary_md(rows, summary, args.stage, args.tag, args.dataset)
     print(f"[eval_hierarchical] summary md: {md_path}")
+
+    if args.save_baseline:
+        baseline_path = save_baseline(summary, args.stage, args.tag, args.dataset)
+        print(f"[eval_hierarchical] baseline saved: {baseline_path}")
 
     return 0
 
