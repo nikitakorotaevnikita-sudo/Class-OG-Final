@@ -83,6 +83,80 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def write_per_case_log(rows: list[dict[str, Any]], stage: str, tag: str) -> Path:
+    """Write per-case rows as JSONL to eval_results/."""
+    EVAL_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    out_path = EVAL_RESULTS_DIR / f"{timestamp}_{tag}_{stage}.jsonl"
+    with out_path.open("w", encoding="utf-8") as f:
+        for row in rows:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    return out_path
+
+
+def write_summary_md(
+    rows: list[dict[str, Any]],
+    summary: dict[str, Any],
+    stage: str,
+    tag: str,
+    dataset_path: Path,
+) -> Path:
+    """Write human-readable markdown summary to eval_results/."""
+    EVAL_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    out_path = EVAL_RESULTS_DIR / f"{timestamp}_{tag}_{stage}_summary.md"
+
+    lines = [
+        f"# Eval Hierarchical — {tag} — {stage}",
+        "",
+        f"**Date:** {datetime.now().isoformat()}",
+        f"**Dataset:** `{dataset_path}` ({summary['total']} records)",
+        f"**Stage:** `{stage}`",
+        "",
+        "## Summary metrics",
+        "",
+        "| Metric | Value |",
+        "|---|---:|",
+    ]
+    if "top1_accuracy_pct" in summary:
+        lines.append(f"| Top-1 accuracy | {summary['correct']}/{summary['evaluable']} = {summary['top1_accuracy_pct']}% |")
+    for key in ["dense_recall_at_10_pct", "dense_recall_at_50_pct", "reranked_recall_at_10_pct"]:
+        if key in summary:
+            lines.append(f"| {key.replace('_pct', '').replace('_', ' ')} | {summary[key]}% |")
+    lines.append("")
+
+    if summary.get("failure_breakdown"):
+        lines.extend([
+            "## Failure attribution",
+            "",
+            "| Category | Count | % of evaluable |",
+            "|---|---:|---:|",
+        ])
+        evaluable = summary["evaluable"] or 1
+        for category, count in sorted(summary["failure_breakdown"].items(), key=lambda kv: -kv[1]):
+            pct = round(100.0 * count / evaluable, 1)
+            lines.append(f"| `{category}` | {count} | {pct}% |")
+        lines.append("")
+
+    lines.extend([
+        "## Per-case details",
+        "",
+        "| ID | Gold | Dense rank | Reranked rank | Final top-1 | Attribution |",
+        "|---|---|---:|---:|---|---|",
+    ])
+    for row in rows:
+        lines.append(
+            f"| `{row['case_id']}` | `{row['gold_code']}` | "
+            f"{row.get('dense_rank') or '−'} | "
+            f"{row.get('reranked_rank') or '−'} | "
+            f"`{row.get('final_top1_code') or '−'}` | "
+            f"`{row.get('failure_attribution', '−')}` |"
+        )
+
+    out_path.write_text("\n".join(lines), encoding="utf-8")
+    return out_path
+
+
 def evaluate_record_retrieval(
     agent: ClassifierAgent, record: dict[str, Any], dense_top_k: int = 50
 ) -> dict[str, Any]:
@@ -236,9 +310,16 @@ def main() -> int:
             final_top1_code=row.get("final_top1_code"),
         )
 
+    per_case_path = write_per_case_log(rows, args.stage, args.tag)
+    print(f"[eval_hierarchical] per-case log: {per_case_path}")
+
     summary = compute_per_stage_metrics(per_case_rows=rows)
     print("\n=== SUMMARY ===")
     print(json.dumps(summary, indent=2, ensure_ascii=False))
+
+    md_path = write_summary_md(rows, summary, args.stage, args.tag, args.dataset)
+    print(f"[eval_hierarchical] summary md: {md_path}")
+
     return 0
 
 
