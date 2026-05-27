@@ -163,6 +163,9 @@ def attribute_failure(
       - reranker: gold in dense top-50, but reranker dropped it from top-10
       - retrieval_recall: gold not even in dense top-50
       - no_gold: gold_codes is empty (eval skip)
+
+    Note: final_top1_code may be None when the LLM stage produced no answer;
+    in that case the result falls through to retrieval/reranker categories.
     """
     if not gold_codes:
         return "no_gold"

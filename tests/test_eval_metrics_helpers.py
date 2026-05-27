@@ -5,6 +5,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from eval_metrics_helpers import (
     any_expected_in_codes,
+    attribute_failure,
     first_expected_rank,
     pct,
     prefix_match,
@@ -175,8 +176,6 @@ def test_pct_formats_counts_and_zero_denominator():
 
 # Tests for attribute_failure (Phase 0 baseline attribution)
 
-from eval_metrics_helpers import attribute_failure  # will fail import until impl
-
 
 def test_attribute_correct_when_top1_in_gold():
     result = attribute_failure(
@@ -226,6 +225,17 @@ def test_attribute_no_gold_when_gold_codes_empty():
         final_top1_code="0001",
     )
     assert result == "no_gold"
+
+
+def test_attribute_retrieval_recall_when_final_top1_is_none():
+    """LLM produced no answer (None) — categorize by retrieval/reranker stages."""
+    result = attribute_failure(
+        gold_codes=["0001.0002.0003.0004"],
+        dense_top50_codes=["0005.0006.0007.0008"],
+        reranked_top10_codes=["0005.0006.0007.0008"],
+        final_top1_code=None,
+    )
+    assert result == "retrieval_recall"
 
 
 def test_attribute_multi_gold_correct():
