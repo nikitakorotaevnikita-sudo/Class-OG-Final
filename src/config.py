@@ -79,6 +79,16 @@ ENABLE_SECTION_ROUTING: bool = os.getenv("ENABLE_SECTION_ROUTING", "false").lowe
 # Максимальное число L2-тематик которые LLM может выбрать (3 = широко, 1 = жёсткое сужение)
 SECTION_ROUTING_MAX_TOPICS: int = int(os.getenv("SECTION_ROUTING_MAX_TOPICS", "3"))
 
+# ── L3-routing (опц., после L2-routing) — сужает по L3-теме ─────────────────────
+ENABLE_L3_ROUTING: bool = os.getenv("ENABLE_L3_ROUTING", "false").lower() == "true"
+L3_ROUTING_MAX_THEMES: int = int(os.getenv("L3_ROUTING_MAX_THEMES", "3"))
+
+# ── Multi-Query expansion (опц., перед retrieval) ───────────────────────────────
+# LLM генерирует 3-5 разных формулировок обращения, для каждой делается отдельный
+# retrieval, потом union пулов. Цена: +1 LLM-вызов на сегмент.
+ENABLE_MULTI_QUERY_EXPAND: bool = os.getenv("ENABLE_MULTI_QUERY_EXPAND", "false").lower() == "true"
+MQE_N_VARIANTS: int = int(os.getenv("MQE_N_VARIANTS", "4"))
+
 # ── Learning-to-Rank reranker (опциональный) ────────────────────────────────────
 # Sklearn LogReg обучен на ii25_train: предсказывает вероятность что candidate -
 # правильный код. Score добавляется в combined_score reranker'а.

@@ -1,18 +1,17 @@
 """
-CrossEncoder reranker (опциональный).
+CrossEncoder reranker через transformers напрямую (sentence-transformers wrapper
+саturate scores на BGE — переписано на AutoModelForSequenceClassification).
 
-Применяется ПОСЛЕ heuristic rerank — на топ-N лучших кандидатов от dense+lexical+heuristic.
-Делает CE-предсказание (query, candidate_text) → score, смешивает с heuristic score
-и пересортирует.
+Применяется ПОСЛЕ heuristic rerank на top-N лучших кандидатов от dense+lexical+heuristic.
+Вычисляет (query, candidate) логиты → смешивает с heuristic score → пересортировка.
 
-Безопасный fallback: если модель не загружается — возвращает кандидатов в исходном порядке.
+Безопасный fallback: если модель не загружается — возвращает кандидатов как есть.
 """
 
 import os
 import sys
 from pathlib import Path
 
-# Окружение для HF mirror (так же как в classifier_agent)
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 os.environ.setdefault("HF_HUB_DISABLE_SSL", "1")
 
@@ -22,23 +21,28 @@ from config import CROSS_ENCODER_MODEL, CE_RERANK_TOP_N, CE_BLEND_WEIGHT
 
 
 class CrossEncoderReranker:
-    """Lazy-load CrossEncoder; rerank topN candidates by (query, candidate_text) score."""
+    """Lazy-load CrossEncoder; rerank topN candidates by (query, candidate_text) logit."""
 
     def __init__(self, model_name: str | None = None):
         self.model_name = model_name or CROSS_ENCODER_MODEL
+        self._tokenizer = None
         self._model = None
         self._failed = False
 
     def _ensure_loaded(self) -> bool:
-        """Lazy-load. Return True if model is ready."""
-        if self._model is not None:
+        if self._model is not None and self._tokenizer is not None:
             return True
         if self._failed:
             return False
         try:
-            from sentence_transformers import CrossEncoder
+            import torch
+            torch.set_num_threads(1)
+            from transformers import AutoTokenizer, AutoModelForSequenceClassification
             print(f"  [CE] Загрузка CrossEncoder: {self.model_name}")
-            self._model = CrossEncoder(self.model_name, max_length=512)
+            self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+            self._model = AutoModelForSequenceClassification.from_pretrained(self.model_name)
+            self._model.eval()
+            self._torch = torch
             print(f"  [CE] Готово.")
             return True
         except Exception as e:
@@ -48,12 +52,10 @@ class CrossEncoderReranker:
 
     @staticmethod
     def _candidate_text(c: dict) -> str:
-        """Build text to feed CrossEncoder for a candidate."""
         return f"{c.get('name', '')}. {c.get('full_path', '')}"
 
     @staticmethod
     def _normalize_scores(scores: list[float]) -> list[float]:
-        """Min-max normalize to [0, 1]; if all equal — returns 0.5."""
         if not scores:
             return []
         lo, hi = min(scores), max(scores)
@@ -69,18 +71,6 @@ class CrossEncoderReranker:
         top_n: int | None = None,
         blend_weight: float | None = None,
     ) -> list[dict]:
-        """Rerank candidates with CrossEncoder.
-
-        Args:
-            query: текст вопроса
-            candidates: уже отсортированные heuristic-rerank кандидаты
-            top_k: сколько вернуть
-            top_n: сколько передать в CE (default — CE_RERANK_TOP_N или len(candidates))
-            blend_weight: вес CE в смеси с heuristic (default CE_BLEND_WEIGHT)
-
-        Returns:
-            top_k кандидатов, пересортированных с учётом CE
-        """
         if not candidates:
             return []
         if not self._ensure_loaded():
@@ -91,18 +81,26 @@ class CrossEncoderReranker:
         head = candidates[:n]
         tail = candidates[n:]
 
-        pairs = [(query, self._candidate_text(c)) for c in head]
         try:
-            scores = self._model.predict(pairs, show_progress_bar=False).tolist()
+            torch = self._torch
+            queries = [query] * len(head)
+            passages = [self._candidate_text(c) for c in head]
+            with torch.no_grad():
+                inputs = self._tokenizer(
+                    queries, passages,
+                    padding=True, truncation=True,
+                    return_tensors="pt", max_length=512,
+                )
+                logits = self._model(**inputs, return_dict=True).logits.view(-1).float()
+            scores = logits.tolist()
         except Exception as e:
             print(f"  [CE] Ошибка predict: {e}. Возвращаю heuristic-порядок.")
             return candidates[:top_k]
 
-        # Сохраняем CE score в кандидата
+        # Сохраняем raw CE логиты
         for c, s in zip(head, scores):
             c["ce_score"] = float(s)
 
-        # Получаем heuristic score (для смеси). Используем 1.0 - rank/n как прокси если нет similarity.
         heuristic_scores = [float(c.get("similarity", 0.0)) for c in head]
         h_norm = self._normalize_scores(heuristic_scores)
         ce_norm = self._normalize_scores(scores)
@@ -115,7 +113,5 @@ class CrossEncoderReranker:
             key=lambda x: (-x[0], x[1]),
         )
         reordered_head = [c for _, _, c in ranked]
-
-        # Финальный список: пересортированный head + хвост (если в top_k не помещается head)
         result = reordered_head + tail
         return result[:top_k]

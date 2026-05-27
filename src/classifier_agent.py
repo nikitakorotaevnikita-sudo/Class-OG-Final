@@ -49,6 +49,8 @@ from config import (
     ENABLE_SECTION_ROUTING, SECTION_ROUTING_MAX_TOPICS,
     ENABLE_LTR_RERANKER, LTR_MODEL_PATH, LTR_WEIGHT,
     ENABLE_EMBEDDING_ADAPTER, ADAPTER_PATH,
+    ENABLE_L3_ROUTING, L3_ROUTING_MAX_THEMES,
+    ENABLE_MULTI_QUERY_EXPAND, MQE_N_VARIANTS,
 )
 from hierarchy import (
     branch_agreement_scores, parent_similarity_boost,
@@ -56,7 +58,8 @@ from hierarchy import (
 )
 from section_router import (
     build_routing_prompt, parse_routing_response,
-    filter_candidates_by_l2,
+    filter_candidates_by_l2, filter_candidates_by_l3,
+    build_l3_routing_prompt, parse_l3_routing_response,
 )
 from appeals_logger import get_logger
 
@@ -280,6 +283,28 @@ QUERY_EXPANSION_SYSTEM = """Ты — эксперт по Общероссийс�
 
 QUERY_EXPANSION_USER_TEMPLATE = """Вопрос: «{question}»
 Ответ:"""
+
+
+# ── Multi-Query expansion: 3-5 разных формулировок одним LLM-вызовом ──────────
+MULTI_QUERY_SYSTEM = """Ты — эксперт по Общероссийскому классификатору обращений граждан.
+
+Твоя задача — сгенерировать N РАЗЛИЧНЫХ ФОРМУЛИРОВОК одного обращения, чтобы поиск по векторной базе классификатора нашёл правильный код с любого ракурса.
+
+Каждая формулировка — короткая (5-15 слов), фокусируется на своём аспекте:
+1. **ТЕМА** — о чём конкретно вопрос (предмет: дорога, лекарство, школа, инвалидность, и т.п.)
+2. **ДЕЙСТВИЕ** — что просит/требует гражданин (отремонтировать, предоставить, разъяснить, ...)
+3. **КЛАССИФИКАТОРНЫЙ СТИЛЬ** — формальная формулировка как в государственном перечне (например «Обращение с твёрдыми коммунальными отходами», «Установление группы инвалидности», «Благоустройство тротуаров»)
+4. **СФЕРА** — отрасль (ЖКХ, здравоохранение, образование, соцобеспечение, ...)
+5. (опц.) **ВЕДОМСТВО** — кому адресовано (УК, МСЭ, Минздрав, прокуратура, ...)
+
+Формулировки не повторяются. Без воды, без «обращение гражданина о...».
+
+Отвечай СТРОГО в JSON: {"variants": ["формулировка 1", "формулировка 2", ...]}"""
+
+
+MULTI_QUERY_USER_TEMPLATE = """Обращение: «{question}»
+
+Сгенерируй {n} различных формулировок. JSON-ответ:"""
 
 
 CLASSIFICATION_PROMPT_TEMPLATE = """Классифицируй следующее обращение гражданина.
@@ -779,6 +804,208 @@ class ClassifierAgent:
             print(f"  [Router] не распознан ответ → fallback без фильтрации: {raw[:120]}")
         return topics
 
+    def _route_to_l3_themes(
+        self,
+        appeal_text: str,
+        allowed_l2: list[str],
+        provider: str,
+        model: str,
+    ) -> list[str]:
+        """Внутри выбранных L2-тематик выбрать 1-3 L3-темы. Возвращает XXXX.XXXX.XXXX коды.
+
+        Empty list if router fails — no L3 filtering applied.
+        """
+        if not allowed_l2:
+            return []
+
+        # Собираем L3-опции внутри allowed_l2 (level=3 записи)
+        allowed_set = set(allowed_l2)
+        l3_options: list[tuple[str, str]] = []
+        for meta in self.metadata:
+            if str(meta.get("level", "")) != "3":
+                continue
+            code = meta["code"]
+            parts = code.split(".")
+            if len(parts) >= 3:
+                l2 = ".".join(parts[:2])
+                if l2 in allowed_set:
+                    l3_code = ".".join(parts[:3])
+                    l3_options.append((l3_code, meta["name"]))
+        if not l3_options:
+            return []
+
+        sys_msg, user_msg = build_l3_routing_prompt(
+            appeal_text, l3_options, max_themes=L3_ROUTING_MAX_THEMES
+        )
+        try:
+            if provider == "gemini":
+                response = self._get_gemini_client().models.generate_content(
+                    model=model,
+                    contents=user_msg,
+                    config=GenerateContentConfig(
+                        system_instruction=sys_msg,
+                        temperature=0.0,
+                        max_output_tokens=200,
+                    ),
+                )
+                raw = (response.text or "").strip()
+            elif provider == "ollama":
+                r = self._get_ollama_client().post(
+                    "/chat/completions",
+                    json={
+                        "model": model,
+                        "messages": [
+                            {"role": "system", "content": sys_msg},
+                            {"role": "user", "content": user_msg},
+                        ],
+                        "temperature": 0.0,
+                        "max_tokens": 200,
+                    },
+                )
+                r.raise_for_status()
+                raw = r.json()["choices"][0]["message"]["content"].strip()
+            elif provider == "ario":
+                import httpx
+                client = httpx.Client(
+                    base_url=ARIO_BASE_URL,
+                    headers={"Authorization": f"Bearer {ARIO_API_KEY}"},
+                    timeout=60,
+                )
+                try:
+                    r = client.post(
+                        "/chat/completions",
+                        json={
+                            "model": model,
+                            "messages": [
+                                {"role": "system", "content": sys_msg},
+                                {"role": "user", "content": user_msg},
+                            ],
+                            "temperature": 0.0,
+                            "max_tokens": 200,
+                        },
+                    )
+                    r.raise_for_status()
+                    raw = r.json()["choices"][0]["message"]["content"].strip()
+                finally:
+                    client.close()
+            else:
+                r = self._get_groq_client().chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": sys_msg},
+                        {"role": "user", "content": user_msg},
+                    ],
+                    temperature=0.0,
+                    max_tokens=200,
+                    response_format={"type": "json_object"},
+                )
+                raw = r.choices[0].message.content.strip()
+        except Exception as e:
+            print(f"  [L3-Router] error: {e}")
+            return []
+
+        themes = parse_l3_routing_response(raw)
+        # Validate — оставить только те L3 которые в нашем allowed_set
+        themes_valid = [
+            t for t in themes
+            if len(t.split(".")) >= 3 and ".".join(t.split(".")[:2]) in allowed_set
+        ]
+        if themes_valid:
+            print(f"  [L3-Router] выбрано: {themes_valid}")
+        else:
+            print(f"  [L3-Router] не распознан / не валиден ответ: {raw[:120]}")
+        return themes_valid
+
+    def _multi_query_expand(self, question_text: str, provider: str, model: str, n: int = MQE_N_VARIANTS) -> list[str]:
+        """LLM генерирует N разных формулировок одного обращения (тема/действие/классификаторный
+        стиль/сфера). Возвращает список строк. На ошибке — пустой список."""
+        user_msg = MULTI_QUERY_USER_TEMPLATE.format(question=question_text[:500], n=n)
+        max_tokens = 60 * n + 40
+
+        try:
+            if provider == "gemini":
+                response = self._get_gemini_client().models.generate_content(
+                    model=model,
+                    contents=user_msg,
+                    config=GenerateContentConfig(
+                        system_instruction=MULTI_QUERY_SYSTEM,
+                        temperature=0.3,
+                        max_output_tokens=max_tokens,
+                    ),
+                )
+                raw = (response.text or "").strip()
+            elif provider == "ollama":
+                r = self._get_ollama_client().post(
+                    "/chat/completions",
+                    json={
+                        "model": model,
+                        "messages": [
+                            {"role": "system", "content": MULTI_QUERY_SYSTEM},
+                            {"role": "user", "content": user_msg},
+                        ],
+                        "temperature": 0.3,
+                        "max_tokens": max_tokens,
+                    },
+                )
+                r.raise_for_status()
+                raw = r.json()["choices"][0]["message"]["content"].strip()
+            elif provider == "ario":
+                import httpx
+                client = httpx.Client(
+                    base_url=ARIO_BASE_URL,
+                    headers={"Authorization": f"Bearer {ARIO_API_KEY}"},
+                    timeout=60,
+                )
+                try:
+                    r = client.post(
+                        "/chat/completions",
+                        json={
+                            "model": model,
+                            "messages": [
+                                {"role": "system", "content": MULTI_QUERY_SYSTEM},
+                                {"role": "user", "content": user_msg},
+                            ],
+                            "temperature": 0.3,
+                            "max_tokens": max_tokens,
+                        },
+                    )
+                    r.raise_for_status()
+                    raw = r.json()["choices"][0]["message"]["content"].strip()
+                    for prefix in ("```json", "```"):
+                        if raw.startswith(prefix):
+                            raw = raw[len(prefix):].strip()
+                    if raw.endswith("```"):
+                        raw = raw[:-3].strip()
+                finally:
+                    client.close()
+            else:
+                r = self._get_groq_client().chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": MULTI_QUERY_SYSTEM},
+                        {"role": "user", "content": user_msg},
+                    ],
+                    temperature=0.3,
+                    max_tokens=max_tokens,
+                    response_format={"type": "json_object"},
+                )
+                raw = r.choices[0].message.content.strip()
+        except Exception as e:
+            print(f"  [MQE] expand failed: {e}")
+            return []
+
+        try:
+            data = json.loads(raw)
+            variants = data.get("variants", [])
+            if isinstance(variants, list):
+                out = [str(v).strip() for v in variants if isinstance(v, str) and v.strip()]
+                return out[:n]
+        except (json.JSONDecodeError, KeyError, TypeError):
+            pass
+        # Fallback: split by lines
+        lines = [l.strip(' "-•*\t') for l in raw.split("\n") if l.strip()]
+        return [l for l in lines if len(l) > 5][:n]
+
     def _expand_query(self, question_text: str, provider: str, model: str) -> str:
         """LLM query expansion — переформулировать вопрос в терминах классификатора.
 
@@ -864,11 +1091,15 @@ class ClassifierAgent:
         segment_text: str,
         expanded: str = "",
         allowed_l2: list[str] | None = None,
+        allowed_l3: list[str] | None = None,
+        multi_queries: list[str] | None = None,
     ) -> list[dict]:
         """Per-question retrieval: dense + lexical + heuristic rerank → (CE rerank?) → top-K.
 
         Если allowed_l2 непустой — кандидаты фильтруются по этим L2-тематикам (coarse-to-fine).
         Если expanded query задан — embedding ищется по объединённому тексту.
+        Если multi_queries задан — для каждого варианта делается отдельный dense+lexical retrieval,
+            пулы объединяются (max similarity per code).
         """
         query = segment_text if not expanded else f"{segment_text}. {expanded}"
 
@@ -876,15 +1107,42 @@ class ClassifierAgent:
         dense_top_k = max(RETRIEVAL_POOL_SIZE * 2, 100) if allowed_l2 else max(RETRIEVAL_POOL_SIZE, TOP_K_CANDIDATES)
         lex_top_k = max(LEXICAL_POOL_SIZE * 2, 60) if allowed_l2 else LEXICAL_POOL_SIZE
 
+        # 1) Retrieval по основному query
         dense_pool = self._search_candidates(query, top_k=dense_top_k)
         lexical_pool = self._search_lexical_candidates(query, top_k=lex_top_k)
         merged = self._merge_candidate_pools(dense_pool, lexical_pool)
+
+        # 2) Multi-query union (опц.): для каждого variant — отдельный retrieval
+        if multi_queries:
+            # Меньший размер на variant — суммарно пул не должен взорваться
+            mq_dense_k = max(RETRIEVAL_POOL_SIZE // 2, 30)
+            mq_lex_k = max(LEXICAL_POOL_SIZE // 2, 15)
+            all_pools = [merged]
+            for variant in multi_queries:
+                v_dense = self._search_candidates(variant, top_k=mq_dense_k)
+                v_lex = self._search_lexical_candidates(variant, top_k=mq_lex_k)
+                all_pools.append(v_dense)
+                all_pools.append(v_lex)
+            before_mqe = len(merged)
+            merged = self._merge_candidate_pools(*all_pools)
+            print(f"  [MQE] union {len(multi_queries)+1} запросов: {before_mqe} -> {len(merged)} кандидатов")
 
         # Coarse-to-fine: фильтрация по L2-разделам ПЕРЕД rerank
         if allowed_l2:
             before = len(merged)
             merged = filter_candidates_by_l2(merged, allowed_l2)
-            print(f"  [Router] фильтр L2 {allowed_l2}: {before} → {len(merged)} кандидатов")
+            print(f"  [Router] фильтр L2 {allowed_l2}: {before} -> {len(merged)} кандидатов")
+
+        # L3 фильтр — узкое сужение если L3-router работал
+        if allowed_l3:
+            before_l3 = len(merged)
+            l3_filtered = filter_candidates_by_l3(merged, allowed_l3)
+            if len(l3_filtered) >= TOP_K_CANDIDATES:
+                merged = l3_filtered
+                print(f"  [L3-Router] фильтр L3 {allowed_l3}: {before_l3} -> {len(merged)} кандидатов")
+            else:
+                # safety: если по L3 слишком мало, оставляем L2-фильтрованный пул
+                print(f"  [L3-Router] L3-фильтр дал бы {len(l3_filtered)}<{TOP_K_CANDIDATES}, оставляем L2-пул {len(merged)}")
             # Если после фильтра мало кандидатов — ДОЗАПОЛНЯЕМ кодами из той же L2-ветки
             # (направленный поиск во всех 2108 кодах с этим L2-префиксом), а НЕ откатываемся на полный пул
             if len(merged) < TOP_K_CANDIDATES:
@@ -1142,12 +1400,31 @@ class ClassifierAgent:
                 f"  [QE] Query expansion для {len(segments)} сегментов за {time.time() - qe_start:.2f}с"
             )
 
+        # Шаг 1b': Опциональное Multi-Query expansion — 1 LLM-вызов даёт N формулировок,
+        # для каждой делается отдельный retrieval, потом union пулов.
+        multi_queries_by_ord: dict[int, list[str]] = {}
+        if ENABLE_MULTI_QUERY_EXPAND:
+            mqe_start = time.time()
+            for seg in segments:
+                variants = self._multi_query_expand(seg.text, provider, model)
+                if variants:
+                    multi_queries_by_ord[seg.ordinal] = variants
+                    print(f"  [MQE] seg {seg.ordinal}: {len(variants)} вариантов: {variants[:2]}")
+            print(f"  [MQE] expansion для {len(segments)} сегментов за {time.time() - mqe_start:.2f}с")
+
         # Шаг 1c: Опциональное section routing — coarse-to-fine выбор тематик из методички
         allowed_l2: list[str] = []
+        allowed_l3: list[str] = []
         if ENABLE_SECTION_ROUTING:
             route_start = time.time()
             allowed_l2 = self._route_to_sections(appeal_text, provider, model)
-            print(f"  [Router] выбор тематик за {time.time() - route_start:.2f}с")
+            print(f"  [Router] выбор L2 за {time.time() - route_start:.2f}с")
+
+            # Шаг 1d: L3-router — сужение по конкретной L3-теме внутри выбранных L2
+            if ENABLE_L3_ROUTING and allowed_l2:
+                l3_start = time.time()
+                allowed_l3 = self._route_to_l3_themes(appeal_text, allowed_l2, provider, model)
+                print(f"  [L3-Router] выбор L3 за {time.time() - l3_start:.2f}с")
 
         # Шаг 2: Per-question retrieval — для каждого вопроса свой пул кандидатов
         search_start = time.time()
@@ -1158,6 +1435,8 @@ class ClassifierAgent:
                 seg.text,
                 expanded=expansions.get(seg.ordinal, ""),
                 allowed_l2=allowed_l2 or None,
+                allowed_l3=allowed_l3 or None,
+                multi_queries=multi_queries_by_ord.get(seg.ordinal) or None,
             )
             questions_with_candidates.append({
                 "ordinal": seg.ordinal,

@@ -84,7 +84,12 @@
       "Bash(HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe tests/eval_accuracy.py --fixtures tests/fixtures/ii25_test.json)",
       "Bash(ENABLE_LTR_RERANKER=false HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe tests/eval_accuracy.py --fixtures tests/fixtures/ii25_test.json)",
       "Bash(git reset *)",
-      "Bash(grep -v \"^\\\\\\\\?\\\\\\\\?\")"
+      "Bash(grep -v \"^\\\\\\\\?\\\\\\\\?\")",
+      "Bash(HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe -u scripts/build_ltr_dataset.py)",
+      "Bash(PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe scripts/train_ltr.py)",
+      "PowerShell(Get-Process python -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep -Seconds 3; $os = Get-CimInstance Win32_OperatingSystem; $freeMB = [math]::Round\\($os.FreePhysicalMemory / 1024\\); Write-Output \"Free RAM: $freeMB MB\")",
+      "Bash(HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe -u tests/eval_ii25_with_ce.py)",
+      "Bash(PYTHONIOENCODING=utf-8 ./venv/Scripts/python.exe -u scripts/finetune_ce_direct.py)"
     ]
   }
 }

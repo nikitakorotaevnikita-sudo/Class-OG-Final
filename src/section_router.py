@@ -193,3 +193,65 @@ def filter_candidates_by_l2(candidates: list[dict], allowed_l2: list[str]) -> li
             if l2 in allowed:
                 kept.append(c)
     return kept
+
+
+def filter_candidates_by_l3(candidates: list[dict], allowed_l3: list[str]) -> list[dict]:
+    """Keep only candidates whose code starts with one of allowed L3 prefixes (XXXX.XXXX.XXXX)."""
+    if not allowed_l3:
+        return candidates
+    allowed = set(allowed_l3)
+    kept = []
+    for c in candidates:
+        code = c.get("code", "")
+        parts = code.split(".")
+        if len(parts) >= 3:
+            l3 = ".".join(parts[:3])
+            if l3 in allowed:
+                kept.append(c)
+    return kept
+
+
+def build_l3_routing_prompt(appeal_text: str, l3_options: list[tuple[str, str]], max_themes: int = 3) -> tuple[str, str]:
+    """Build (system, user) for L3-routing LLM call.
+
+    l3_options: список (l3_code XXXX.XXXX.XXXX, l3_name) среди выбранных L2-тематик.
+    """
+    options_str = "\n".join(f"  • {code}  — {name}" for code, name in l3_options)
+    sys_msg = (
+        "Ты — эксперт по Общероссийскому классификатору обращений граждан. "
+        "Тебе уже выбраны тематики (L2). Теперь сузь до конкретных ТЕМ (L3) — "
+        "это родительская группа для leaf-кодов классификатора.\n"
+        f"Выбери от 1 до {max_themes} наиболее подходящих L3-тем для обращения.\n"
+        "Отвечай СТРОГО в JSON: {\"themes\": [\"XXXX.XXXX.XXXX\", ...], \"reasoning\": \"...\"}"
+    )
+    user_msg = (
+        f"ОБРАЩЕНИЕ:\n{appeal_text[:2000]}\n\n"
+        f"ДОСТУПНЫЕ L3-ТЕМЫ (выбирай 1-{max_themes} наиболее подходящих):\n{options_str}\n\n"
+        "JSON-ответ:"
+    )
+    return sys_msg, user_msg
+
+
+_L3_RE = re.compile(r"\b(\d{4}\.\d{4}\.\d{4})\b")
+
+
+def parse_l3_routing_response(raw: str) -> list[str]:
+    """Extract L3 codes (XXXX.XXXX.XXXX) from LLM JSON response."""
+    if not raw:
+        return []
+    try:
+        import json as _json
+        text = raw.strip()
+        for prefix in ("```json", "```"):
+            if text.startswith(prefix):
+                text = text[len(prefix):].strip()
+        if text.endswith("```"):
+            text = text[:-3].strip()
+        data = _json.loads(text)
+        if isinstance(data, dict):
+            themes = data.get("themes", [])
+            if isinstance(themes, list):
+                return [t for t in themes if isinstance(t, str) and _L3_RE.fullmatch(t)]
+    except Exception:
+        pass
+    return list(dict.fromkeys(_L3_RE.findall(raw)))
