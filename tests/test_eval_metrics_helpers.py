@@ -171,3 +171,68 @@ def test_summarize_eval_results_empty_input_returns_zeroes():
 def test_pct_formats_counts_and_zero_denominator():
     assert pct(2, 3) == "2/3 = 66.7%"
     assert pct(0, 0) == "N/A"
+
+
+# Tests for attribute_failure (Phase 0 baseline attribution)
+
+from eval_metrics_helpers import attribute_failure  # will fail import until impl
+
+
+def test_attribute_correct_when_top1_in_gold():
+    result = attribute_failure(
+        gold_codes=["0001.0002.0003.0004"],
+        dense_top50_codes=["0001.0002.0003.0004", "0005.0006.0007.0008"],
+        reranked_top10_codes=["0001.0002.0003.0004"],
+        final_top1_code="0001.0002.0003.0004",
+    )
+    assert result == "correct"
+
+
+def test_attribute_llm_final_when_gold_in_top10_but_top1_wrong():
+    result = attribute_failure(
+        gold_codes=["0001.0002.0003.0004"],
+        dense_top50_codes=["0001.0002.0003.0004"],
+        reranked_top10_codes=["0005.0006.0007.0008", "0001.0002.0003.0004"],
+        final_top1_code="0005.0006.0007.0008",
+    )
+    assert result == "llm_final"
+
+
+def test_attribute_reranker_when_gold_in_dense_but_not_in_top10():
+    result = attribute_failure(
+        gold_codes=["0001.0002.0003.0004"],
+        dense_top50_codes=["0001.0002.0003.0004", "0009.0009.0009.0009"],
+        reranked_top10_codes=["0005.0006.0007.0008", "0009.0009.0009.0009"],
+        final_top1_code="0005.0006.0007.0008",
+    )
+    assert result == "reranker"
+
+
+def test_attribute_retrieval_recall_when_gold_not_in_dense():
+    result = attribute_failure(
+        gold_codes=["0001.0002.0003.0004"],
+        dense_top50_codes=["0005.0006.0007.0008", "0009.0009.0009.0009"],
+        reranked_top10_codes=["0005.0006.0007.0008"],
+        final_top1_code="0005.0006.0007.0008",
+    )
+    assert result == "retrieval_recall"
+
+
+def test_attribute_no_gold_when_gold_codes_empty():
+    result = attribute_failure(
+        gold_codes=[],
+        dense_top50_codes=["0001"],
+        reranked_top10_codes=["0001"],
+        final_top1_code="0001",
+    )
+    assert result == "no_gold"
+
+
+def test_attribute_multi_gold_correct():
+    result = attribute_failure(
+        gold_codes=["0001.0002.0003.0004", "0005.0006.0007.0008"],
+        dense_top50_codes=["0005.0006.0007.0008"],
+        reranked_top10_codes=["0005.0006.0007.0008"],
+        final_top1_code="0005.0006.0007.0008",
+    )
+    assert result == "correct"

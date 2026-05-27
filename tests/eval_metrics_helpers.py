@@ -145,3 +145,33 @@ def summarize_eval_results(results: Iterable[dict[str, Any]]) -> dict[str, Any]:
         "avg_confidence": sum(confidences) / len(ok_rows) if ok_rows else 0,
         "avg_time": sum(elapsed_values) / len(ok_rows) if ok_rows else 0,
     }
+
+
+def attribute_failure(
+    *,
+    gold_codes: Sequence[str],
+    dense_top50_codes: Sequence[str],
+    reranked_top10_codes: Sequence[str],
+    final_top1_code: str | None,
+) -> str:
+    """Categorize which pipeline stage failed.
+
+    Phase 0 baseline categories (will be extended in Phase 1+ to include
+    router_stage1, router_stage2):
+      - correct: final top-1 prediction is in gold
+      - llm_final: gold in reranked top-10, but LLM picked wrong code
+      - reranker: gold in dense top-50, but reranker dropped it from top-10
+      - retrieval_recall: gold not even in dense top-50
+      - no_gold: gold_codes is empty (eval skip)
+    """
+    if not gold_codes:
+        return "no_gold"
+
+    gold_set = set(gold_codes)
+    if final_top1_code in gold_set:
+        return "correct"
+    if any(code in gold_set for code in reranked_top10_codes):
+        return "llm_final"
+    if any(code in gold_set for code in dense_top50_codes):
+        return "reranker"
+    return "retrieval_recall"
