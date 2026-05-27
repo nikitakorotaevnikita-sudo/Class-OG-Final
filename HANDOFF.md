@@ -225,9 +225,22 @@ uvicorn src/api_server:app --host 0.0.0.0 --port 8000 --reload
 |---|---:|---:|---:|---:|
 | retrieval | n/a | **41.1%** | **69.6%** | n/a |
 | reranker | 0% (no LLM) | 41.1% | 69.6% | **12.5%** |
-| all (full pipeline) | см. `data/eval_baselines/2026-05-27_baseline_all.json` после завершения | | | |
+| all (full pipeline) | **7.1%** (4/56) | 41.1% | 69.6% | 12.5% |
 
-Любая последующая фаза должна сравниваться с этими snapshot'ами (`data/eval_baselines/`).
+**Failure attribution (--stage all):**
+- 30 кейсов `reranker` — gold в dense top-50, но reranker уронил из top-10
+- 17 кейсов `retrieval_recall` — gold вообще не в dense top-50
+- 5 кейсов `llm_final` — gold в reranked top-10, но LLM выбрала другой код
+- 4 кейса `correct`
+
+**Дополнительные наблюдения:**
+- Multi-question appeals: 1/56 — большинство single-question, soft и strict Top-1 совпадают
+- 2 LLM errors (400 Bad Request от Ario на 1 кейсе — флуктуация)
+- LLM Top-1 (7.1%) ≈ Reranked Top-5 (7.1%) — LLM эффективно выбирает из top-5 reranker'а
+
+**Важно:** ранее в HANDOFF упоминался `Top-1 ~25%`. Это либо измерено на другом cut, либо при других параметрах. Текущий честный baseline на ii25_test = **7.1%**. Spec target Top-1 ≥ 45% → теперь это +38 pp, более амбициозная цель, но и больше room для улучшения.
+
+Любая последующая фаза должна сравниваться с `data/eval_baselines/2026-05-27_baseline_*.json`.
 
 ---
 
