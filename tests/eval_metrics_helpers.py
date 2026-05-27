@@ -178,3 +178,44 @@ def attribute_failure(
     if any(code in gold_set for code in dense_top50_codes):
         return "reranker"
     return "retrieval_recall"
+
+
+def compute_per_stage_metrics(*, per_case_rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    """Aggregate per-case eval rows into a summary dict.
+
+    Args:
+        per_case_rows: list of dicts each containing at least 'failure_attribution'
+                       and optionally boolean stage flags (dense_recall_at_K, etc.)
+
+    Returns:
+        Dict with: total, evaluable (excludes no_gold), correct, top1_accuracy_pct,
+        failure_breakdown (dict by category), and per-stage recall metrics if present.
+    """
+    rows = list(per_case_rows)
+    total = len(rows)
+    evaluable_rows = [r for r in rows if r.get("failure_attribution") != "no_gold"]
+    evaluable = len(evaluable_rows)
+    correct = sum(1 for r in evaluable_rows if r.get("failure_attribution") == "correct")
+
+    failure_breakdown: dict[str, int] = {}
+    for r in evaluable_rows:
+        attr = r.get("failure_attribution")
+        if attr and attr != "correct":
+            failure_breakdown[attr] = failure_breakdown.get(attr, 0) + 1
+
+    summary: dict[str, Any] = {
+        "total": total,
+        "evaluable": evaluable,
+        "correct": correct,
+        "top1_accuracy_pct": round(100.0 * correct / evaluable, 1) if evaluable else 0.0,
+        "failure_breakdown": failure_breakdown,
+    }
+
+    # Optional stage recall metrics — compute if present in any row
+    for key in ["dense_recall_at_10", "dense_recall_at_50", "reranked_recall_at_10"]:
+        flagged = [r for r in evaluable_rows if key in r]
+        if flagged:
+            true_count = sum(1 for r in flagged if r.get(key) is True)
+            summary[f"{key}_pct"] = round(100.0 * true_count / len(flagged), 1)
+
+    return summary

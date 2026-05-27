@@ -6,6 +6,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from eval_metrics_helpers import (
     any_expected_in_codes,
     attribute_failure,
+    compute_per_stage_metrics,
     first_expected_rank,
     pct,
     prefix_match,
@@ -246,3 +247,55 @@ def test_attribute_multi_gold_correct():
         final_top1_code="0005.0006.0007.0008",
     )
     assert result == "correct"
+
+
+def test_compute_per_stage_metrics_empty():
+    summary = compute_per_stage_metrics(per_case_rows=[])
+    assert summary["total"] == 0
+    assert summary["correct"] == 0
+    assert summary["failure_breakdown"] == {}
+
+
+def test_compute_per_stage_metrics_mixed():
+    rows = [
+        {"failure_attribution": "correct"},
+        {"failure_attribution": "correct"},
+        {"failure_attribution": "llm_final"},
+        {"failure_attribution": "reranker"},
+        {"failure_attribution": "retrieval_recall"},
+    ]
+    summary = compute_per_stage_metrics(per_case_rows=rows)
+    assert summary["total"] == 5
+    assert summary["correct"] == 2
+    assert summary["top1_accuracy_pct"] == 40.0
+    assert summary["failure_breakdown"] == {
+        "llm_final": 1,
+        "reranker": 1,
+        "retrieval_recall": 1,
+    }
+
+
+def test_compute_per_stage_metrics_with_top_k_metrics():
+    rows = [
+        {"failure_attribution": "correct", "dense_recall_at_10": True, "dense_recall_at_50": True, "reranked_recall_at_10": True},
+        {"failure_attribution": "llm_final", "dense_recall_at_10": True, "dense_recall_at_50": True, "reranked_recall_at_10": True},
+        {"failure_attribution": "reranker", "dense_recall_at_10": True, "dense_recall_at_50": True, "reranked_recall_at_10": False},
+        {"failure_attribution": "retrieval_recall", "dense_recall_at_10": False, "dense_recall_at_50": False, "reranked_recall_at_10": False},
+    ]
+    summary = compute_per_stage_metrics(per_case_rows=rows)
+    assert summary["dense_recall_at_10_pct"] == 75.0
+    assert summary["dense_recall_at_50_pct"] == 75.0
+    assert summary["reranked_recall_at_10_pct"] == 50.0
+
+
+def test_compute_per_stage_metrics_skips_no_gold():
+    rows = [
+        {"failure_attribution": "correct"},
+        {"failure_attribution": "no_gold"},
+    ]
+    summary = compute_per_stage_metrics(per_case_rows=rows)
+    # "no_gold" rows excluded from accuracy denominator
+    assert summary["total"] == 2
+    assert summary["evaluable"] == 1
+    assert summary["correct"] == 1
+    assert summary["top1_accuracy_pct"] == 100.0
