@@ -10,10 +10,17 @@ services:
       - ./data/request_log.jsonl:/app/data/request_log.jsonl
       - ./data/historical_verified.jsonl:/app/data/historical_verified.jsonl
       - ./data/classifier_annotations.json:/app/data/classifier_annotations.json
+      # Active embedding DBs (read-only at runtime)
       - ./data/vector_db:/app/data/vector_db
       - ./data/vector_db_adapted:/app/data/vector_db_adapted
+      - ./data/vector_db_adapted_v3:/app/data/vector_db_adapted_v3:ro
+      - ./data/vector_db_bge_m3:/app/data/vector_db_bge_m3:ro
+      # Adapters and trained components
       - ./models:/app/models
+      # HF model cache (read-only; lets the container reuse host-downloaded weights)
       - C:/Users/Korotaev_NO/.cache/huggingface:/root/.cache/huggingface:ro
+      # Allowed-codes whitelist (changes don't require image rebuild)
+      - ./data/allowed_codes_top69.json:/app/data/allowed_codes_top69.json:ro
     env_file:
       - .env
     restart: unless-stopped
