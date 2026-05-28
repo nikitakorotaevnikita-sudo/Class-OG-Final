@@ -1,10 +1,14 @@
 # Hierarchical Classification Pipeline — Design Spec
 
-**Date:** 2026-05-27
+**Date:** 2026-05-27 (revised after Phase 0 baseline + SOTA tooling research)
 **Project:** Class-OG-Final
-**Status:** Draft (awaiting user review)
+**Status:** Approved (Phase 0 complete; Phase 1 tooling upgrade pending)
 **Author:** Claude (Opus 4.7) in brainstorming session
-**Target:** улучшение Top-1 accuracy с ~25% до ≥45% на ii25_test
+**Target:** улучшение Top-1 accuracy с **7.1% (честный Phase 0 baseline)** до ≥45% на ii25_test
+
+**Revision history:**
+- 2026-05-27 v1: исходный дизайн (предполагалось Top-1 ~25% baseline, target +20pp)
+- 2026-05-27 v2: после Phase 0 baseline (Top-1 = 7.1% реально, target +38pp) — добавлены Phase 1 Tooling Upgrade и Checkpoint 1
 
 ---
 
@@ -288,21 +292,22 @@ search_text = (
 
 ### Декомпозированные метрики
 
-| Метрика | Текущее | Target | Источник |
-|---|---:|---:|---|
-| Stage 1 L1 accuracy | ~50% | >85% | Phase 1 |
-| Stage 2 L2 accuracy | ~30% | >70% | Phase 1 |
-| L2 pool contains gold | ~60% | >90% | Phase 1 |
-| dense_recall@10 (full pool) | 41.1% | >55% | Phase 5 |
-| dense_recall@30 (filtered) | TBD via Phase 0 | >80% | Phase 1+5 |
-| dense_recall@50 (filtered) | 69.6% | >90% | Phase 1+5 |
-| aggregate_top1 | 3.6% | >25% | Phase 3+4 |
-| aggregate_top5 | 7.1% | >55% | Phase 3+4 |
-| aggregate_top10 | 12.5% | >70% | Phase 3+4 |
-| Top-1 final | ~25% | >45% | All phases |
-| Top-3 final | TBD via Phase 0 | >70% | All phases |
-| L1 prefix accuracy | 23.2% | >80% | All phases |
-| L2 prefix accuracy | 16.1% | >75% | All phases |
+| Метрика | Phase 0 Baseline (измерено 2026-05-27) | После Phase 1 (ожидание) | Final Target | Источник |
+|---|---:|---:|---:|---|
+| Stage 1 L1 accuracy (если измерим heuristic) | ~50% (косвенно) | n/a (если skip Phase 2) | >85% | Phase 2 |
+| Stage 2 L2 accuracy | ~30% | n/a | >70% | Phase 2 |
+| L2 pool contains gold | ~60% | n/a | >90% | Phase 2 |
+| **dense_recall@10 (full pool)** | **41.1%** | ~55-65% | >75% | Phase 1+6 |
+| dense_recall@50 (filtered) | 69.6% | ~80-85% | >90% | Phase 1+2+6 |
+| aggregate_top1 (no LLM) | 3.6% | ~15-25% | >35% | Phase 1+4+5 |
+| aggregate_top5 (no LLM) | 7.1% | ~30-45% | >65% | Phase 1+4+5 |
+| **reranked_recall@10** | **12.5%** | ~35-45% | >70% | Phase 1+4+5 |
+| **Top-1 final (с LLM)** | **7.1%** ⚠️ (не 25% как заявлено ранее) | ~20-30% | >45% | All phases |
+| Top-3 final | TBD | ~35-50% | >70% | All phases |
+| L1 prefix accuracy | 23.2% | ~50-65% | >80% | All phases |
+| L2 prefix accuracy | 16.1% | ~40-55% | >75% | All phases |
+
+**Колонка "После Phase 1"** — ожидания от tooling-апгрейда без остальных архитектурных фаз. Если реальность сильно лучше — applies Checkpoint 1 "breakthrough" ветка (см. § 9).
 
 ### Eval-скрипт
 
@@ -330,42 +335,71 @@ tests/eval_hierarchical.py [--stage router|retrieval|reranker|final|all]
 
 ---
 
-## 9. Rollout plan
+## 9. Rollout plan (v2 — после SOTA tooling research)
 
 ```
-Phase 0: Eval Framework           [Дни 1-2]   Блокирует все
+Phase 0: Eval Framework           [Дни 1-2]   ✓ ЗАВЕРШЕНО 2026-05-27
    ↓
-   ├─ Phase 1: Router LLM          [Дни 3-5]   ─┐
-   └─ Phase 2: PTO Cleanup         [Дни 3-7]    │ параллельно
+Phase 1: Tooling Upgrade          [Дни 3-6]   ⭐ НОВАЯ — НАЧИНАЕМ ОТСЮДА
+   1.1 BGE-M3 embedding swap (rebuild vector_db)
+   1.2 BGE-Reranker-v2-m3 swap (off-the-shelf)
+   1.3 Constrained decoding (response_format JSON schema) во всех LLM-вызовах
+   1.4 Baseline eval с новыми инструментами на ii25_test
+   ↓
+═══ CHECKPOINT 1: Decision Gate ═══
+   Замеряем Top-1, recall@K, attribution на новом стэке.
+   Принимаем решение о следующих фазах (см. § "Checkpoint 1 logic" ниже).
+   ↓
+   (Дальнейшие фазы условны)
+   ├─ Phase 2: Router LLM          [Дни 7-9]   ─┐ если Checkpoint 1 показал
+   └─ Phase 3: PTO Cleanup         [Дни 7-11]   │ необходимость
                                                  │
-   ── Gate 1: Router L1 acc ≥ 70% ───────────────┘
+   ── Gate 2: Router L1 acc ≥ 70% ───────────────┘
    ↓
-   ├─ Phase 3: Reranker Fix        [Дни 6-8]   ─┐
-   └─ Phase 4: CE Training         [Дни 8-10]   │ Phase 4 нужны данные Phase 2
-                                                 │
-   ── Gate 2: aggregate_top10 ≥ 50% ─────────────┘
+   Phase 4: Reranker aggregate score fix [Дни 10-12]
    ↓
-   Phase 5: LoRA fine-tune         [Дни 10-14]  (CPU фон, ~15 ч)
+   ── Gate 3: aggregate_top10 ≥ 50% ──
    ↓
-   ── Gate 3: recall@10 ≥ 50% ──
+   Phase 5 (CONDITIONAL): CE training [Дни 12-14]
+       Отменяется если BGE-Reranker-v2-m3 off-the-shelf даёт recall@10 ≥ 70%
    ↓
-   Phase 6: Integration & Final Eval [Дни 15-16]
+   Phase 6 (CONDITIONAL): LoRA fine-tune на BGE-M3 [Дни 14-18]
+       Отменяется если Phase 1 даёт recall@10 ≥ 75% off-the-shelf
    ↓
-   Phase 7 (опц): Operator UI       [День 17]
+   Phase 7: Integration & Final Eval [Дни 18-20]
+   ↓
+   Phase 8 (опц): Operator UI       [День 21]
 ```
+
+### Checkpoint 1 Decision Logic
+
+После завершения Phase 1.4 (eval на новом стэке) — три ветки:
+
+| Top-1 после Phase 1 | Решение | Что делаем дальше |
+|---|---|---|
+| **≥ 35%** ("breakthrough") | Tooling — главный bottleneck. Архитектурные фазы — опционально. | Только Phase 2 (router) + Phase 4 (reranker score fix) + Phase 7 (integration). Skip Phase 3 (PTO cleanup), 5 (CE), 6 (LoRA). Бюджет: +5 дней до финала. |
+| **20-35%** ("strong gain") | Tooling помогло, но архитектура тоже нужна. | Все Phases 2-7 в полном объёме, но Phase 5/6 conditional. Бюджет: +10-12 дней. |
+| **< 20%** ("partial gain") | Tooling не закрывает gap. Нужна полная архитектурная перестройка. | Full original spec: все Phases 2-7. Бюджет: +14-16 дней. |
+
+**Дополнительные условные триггеры (внутри ветки):**
+- `dense_recall@10 ≥ 75%` после Phase 1 → Skip Phase 6 (LoRA не нужен)
+- `reranked_recall@10 ≥ 70%` после Phase 1 → Skip Phase 5 (CE training не нужен)
+- `Stage1 L1 accuracy (если измерим heuristic) < 50%` → Phase 2 обязательна
+- Все failure-категории распределены равномерно → Phase 3 (PTO cleanup) обязательна (для широкого fine-tuning сигнала)
 
 ### Gate fallbacks
 
 | Gate | Если не прошли | Откат |
 |---|---|---|
-| Gate 1 | Router L1 acc < 70% | Heuristic-router back. Phase 2 продолжаем |
-| Gate 2 | aggregate_top10 < 50% | Откат aggregate weights к defaults |
-| Gate 3 | recall@10 не выше adapter_v3 | `.env` revert к adapter_v3 |
+| Checkpoint 1 (Top-1 не вырос на ≥ 5pp) | Откат к Phase 0 baseline. Анализ почему tooling не помог. | Возврат к старому стэку (e5-base + mmarco-CE) и пересмотр spec'а |
+| Gate 2 (Router L1 < 70%) | Heuristic-router back. Phase 3 продолжаем | |
+| Gate 3 (aggregate_top10 < 50%) | Откат aggregate weights к defaults | |
 
 ### Git workflow
-- Feature branch на каждую фазу: `phase-1-llm-router`, ..., `phase-5-lora`
+- Feature branch на каждую фазу: `phase-1-tooling-upgrade`, `phase-2-llm-router`, ..., `phase-6-lora`
 - Merge в `main` только после GO на eval
 - Tag `v0.4.<phase>` после каждого merge
+- Phase 0 уже на ветке `phase-0-eval-framework` (статус: kept locally, см. HANDOFF.md)
 
 ### Артефакты репо
 - `docs/superpowers/specs/2026-05-27-hierarchical-classification-design.md` (этот файл)
@@ -398,8 +432,111 @@ Phase 0: Eval Framework           [Дни 1-2]   Блокирует все
 ## 12. Acceptance for spec
 
 Этот документ — design contract. Перед переходом к writing-plans пользователь подтверждает:
-- [ ] Архитектура корректна
-- [ ] Phase boundaries и gate criteria приемлемы
-- [ ] Acceptance criteria (Top-1 ≥ 45%) реалистичны и согласованы
-- [ ] Используем Ario для всех LLM-задач (confirmed)
-- [ ] CPU + real-data only для embedding fine-tune (confirmed)
+- [x] Архитектура корректна (utwerждено 2026-05-27)
+- [x] Phase boundaries и gate criteria приемлемы (v1 + v2 с Checkpoint 1 утверждено)
+- [x] Acceptance criteria (Top-1 ≥ 45%) реалистичны (теперь от honest baseline 7.1%, не от 25%)
+- [x] Используем Ario для всех LLM-задач (confirmed)
+- [x] CPU + real-data only для embedding fine-tune (confirmed)
+- [x] **NEW (v2):** Tooling upgrade перед всеми архитектурными фазами + Checkpoint 1 (утверждено 2026-05-27)
+
+---
+
+## 13. Phase 1 — Tooling Upgrade (детали)
+
+Точечный апгрейд 3 компонентов до SOTA (2024-2026). Не refactoring архитектуры — компонентная модернизация. Делается ПЕРЕД всеми архитектурными фазами, чтобы baseline для последующих measurement был на современном стэке.
+
+### 13.1 Embedding swap: `intfloat/multilingual-e5-base` → `BAAI/bge-m3`
+
+**Обоснование:**
+
+| Параметр | e5-base (наш) | BGE-M3 |
+|---|---|---|
+| Год | Dec 2023 | Q2 2024 |
+| Размер | 278M | 568M |
+| ruMTEB Retrieval | ~67-70 (оценка) | **74.8** |
+| ruMTEB Reranking | ~63 | **69.7** |
+| ruMTEB Avg | ~57 | **60.8** |
+| Лицензия | MIT | MIT |
+| Multi-vector | dense only | **dense + sparse + multi-vec** одновременно |
+
+**Изменения в коде:**
+- `.env`: `EMBEDDING_MODEL=BAAI/bge-m3`
+- `src/build_vectordb.py`: пересобрать `data/vector_db_bge_m3/`
+- `src/config.py`: `VECTOR_DB_DIR=data/vector_db_bge_m3`
+- `src/classifier_agent.py:_search_candidates`: остаётся без изменений (использует API `SentenceTransformer.encode`)
+- **CRITICAL:** Сохранить старую DB (`data/vector_db_adapted_v3`) для rollback
+- ENV adapter переменные: `ENABLE_EMBEDDING_ADAPTER=false` (BGE-M3 уже сильна на русском без адаптера)
+
+**Время:** 1-2 дня (включая пересборку DB ~30-60 мин на CPU, smoke-test)
+
+### 13.2 Cross-encoder swap: `mmarco-mMiniLMv2` → `BAAI/bge-reranker-v2-m3`
+
+**Обоснование:**
+
+| Параметр | mmarco (наш) | BGE-Reranker-v2-m3 |
+|---|---|---|
+| Год | ~2022 | Q2 2024 |
+| Размер | 117M | 568M |
+| MIRACL multilingual | базовый | **SOTA для open-source** |
+| Russian quality | средне | **сильно лучше** |
+| Лицензия | Apache 2.0 | Apache 2.0 |
+
+**Изменения в коде:**
+- `.env`: `RERANKER_MODEL=BAAI/bge-reranker-v2-m3`
+- `src/config.py`: добавить `RERANKER_MODEL` если ещё не вынесено
+- `src/reranker.py`: интерфейс `CrossEncoder.predict` тот же, замена прозрачная
+- **Smoke-test:** запустить eval `--stage reranker` сразу после swap — увидеть delta
+
+**Время:** 0.5 дня (модель загружается лениво при первом use)
+
+### 13.3 Constrained decoding: native vLLM `response_format` JSON schema
+
+**Обоснование:**
+- Ario — vLLM-backend, поддерживает OpenAI-compatible `response_format={"type": "json_schema", ...}`
+- Гарантирует **физически невозможный** invalid JSON или неверный код от LLM
+- Убирает категорию ошибок "LLM_invalid_format" целиком
+- Применяется к: Stage 1 router, Stage 2 router, Stage 4 final pick, PTO cleanup, query expansion
+
+**Caveat (известный):** [vLLM issue #18819](https://github.com/vllm-project/vllm/issues/18819) — bug с `enable_thinking=False` для Qwen3. Митигация:
+1. Smoke-test: один вызов с `response_format` и `enable_thinking=True` (default)
+2. Если bug проявляется — fallback: грамматика в промпте + JSON-парсинг как сейчас
+3. Замерить delta на 5-10 кейсов до коммита
+
+**Изменения в коде:**
+- `src/classifier_agent.py`: где сейчас Ario вызывается через httpx (lines ~1073-1080, ~1327-1334) — добавить `response_format` параметр со схемой
+- Удалить ```json wrapper-stripping код (lines 1076-1080, 1330-1334) — больше не нужен
+- Создать `src/llm_schemas.py` с JSON-схемами для каждого типа вызова:
+  - `ROUTER_L1_SCHEMA` — для Stage 1
+  - `ROUTER_L2_SCHEMA` — для Stage 2
+  - `FINAL_PICK_SCHEMA` — для Stage 4
+  - `PTO_CLEANUP_SCHEMA` — для PTO re-annotation
+
+**Время:** 1-2 дня (включая smoke-test, fallback логику)
+
+### 13.4 Baseline replay с новым стэком
+
+После 13.1+13.2+13.3:
+
+```bash
+# Пересобрать vector_db
+./venv/Scripts/python.exe src/build_vectordb.py
+
+# Прогнать все 3 baseline stages с тегом v0.4.tooling
+./venv/Scripts/python.exe tests/eval_hierarchical.py --stage retrieval --tag v0.4.tooling --save-baseline
+./venv/Scripts/python.exe tests/eval_hierarchical.py --stage reranker --tag v0.4.tooling --save-baseline
+./venv/Scripts/python.exe tests/eval_hierarchical.py --stage all --tag v0.4.tooling --save-baseline
+```
+
+Результаты сравнить с `data/eval_baselines/2026-05-27_baseline_*.json`. Сформировать `docs/checkpoint1_decision.md` с:
+- Diff таблицей (Phase 0 vs Phase 1 metrics)
+- Failure attribution shift
+- Решение (breakthrough / strong gain / partial gain) с обоснованием
+- Список фаз, которые продолжаем / отменяем
+
+### 13.5 Acceptance для Phase 1 → переход к Checkpoint 1
+
+- [ ] BGE-M3 embedding model работает в pipeline (smoke на 5 кейсах)
+- [ ] BGE-Reranker-v2-m3 работает (smoke)
+- [ ] Constrained decoding включён для всех 4 типов LLM-вызовов (или fallback задокументирован если Qwen3 bug проявился)
+- [ ] Baseline replay на ii25_test сохранён в `data/eval_baselines/2026-05-27_v0.4.tooling_*.json`
+- [ ] `docs/checkpoint1_decision.md` написан с явным решением по дальнейшим фазам
