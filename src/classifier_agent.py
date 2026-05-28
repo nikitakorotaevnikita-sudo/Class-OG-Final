@@ -310,61 +310,57 @@ MULTI_QUERY_USER_TEMPLATE = """Обращение: «{question}»
 Сгенерируй {n} различных формулировок. JSON-ответ:"""
 
 
-CLASSIFICATION_PROMPT_TEMPLATE = """Классифицируй следующее обращение гражданина.
+CLASSIFICATION_PROMPT_TEMPLATE_L3GROUP = """Классифицируй следующее обращение гражданина.
 
-ТЕКСТ ОБРАЩЕНИЯ (полный):
+ТЕКСТ ОБРАЩЕНИЯ:
 {appeal_text}
 
-ВЫЯВЛЕННЫЕ ВОПРОСЫ С КАНДИДАТАМИ ИЗ КЛАССИФИКАТОРА:
+КАНДИДАТЫ ПО ВОПРОСАМ (сгруппированы по L3-теме):
 {questions_json}
 
-ПРАВИЛА ВЫБОРА КОДА:
+ЭТАП 1 — ВЫБОР L3-ТЕМЫ (обязательно):
+Для каждого вопроса СНАЧАЛА определи, к какой L3-теме относится вопрос, выбирая из списка "l3_options".
+L3-тема — это тематическое направление (например "Благоустройство территорий", "Обеспечение лекарствами").
+В поле "selected_l3_code" запиши код выбранной L3-темы.
 
-1. Для каждого вопроса (ordinal) выбирай код ТОЛЬКО из его списка "candidates".
+ЭТАП 2 — ВЫБОР КОНКРЕТНОГО КОДА (из выбранной L3):
+Затем выбери наиболее подходящий код классификатора из кандидатов выбранной L3-темы.
+Поле "selected_code" — финальный код из списка candidates.
 
-2. **СНАЧАЛА определи тему, потом код.** Внутренне (про себя) сначала выбери одну подходящую "l3_theme" из списка кандидатов вопроса, затем из кандидатов с этой темой выбери код, чьё "name" точнее всего описывает суть вопроса.
-   ВАЖНО: в поле "reasoning" пиши ТОЛЬКО конечное обоснование в 1-2 предложениях на естественном русском (без слов «Шаг A», «Шаг B», без упоминания внутренней логики). Пример хорошего reasoning: «Заявитель просит провести ремонт асфальтового покрытия — это благоустройство подъездных дорог и тротуаров».
+ПРАВИЛА:
 
-3. ТИПОВЫЕ L3-РАЗГРАНИЧЕНИЯ (правильное соотнесение темы — критично для точности):
-   • «Строительство и реконструкция» (0003.0009.0096) vs «Градостроительство и архитектура. Благоустройство» (0003.0009.0097):
-     — НОВОЕ строительство, реконструкция → 0096
-     — РЕМОНТ существующего, благоустройство, тротуары, освещение, озеленение → 0097
-     — школу/детсад/больницу СТРОЯТ → 0096 «Строительные организации» или «Строительство соцобъектов»
-     — школу/детсад/больницу ДЕЯТЕЛЬНОСТЬ → 0002.0013 или 0002.0014
-   • «Транспорт» (0003.0009.0099) vs «Связь» (0003.0009.0100):
-     — дороги, перевозки, ГИБДД → 0099
-     — телефон, интернет, почта → 0100
-   • «Соцобеспечение» (0002.0007) vs «Здравоохранение» (0002.0014):
-     — пенсии, льготы, проездные, соцработник для пожилых → 0007
-     — медпомощь, лекарства, поликлиники, санитария → 0014
-   • «Семья» (0002.0004) vs «Образование» (0002.0013):
-     — опека, усыновление, мат.капитал, алименты → 0004
-     — детский сад, школа, поступление → 0013
+1. L3-ТЕМА определяется первым — это тематика вопроса (а не конкретный вопрос).
+   Пример: вопрос "в доме протекает крыша" → L3 "Благоустройство" (0003.0009.0097),
+   а код — "Ремонт кровли" (конкретный leaf).
 
-4. НЕ выбирай код "0001.0002.0027.0126" (Отсутствует адресат обращения) если хоть один другой кандидат соответствует теме вопроса — это резервная категория только для случаев, когда заявитель совсем не указал, к кому обращается.
+2. Если в questions_json нет candidates с correct_l3 или candidates пустые —
+   выбери наиболее близкую L3-тему из l3_options и поставь confidence <= 0.5.
 
-5. Запрещено присваивать ОДИН И ТОТ ЖЕ код разным вопросам, если темы вопросов разные.
+3. ТИПОВЫЕ РАЗГРАНИЧЕНИЯ (как отличить):
+   • 0096 vs 0097: новое строительство/реконструкция → 0096; ремонт/благоустройство → 0097
+   • 0007 vs 0014: пенсии/льготы/соцработник → 0007; лекарства/поликлиники/медпомощь → 0014
+   • 0004 vs 0013: опека/алименты/маткапитал → 0004; детсад/школа/поступление → 0013
 
-6. Предпочитай более глубокий код (level 4-5) над общим (level 1-3), если оба применимы.
-
-7. Если несколько SIBLINGS в одной l3_theme (поле "siblings_in_l3" > 1) — внимательно прочитай "name" каждого и выбери ТОЧНО соответствующий формулировке вопроса. НЕ выбирай первый попавшийся sibling.
-
-8. Если ни один кандидат не подходит — выбери ближайший по смыслу и понизь confidence до <= 0.5.
+4. Запрещено: один код на разные вопросы; fallback "0001.0002.0027.0126" при наличии альтернатив.
 
 Верни JSON строго в формате:
 {{
-  "vid_obrascheniya": "Жалоба|Заявление|Предложение",
+  "vid_obrascheniya": "Жалоба|Заявление|предложение",
   "tip_obrascheniya": "Индивидуальное|Коллективное|Анонимное",
   "is_ustnoe": false,
   "questions": [
     {{
       "ordinal": 1,
-      "question_text": "Краткая формулировка вопроса (1 строка)",
+      "question_text": "...",
+      "l3_options": ["XXXX.XXXX.XXXX ...", ...],
+      "selected_l3_code": "XXXX.XXXX.XXXX",
+      "candidates": [
+
+      ],
       "selected_code": "XXXX.XXXX.XXXX.XXXX",
       "predmet_vedeniya": "...",
       "confidence": 0.87,
-      "reasoning": "Обоснование (1-2 предложения, ссылка на тему вопроса)",
-      "alternative_codes": ["XXXX.XXXX.XXXX.XXXX"]
+      "reasoning": "..."
     }}
   ]
 }}"""
@@ -484,15 +480,90 @@ class ClassifierAgent:
         return self._ollama_client
 
     def _embed_query(self, text: str) -> np.ndarray:
-        """Векторизация запроса с префиксом для multilingual-e5.
+        """Векторизация запроса. Префикс "query: " только для e5-семейства
+        (BGE-M3 и др. современные модели префиксов не требуют — см. модель-карту).
         Если включён embedding adapter — применяется его проекция."""
-        emb = self.embedder.encode(f"query: {text}", normalize_embeddings=True)
+        formatted = f"query: {text}" if "e5" in EMBEDDING_MODEL.lower() else text
+        emb = self.embedder.encode(formatted, normalize_embeddings=True)
         if self.adapter_W is not None:
             emb = emb @ self.adapter_W.T + self.adapter_b
             n = float(np.linalg.norm(emb))
             if n > 1e-12:
                 emb = emb / n
         return emb
+
+    def _ario_call(
+        self,
+        *,
+        messages: list[dict],
+        model: str | None = None,
+        max_tokens: int | None = 800,
+        temperature: float = 0.0,
+        timeout: int = 60,
+        schema: dict | None = None,
+    ) -> str:
+        """Centralized Ario httpx call with optional post-hoc schema validation.
+
+        Calls Ario (vLLM-backed) chat completions endpoint, strips common ```json
+        wrappers from the response, and optionally validates parsed JSON against the
+        given jsonschema. Validation failure logs a warning but still returns the raw
+        string — caller decides whether to retry or fallback.
+
+        Args:
+            messages: OpenAI-style messages list.
+            model: model name (defaults to ARIO_MODEL).
+            max_tokens: max tokens to generate. Pass None to omit (use server default).
+            temperature: sampling temperature.
+            timeout: httpx client timeout in seconds.
+            schema: optional jsonschema dict; if provided, parsed JSON is validated.
+
+        Returns:
+            Raw string content from the LLM (with wrappers stripped if any).
+        """
+        import httpx
+        import json as _json
+
+        payload: dict = {
+            "model": model or ARIO_MODEL,
+            "messages": messages,
+            "temperature": temperature,
+        }
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
+
+        client = httpx.Client(
+            base_url=ARIO_BASE_URL,
+            headers={"Authorization": f"Bearer {ARIO_API_KEY}"},
+            timeout=timeout,
+        )
+        try:
+            r = client.post("/chat/completions", json=payload)
+            r.raise_for_status()
+            raw = r.json()["choices"][0]["message"]["content"].strip()
+        finally:
+            client.close()
+
+        # Strip common ```json wrappers
+        for prefix in ("```json", "```"):
+            if raw.startswith(prefix):
+                raw = raw[len(prefix):].strip()
+        if raw.endswith("```"):
+            raw = raw[:-3].strip()
+
+        # Optional post-hoc schema validation (best-effort)
+        if schema is not None:
+            try:
+                import jsonschema
+                parsed = _json.loads(raw)
+                jsonschema.validate(parsed, schema)
+            except _json.JSONDecodeError as exc:
+                print(f"  [Ario] WARN: response is not valid JSON: {exc}")
+            except jsonschema.ValidationError as exc:
+                print(f"  [Ario] WARN: response does not match schema: {exc.message}")
+            except ImportError:
+                pass  # jsonschema not installed, skip validation
+
+        return raw
 
     def _split_appeal_questions(self, text: str, max_segments: int = 7) -> list[AppealQuestion]:
         """Делегирует module-level функции — позволяет тестировать без агента."""
@@ -773,29 +844,14 @@ class ClassifierAgent:
                 r.raise_for_status()
                 raw = r.json()["choices"][0]["message"]["content"].strip()
             elif provider == "ario":
-                import httpx
-                client = httpx.Client(
-                    base_url=ARIO_BASE_URL,
-                    headers={"Authorization": f"Bearer {ARIO_API_KEY}"},
-                    timeout=60,
+                raw = self._ario_call(
+                    messages=[
+                        {"role": "system", "content": sys_msg},
+                        {"role": "user", "content": user_msg},
+                    ],
+                    model=model,
+                    max_tokens=200,
                 )
-                try:
-                    r = client.post(
-                        "/chat/completions",
-                        json={
-                            "model": model,
-                            "messages": [
-                                {"role": "system", "content": sys_msg},
-                                {"role": "user", "content": user_msg},
-                            ],
-                            "temperature": 0.0,
-                            "max_tokens": 200,
-                        },
-                    )
-                    r.raise_for_status()
-                    raw = r.json()["choices"][0]["message"]["content"].strip()
-                finally:
-                    client.close()
             else:
                 r = self._get_groq_client().chat.completions.create(
                     model=model,
@@ -880,29 +936,14 @@ class ClassifierAgent:
                 r.raise_for_status()
                 raw = r.json()["choices"][0]["message"]["content"].strip()
             elif provider == "ario":
-                import httpx
-                client = httpx.Client(
-                    base_url=ARIO_BASE_URL,
-                    headers={"Authorization": f"Bearer {ARIO_API_KEY}"},
-                    timeout=60,
+                raw = self._ario_call(
+                    messages=[
+                        {"role": "system", "content": sys_msg},
+                        {"role": "user", "content": user_msg},
+                    ],
+                    model=model,
+                    max_tokens=200,
                 )
-                try:
-                    r = client.post(
-                        "/chat/completions",
-                        json={
-                            "model": model,
-                            "messages": [
-                                {"role": "system", "content": sys_msg},
-                                {"role": "user", "content": user_msg},
-                            ],
-                            "temperature": 0.0,
-                            "max_tokens": 200,
-                        },
-                    )
-                    r.raise_for_status()
-                    raw = r.json()["choices"][0]["message"]["content"].strip()
-                finally:
-                    client.close()
             else:
                 r = self._get_groq_client().chat.completions.create(
                     model=model,
@@ -965,34 +1006,15 @@ class ClassifierAgent:
                 r.raise_for_status()
                 raw = r.json()["choices"][0]["message"]["content"].strip()
             elif provider == "ario":
-                import httpx
-                client = httpx.Client(
-                    base_url=ARIO_BASE_URL,
-                    headers={"Authorization": f"Bearer {ARIO_API_KEY}"},
-                    timeout=60,
+                raw = self._ario_call(
+                    messages=[
+                        {"role": "system", "content": MULTI_QUERY_SYSTEM},
+                        {"role": "user", "content": user_msg},
+                    ],
+                    model=model,
+                    max_tokens=max_tokens,
+                    temperature=0.3,
                 )
-                try:
-                    r = client.post(
-                        "/chat/completions",
-                        json={
-                            "model": model,
-                            "messages": [
-                                {"role": "system", "content": MULTI_QUERY_SYSTEM},
-                                {"role": "user", "content": user_msg},
-                            ],
-                            "temperature": 0.3,
-                            "max_tokens": max_tokens,
-                        },
-                    )
-                    r.raise_for_status()
-                    raw = r.json()["choices"][0]["message"]["content"].strip()
-                    for prefix in ("```json", "```"):
-                        if raw.startswith(prefix):
-                            raw = raw[len(prefix):].strip()
-                    if raw.endswith("```"):
-                        raw = raw[:-3].strip()
-                finally:
-                    client.close()
             else:
                 r = self._get_groq_client().chat.completions.create(
                     model=model,
@@ -1056,36 +1078,14 @@ class ClassifierAgent:
                 r.raise_for_status()
                 return r.json()["choices"][0]["message"]["content"].strip()
             elif provider == "ario":
-                import httpx
-                client = httpx.Client(
-                    base_url=ARIO_BASE_URL,
-                    headers={"Authorization": f"Bearer {ARIO_API_KEY}"},
-                    timeout=60,
+                return self._ario_call(
+                    messages=[
+                        {"role": "system", "content": QUERY_EXPANSION_SYSTEM},
+                        {"role": "user", "content": user_msg},
+                    ],
+                    model=model,
+                    max_tokens=120,
                 )
-                try:
-                    r = client.post(
-                        "/chat/completions",
-                        json={
-                            "model": model,
-                            "messages": [
-                                {"role": "system", "content": QUERY_EXPANSION_SYSTEM},
-                                {"role": "user", "content": user_msg},
-                            ],
-                            "temperature": 0.0,
-                            "max_tokens": 120,
-                        },
-                    )
-                    r.raise_for_status()
-                    raw = r.json()["choices"][0]["message"]["content"].strip()
-                    # Strip Ario ```json wrappers if present
-                    for prefix in ("```json", "```"):
-                        if raw.startswith(prefix):
-                            raw = raw[len(prefix):].strip()
-                    if raw.endswith("```"):
-                        raw = raw[:-3].strip()
-                    return raw
-                finally:
-                    client.close()
             else:
                 r = self._get_groq_client().chat.completions.create(
                     model=model,
@@ -1142,13 +1142,42 @@ class ClassifierAgent:
             merged = self._merge_candidate_pools(*all_pools)
             print(f"  [MQE] union {len(multi_queries)+1} запросов: {before_mqe} -> {len(merged)} кандидатов")
 
-        # Whitelist (опц.): оставить только «горячие» коды + их L4-родителей в случае L5-кодов
+        # 1) Coarse-to-fine routing FIRST — сужаем пул до релевантных L2/L3 тем
+        #    Затем whitelist применяется КО ВСЕМУ already-routed пулу
+        if allowed_l2:
+            merged = filter_candidates_by_l2(merged, allowed_l2)
+            print(f"  [Router] фильтр L2 {allowed_l2}: {len(merged)} кандидатов")
+
+        if allowed_l3:
+            l3_filtered = filter_candidates_by_l3(merged, allowed_l3)
+            if len(l3_filtered) >= TOP_K_CANDIDATES:
+                merged = l3_filtered
+                print(f"  [L3-Router] фильтр L3 {allowed_l3}: {len(merged)} кандидатов")
+            else:
+                print(f"  [L3-Router] L3-фильтр дал бы {len(l3_filtered)}<{TOP_K_CANDIDATES}, оставляем L2-пул")
+
+        # Заполняем до TOP_K_CANDIDATES кодами из той же L2-ветки (если routing сузил)
+        if len(merged) < TOP_K_CANDIDATES:
+            allowed = set(allowed_l2) if allowed_l2 else set()
+            seen = {c["code"] for c in merged}
+            direct_l2 = []
+            for meta in self.metadata:
+                code = meta["code"]
+                parts = code.split(".")
+                l2_prefix = ".".join(parts[:2]) if len(parts) >= 2 else code
+                if l2_prefix in allowed and code not in seen:
+                    direct_l2.append(self._candidate_from_metadata(meta, 0.5, source="l2-direct"))
+            if direct_l2:
+                merged = merged + direct_l2
+                print(f"  [Router] добавлено {len(direct_l2)} кодов из L2 напрямую → {len(merged)}")
+
+        # 2) Whitelist (опц.): оставить только «горячие» коды + их L4-родителей в случае L5-кодов
+        #    Применяется ПОСЛЕ routing — так whitelist фильтрует уже narrow-пул
         if self.allowed_codes:
             before_wl = len(merged)
             filtered = []
             for c in merged:
                 code = c["code"]
-                # Полный код в списке ИЛИ его 4-сегментный префикс (L5 → L4 родитель)
                 parts = code.split(".")
                 l4_prefix = ".".join(parts[:4]) if len(parts) >= 4 else code
                 if code in self.allowed_codes or l4_prefix in self.allowed_codes:
@@ -1157,7 +1186,7 @@ class ClassifierAgent:
                 merged = filtered
                 print(f"  [Whitelist] {before_wl} -> {len(merged)} кодов из топ-{len(self.allowed_codes)}")
             else:
-                # Если whitelist срезал слишком много — расширяем direct-fetch'ем всех allowed codes
+                # Если whitelist срезал слишком много — добавляем allowed-коды напрямую из метаданных
                 seen_codes = {c["code"] for c in filtered}
                 direct_codes = []
                 for meta in self.metadata:
@@ -1168,36 +1197,6 @@ class ClassifierAgent:
                         direct_codes.append(self._candidate_from_metadata(meta, 0.5, source="whitelist-direct"))
                 merged = filtered + direct_codes
                 print(f"  [Whitelist] dense={before_wl}, фильтрован={len(filtered)}, добавлено direct-fetch={len(direct_codes)}, итого={len(merged)}")
-
-        # Coarse-to-fine: фильтрация по L2-разделам ПЕРЕД rerank
-        if allowed_l2:
-            before = len(merged)
-            merged = filter_candidates_by_l2(merged, allowed_l2)
-            print(f"  [Router] фильтр L2 {allowed_l2}: {before} -> {len(merged)} кандидатов")
-
-        # L3 фильтр — узкое сужение если L3-router работал
-        if allowed_l3:
-            before_l3 = len(merged)
-            l3_filtered = filter_candidates_by_l3(merged, allowed_l3)
-            if len(l3_filtered) >= TOP_K_CANDIDATES:
-                merged = l3_filtered
-                print(f"  [L3-Router] фильтр L3 {allowed_l3}: {before_l3} -> {len(merged)} кандидатов")
-            else:
-                # safety: если по L3 слишком мало, оставляем L2-фильтрованный пул
-                print(f"  [L3-Router] L3-фильтр дал бы {len(l3_filtered)}<{TOP_K_CANDIDATES}, оставляем L2-пул {len(merged)}")
-            # Если после фильтра мало кандидатов — ДОЗАПОЛНЯЕМ кодами из той же L2-ветки
-            # (направленный поиск во всех 2108 кодах с этим L2-префиксом), а НЕ откатываемся на полный пул
-            if len(merged) < TOP_K_CANDIDATES:
-                allowed = set(allowed_l2)
-                direct_codes = []
-                for meta in self.metadata:
-                    code = meta["code"]
-                    parts = code.split(".")
-                    if len(parts) >= 2 and ".".join(parts[:2]) in allowed:
-                        if code not in {c["code"] for c in merged}:
-                            direct_codes.append(self._candidate_from_metadata(meta, 0.5, source="l2-direct"))
-                merged = merged + direct_codes
-                print(f"  [Router] добавлено {len(direct_codes)} кодов из L2 напрямую → {len(merged)} кандидатов")
 
         if self.ce_reranker is not None:
             heuristic_top = self._rerank_candidates(query, merged, top_k=30)
@@ -1239,6 +1238,18 @@ class ClassifierAgent:
             for c in q["candidates"]:
                 l3_counts[l3_prefix(c["code"])] = l3_counts.get(l3_prefix(c["code"]), 0) + 1
 
+            # Build l3_options: unique L3 themes in this question's candidate pool
+            l3_options = []
+            for l3_code, l3_code_count in l3_counts.items():
+                l3_with_zeros = l3_code + ".0000"
+                entry = self.code_index.get(l3_with_zeros)
+                l3_name_str = entry["name"] if entry and entry.get("name") else l3_name(q["candidates"][0]["code"])
+                l3_options.append({
+                    "l3_code": l3_code,
+                    "l3_name": l3_name_str,
+                    "candidates_in_l3": l3_code_count,
+                })
+
             compact_candidates = []
             for c in q["candidates"]:
                 code = c["code"]
@@ -1248,21 +1259,22 @@ class ClassifierAgent:
                     "name": c["name"],
                     "level": c.get("level", 0),
                     "full_path": c.get("full_path", ""),
-                    "l3_theme": l3_name(code),  # родительская L3-тема для disambiguation
+                    "l3_theme": l3_name(code),
                 }
                 if l3_counts.get(l3, 0) > 1:
-                    entry["siblings_in_l3"] = l3_counts[l3]  # сколько кандидатов в той же L3-теме
+                    entry["siblings_in_l3"] = l3_counts[l3]
                 compact_candidates.append(entry)
 
             total_candidates += len(compact_candidates)
             compact_questions.append({
                 "ordinal": q["ordinal"],
                 "question_text": q["question_text"],
+                "l3_options": l3_options,
                 "candidates": compact_candidates,
             })
 
         questions_json = json.dumps(compact_questions, ensure_ascii=False, indent=2)
-        user_message = CLASSIFICATION_PROMPT_TEMPLATE.format(
+        user_message = CLASSIFICATION_PROMPT_TEMPLATE_L3GROUP.format(
             appeal_text=appeal_text[:4000],
             questions_json=questions_json,
         )
@@ -1299,36 +1311,17 @@ class ClassifierAgent:
                     response.raise_for_status()
                     raw = response.json()["choices"][0]["message"]["content"].strip()
                 elif provider == "ario":
-                    import httpx
-                    client = httpx.Client(
-                        base_url=ARIO_BASE_URL,
-                        headers={"Authorization": f"Bearer {ARIO_API_KEY}"},
+                    raw = self._ario_call(
+                        messages=[
+                            {"role": "system", "content": SYSTEM_PROMPT},
+                            {"role": "user",   "content": user_message},
+                        ],
+                        model=model,
+                        max_tokens=None,
+                        temperature=0.1,
                         timeout=120,
+                        schema=None,
                     )
-                    try:
-                        response = client.post(
-                            "/chat/completions",
-                            json={
-                                "model": model,
-                                "messages": [
-                                    {"role": "system", "content": SYSTEM_PROMPT},
-                                    {"role": "user",   "content": user_message},
-                                ],
-                                "temperature": 0.1,
-                            },
-                        )
-                        response.raise_for_status()
-                        raw = response.json()["choices"][0]["message"]["content"].strip()
-                        # Ario returns JSON wrapped in ```json ... ``` - strip it
-                        if raw.startswith("```json"):
-                            raw = raw[7:]
-                        if raw.startswith("```"):
-                            raw = raw[3:]
-                        if raw.endswith("```"):
-                            raw = raw[:-3]
-                        raw = raw.strip()
-                    finally:
-                        client.close()
                 else:
                     response = self._get_groq_client().chat.completions.create(
                         model=model,
