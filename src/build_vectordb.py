@@ -49,6 +49,12 @@ def build_database():
     all_embeddings = []
     metadata = []
 
+    # Префикс "passage: " только для e5-семейства; BGE-M3 и др. современные
+    # модели префиксов не требуют (см. model card)
+    use_prefix = "e5" in EMBEDDING_MODEL.lower()
+    if not use_prefix:
+        print(f"      (без 'passage: ' префикса — модель {EMBEDDING_MODEL} префиксов не требует)")
+
     for start in range(0, total, BATCH_SIZE):
         batch = entries[start:start + BATCH_SIZE]
         texts = []
@@ -58,7 +64,7 @@ def build_database():
                 base_name=e["name"],
                 base_full_path=e.get("full_path", "")
             )
-            texts.append(f"passage: {search_txt}")
+            texts.append(f"passage: {search_txt}" if use_prefix else search_txt)
         embeddings = model.encode(texts, normalize_embeddings=True)
         all_embeddings.append(embeddings)
 
