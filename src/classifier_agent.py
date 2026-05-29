@@ -1212,9 +1212,95 @@ class ClassifierAgent:
 
         if self.ce_reranker is not None:
             heuristic_top = self._rerank_candidates(query, merged, top_k=30)
-            return self.ce_reranker.rerank(query, heuristic_top, top_k=TOP_K_CANDIDATES)
+            final = self.ce_reranker.rerank(query, heuristic_top, top_k=TOP_K_CANDIDATES)
+        else:
+            final = self._rerank_candidates(query, merged, top_k=TOP_K_CANDIDATES)
 
-        return self._rerank_candidates(query, merged, top_k=TOP_K_CANDIDATES)
+        # Anti-cascade-error: если top-3 все из одного L1, инжектируем лучшего из другого L1.
+        # Защита от ситуации, когда retrieval "залипает" на неправильной L1-теме и LLM
+        # не имеет шанса выбрать что-то из верной области.
+        return self._ensure_l1_diversity(final, dense_pool=dense_pool)
+
+    def _ensure_l1_diversity(
+        self,
+        candidates: list,
+        *,
+        dense_pool: list,
+    ) -> list:
+        """Anti-cascade-error: if the candidate pool is dominated by a single L1
+        (first 4-digit segment of the code), inject the best-scoring candidate from
+        a DIFFERENT L1 — so the LLM is guaranteed to see at least one alternative
+        from another top-level section.
+
+        Triggers when ALL three top-3 share L1, OR ≥4 of top-5 share L1, OR ≥7 of
+        top-10 share L1. We pick the diverse candidate from the broader dense pool
+        and insert it at position 4 in the final list (visible to LLM in top-K).
+
+        This addresses the failure mode where retrieval locks onto a wrong L1 theme
+        and the LLM has no escape — every "alternative" the LLM could pick is also
+        wrong because they're all siblings of the same wrong category.
+
+        Args:
+            candidates: final reranked pool (in score order).
+            dense_pool: broader dense retrieval results to draw alternative L1 from.
+
+        Returns:
+            Same list (potentially with one cross-L1 candidate injected at position 4),
+            trimmed to TOP_K_CANDIDATES so the LLM pool doesn't grow.
+        """
+        if len(candidates) < 3:
+            return candidates
+
+        l1_of = lambda c: c["code"].split(".")[0] if c.get("code") else ""
+
+        # Compute dominance at multiple top-N windows
+        from collections import Counter
+        windows = [
+            ("top-3", 3, 3),    # all 3 must share
+            ("top-5", 5, 4),    # at least 4 of 5
+            ("top-10", 10, 7),  # at least 7 of 10
+        ]
+        triggered_window = None
+        dominant_l1 = None
+        for label, n, threshold in windows:
+            if len(candidates) < n:
+                continue
+            counts = Counter(l1_of(c) for c in candidates[:n])
+            top_l1, top_count = counts.most_common(1)[0]
+            if top_count >= threshold:
+                triggered_window = label
+                dominant_l1 = top_l1
+                break
+
+        # Diagnostic: always log L1 distribution of top-10
+        diag_counts = Counter(l1_of(c) for c in candidates[:10])
+        diag_str = ", ".join(f"L1={k}:{v}" for k, v in diag_counts.most_common())
+        print(f"  [L1-diversity] top-10 distribution: {diag_str}")
+
+        if triggered_window is None:
+            return candidates  # pool is sufficiently diverse
+
+        existing_codes = {c["code"] for c in candidates}
+        # Find best-scoring candidate from broader dense pool with different L1
+        diverse = next(
+            (c for c in dense_pool if l1_of(c) != dominant_l1 and c["code"] not in existing_codes),
+            None,
+        )
+        if diverse is None:
+            print(f"  [L1-diversity] {triggered_window} dominated by L1={dominant_l1}, no cross-L1 candidate in dense_pool")
+            return candidates
+
+        diverse = dict(diverse)  # copy to avoid mutating dense_pool
+        diverse["source"] = (diverse.get("source") or "dense") + "+l1-diversity"
+        diverse_l1 = l1_of(diverse)
+        print(
+            f"  [L1-diversity] {triggered_window} dominated by L1={dominant_l1}; "
+            f"инжектирован {diverse['code']} (L1={diverse_l1}, sim={diverse.get('similarity', 0):.3f}) в позицию 4"
+        )
+
+        # Insert at position 4 (0-indexed = 3) so top-3 ordering stays intact
+        out = candidates[:3] + [diverse] + candidates[3:]
+        return out[:TOP_K_CANDIDATES]
 
     def _classify_with_llm(
         self,
@@ -1335,11 +1421,11 @@ class ClassifierAgent:
                     response.raise_for_status()
                     raw = response.json()["choices"][0]["message"]["content"].strip()
                 elif provider == "ario":
-                    # Each question produces ~250-400 output tokens of structured JSON.
-                    # Without explicit max_tokens, Ario/vLLM may use a small server default
-                    # and truncate the response mid-JSON -> parse fails.
+                    # Qwen3.6 generates verbose reasoning per question (~800-1500 tokens
+                    # incl. l3_options array and explanations). With 128K context window
+                    # we have plenty of headroom; be generous to avoid mid-JSON truncation.
                     n_q = max(len(compact_questions), 1)
-                    explicit_max_tokens = min(8000, n_q * 500 + 600)
+                    explicit_max_tokens = min(16000, n_q * 2500 + 2000)
                     raw = self._ario_call(
                         messages=[
                             {"role": "system", "content": SYSTEM_PROMPT},
@@ -1577,6 +1663,38 @@ class ClassifierAgent:
                         "name":      alt_entry["name"],
                         "full_path": alt_entry["full_path"],
                     })
+
+            # Anti-cascade-error post-process: if selected_code + all alternatives share
+            # the same L1 (first 4-digit segment), inject the best cross-L1 candidate
+            # from this question's retrieval pool as an extra alternative. This protects
+            # against LLM locking onto a wrong top-level section when other plausible
+            # candidates from different sections were already in the candidate pool.
+            picks_l1 = {code.split(".")[0]} | {a["code"].split(".")[0] for a in alt_entries}
+            if len(picks_l1) == 1 and code:
+                dominant_l1 = code.split(".")[0]
+                question_pool = next(
+                    (qc["candidates"] for qc in questions_with_candidates if qc["ordinal"] == ordinal),
+                    [],
+                )
+                picked_codes = {code} | {a["code"] for a in alt_entries}
+                cross_l1 = next(
+                    (c for c in question_pool
+                     if c["code"].split(".")[0] != dominant_l1 and c["code"] not in picked_codes),
+                    None,
+                )
+                if cross_l1:
+                    cross_entry = self.code_index.get(cross_l1["code"])
+                    if cross_entry:
+                        alt_entries.append({
+                            "code":      cross_l1["code"],
+                            "name":      cross_entry["name"],
+                            "full_path": cross_entry["full_path"],
+                        })
+                        print(
+                            f"  [L1-diversity-post] вопрос {ordinal}: top-3 все из L1={dominant_l1}; "
+                            f"добавлен cross-L1 {cross_l1['code']} (L1={cross_l1['code'].split('.')[0]}) "
+                            f"как 3-я альтернатива"
+                        )
 
             confidence_val = float(q.get("confidence", 0.0))
             duplicate_code = duplicate_code_counts.get(original_code, 0) > 1
