@@ -1242,6 +1242,18 @@ class ClassifierAgent:
             entry = self.code_index.get(l3)
             return entry["name"] if entry else ""
 
+        # Dynamic per-question candidate cap to fit 32K context window.
+        # Each candidate ~180-220 tokens; appeal_text ~1500 tokens; JSON structure ~1000.
+        # Reserve ~3000 tokens for LLM output. Budget for candidates: ~24K tokens = ~120 cands total.
+        # Use safer 100 to leave headroom for variable candidate sizes.
+        n_q = max(len(questions_with_candidates), 1)
+        per_q_cap = max(8, min(TOP_K_CANDIDATES, 100 // n_q))
+        if per_q_cap < TOP_K_CANDIDATES:
+            print(
+                f"  [Context] {n_q} вопросов × TOP_K={TOP_K_CANDIDATES} превышает контекст; "
+                f"урезаю до {per_q_cap} кандидатов на вопрос."
+            )
+
         compact_questions = []
         total_candidates = 0
         for q in questions_with_candidates:
@@ -1263,7 +1275,7 @@ class ClassifierAgent:
                 })
 
             compact_candidates = []
-            for c in q["candidates"]:
+            for c in q["candidates"][:per_q_cap]:
                 code = c["code"]
                 l3 = l3_prefix(code)
                 entry = {
@@ -1323,15 +1335,20 @@ class ClassifierAgent:
                     response.raise_for_status()
                     raw = response.json()["choices"][0]["message"]["content"].strip()
                 elif provider == "ario":
+                    # Each question produces ~250-400 output tokens of structured JSON.
+                    # Without explicit max_tokens, Ario/vLLM may use a small server default
+                    # and truncate the response mid-JSON -> parse fails.
+                    n_q = max(len(compact_questions), 1)
+                    explicit_max_tokens = min(8000, n_q * 500 + 600)
                     raw = self._ario_call(
                         messages=[
                             {"role": "system", "content": SYSTEM_PROMPT},
                             {"role": "user",   "content": user_message},
                         ],
                         model=model,
-                        max_tokens=None,
+                        max_tokens=explicit_max_tokens,
                         temperature=0.1,
-                        timeout=120,
+                        timeout=max(120, n_q * 40),
                         schema=None,
                     )
                 else:
@@ -1374,7 +1391,11 @@ class ClassifierAgent:
 
             except json.JSONDecodeError as e:
                 last_error = f"JSON parse error: {e}"
-                print(f"  [LLM] Ошибка парсинга JSON, попытка {attempt}/{max_retries}.")
+                tail = raw[-200:] if 'raw' in dir() and isinstance(raw, str) else "<empty>"
+                print(
+                    f"  [LLM] JSON parse error, попытка {attempt}/{max_retries}: {e}. "
+                    f"Last 200 chars of response: {tail!r}"
+                )
                 if attempt < max_retries:
                     time.sleep(1)
 
