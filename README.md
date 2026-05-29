@@ -22,31 +22,34 @@
 │  → N независимых вопросов (1 или больше)             │
 └──────────────────────────────────────────────────────┘
        │
-       ▼ (для каждого вопроса параллельно)
+       ▼ (для каждого вопроса)
 ┌──────────────────────────────────────────────────────┐
-│  ШАГ 2: Per-question retrieval                       │
+│  ШАГ 2: Per-question hybrid retrieval                │
 │   ┌────────────────────────────────────────────┐     │
-│   │ Dense поиск (multilingual-e5-base)         │     │
+│   │ Dense поиск (e5-base + adapter_v3)         │     │
 │   │ cosine similarity по 2108 записям → top-50 │     │
 │   ├────────────────────────────────────────────┤     │
 │   │ Lexical поиск (token overlap по name+path) │     │
 │   │ → top-30                                   │     │
 │   ├────────────────────────────────────────────┤     │
 │   │ Merge + Heuristic rerank                   │     │
-│   │ Hierarchy boost (см. ниже) → top-10        │     │
+│   │ Hierarchy boost (branch + parent) → top-K  │     │
 │   ├────────────────────────────────────────────┤     │
-│   │ (опц.) CrossEncoder reranker               │     │
-│   │ (опц.) LLM Query Expansion                 │     │
+│   │ L1-diversity guard                         │     │
+│   │ Если все кандидаты в 1 разделе → впрыск   │     │
+│   │ из 2 других разделов (anti-cascade-error)  │     │
 │   └────────────────────────────────────────────┘     │
+│   * Dynamic cap: per_q_cap = max(8, 400 // n_q)      │
 └──────────────────────────────────────────────────────┘
        │
        ▼
 ┌──────────────────────────────────────────────────────┐
 │  ШАГ 3: LLM-классификация (один вызов)               │
+│  Ario Qwen3.6-35B-A3B (MoE, 128K context)           │
 │  Промпт: questions_with_candidates[] —               │
 │  свой пул кандидатов на каждый вопрос                │
 │  Правила: no fallback-код, sibling-aware, deeper>L1  │
-│  → vid, тип, codes per question                      │
+│  → vid, тип, code + alternatives (топ-3) per question│
 └──────────────────────────────────────────────────────┘
        │
        ▼
@@ -59,18 +62,19 @@
        ▼
 ┌──────────────────────────────────────────────────────┐
 │  ШАГ 5: Карточка оператора                           │
+│  Основной код + топ-3 альтернативы + уверенность     │
 │  → [ Подтвердить / Исправить / Отклонить ]           │
 └──────────────────────────────────────────────────────┘
        │
        ▼
 ┌──────────────────────────────────────────────────────┐
-│  ШАГ 6: Логирование                                  │
+│  ШАГ 6: Логирование и дообучение                     │
 │  → appeals_log.jsonl                                 │
 │  → при 50 верификациях: fine-tuning эмбеддера        │
 └──────────────────────────────────────────────────────┘
 ```
 
-Архитектура «retrieve → rerank → LLM» намеренна: hybrid retrieval (dense + lexical + иерархия) сужает 2108 классов до 10 релевантных, LLM делает финальный осмысленный выбор из узкого пула. На каждом вопросе отдельный пул кандидатов — это критично для многовопросных обращений (см. ниже).
+Архитектура «retrieve → rerank → LLM» намеренна: hybrid retrieval (dense + lexical + иерархия) сужает 2108 классов до ~10-30 релевантных, LLM делает финальный осмысленный выбор из узкого пула. На каждом вопросе отдельный пул кандидатов — это критично для многовопросных обращений (см. ниже).
 
 ---
 
@@ -162,10 +166,10 @@ similarities = embeddings_matrix @ query_vector   # одна строка
 
 | Провайдер | Модель | Примечание |
 |-----------|--------|------------|
-| **Groq** (основной) | `llama-3.3-70b-versatile` | Быстрый, хороший русский |
+| **Ario** (основной) | `Qwen/Qwen3.6-35B-A3B` | Корпоративный Directum360, MoE 128K |
+| **Groq** | `llama-3.3-70b-versatile` | Быстрый, хороший русский |
 | **Gemini** | `gemini-2.5-flash` | Бесплатно, лимит 20 req/day |
 | **Ollama** | `qwen2.5-14b` | Локально, без лимитов |
-| **Ario** | `Qwen/Qwen3-32B-AWQ` | Корпоративный Directum360 |
 
 **Ключевые правила в промпте:**
 - Для каждого вопроса код выбирается ТОЛЬКО из его собственного пула кандидатов
@@ -296,68 +300,97 @@ python src/auto_import_historical.py --watch     # слежение за пап�
 
 ---
 
-## Результаты оценки точности (2026-05-26)
+## Результаты оценки точности
 
-Прогресс после EPIC-08 (per-question segmentation + hierarchy-aware reranking + section routing):
+### ИИ25 dataset — основной бенчмарк (56 test-кейсов)
 
-### Синтетические 11 фикстур (`tests/fixtures/test_appeals.json`)
+Источник: `data/ii25_test.jsonl` — 56 реальных обращений с разметкой от специалистов.  
+Распределение по разделам: Раздел 1=2 | 2=24 | **3=45** | 4=6 | 5=22 (доминирует Раздел 3 — Экономика).
 
-| Метрика | v1 (Apr-22) | v2 baseline | **+ hierarchy + routing** | Цель MVP |
-|---|---:|---:|---:|---|
-| Точность вида обращения | 90.0% | 90.9% | **90.9%** | >= 90% ✅ |
-| Prefix L1 (раздел) | 90.0% | 100% | **100%** | >= 85% ✅ |
-| Prefix L2 (подраздел) | — | 90.9% | **100%** | — |
-| **Exact Top-1** | 40.0% | 63.6% | 45.5% | >= 70% ⚠ |
-| **Exact Top-3** | 40.0% | 63.6% | 45.5% | >= 85% ⚠ |
-| Среднее время | 5.0 сек | 22.2 сек | ~25 сек | <= 8 сек ⚠ |
+#### End-to-end Top-1 (с LLM)
 
-### Real-12 — экспертная разметка из xlsx (`tests/fixtures/test_appeals_real12.json`)
+| Конфигурация | Top-1 | Примечание |
+|---|---:|---|
+| Phase 0: e5+adapter_v3 + Qwen3-32B | 7.1% (4/56) | Baseline, 2026-05-27 |
+| **v0.1.minimal: RAG+LLM only** | **10.7% (6/56)** | Без routing/CE/LtR/MQE — лучший результат |
 
-| Метрика | Baseline (без routing) | **С section routing** |
-|---|---:|---:|
-| Prefix L1 | 72.7% | **81.8%** |
-| Prefix L2 | 72.7% | 81.8% |
-| Prefix L3 | 54.5% | 72.7% |
-| **Exact Top-1** | 18.2% | **54.5%** (+36 pp, 3x) |
+**Вывод:** Все дополнительные техники (section routing, CrossEncoder, LtR, MQE) на этом датасете **ухудшают** результат. Чистая RAG+LLM архитектура — лучшая базовая линия.
 
-### 🆕 ИИ25 dataset (99 кейсов: 43 train + 56 test) — `data/ii25_*.jsonl`
-
-Источник: папка `C:\Users\Korotaev_NO\Desktop\Проекты\ИИ25` с .docx-файлами, в которых коды зашиты в имена файлов (например `03-689.docx → 0003.0009.0097.0689`). Импортирован через [scripts/import_ii25_dataset.py](scripts/import_ii25_dataset.py).
-
-**Распределение по разделам (всего 99):** Раздел 1 = 2 | 2 = 24 | **3 = 45** | 4 = 6 | 5 = 22. Доминирует Экономика (Хозяйственная деятельность).
-
-**Retrieval-only метрики на ii25_test (56 кейсов, БЕЗ LLM и БЕЗ section routing):**
+#### Retrieval метрики (e5-base + adapter_v3, без LLM)
 
 | Метрика | Значение |
 |---|---:|
-| Dense recall@10 | 37.5% |
-| **Dense recall@50** | **51.8%** ⚠ |
-| Lexical recall@30 | 14.3% |
+| **Dense recall@10** | **41.1%** |
+| **Dense recall@50** | **69.6%** |
 | Reranked Top-1 | 10.7% |
 | Reranked Top-3 | 16.1% |
-| **Prefix L1 Top-1** | **57.1%** |
-| Prefix L2 Top-1 | 46.4% |
-| Prefix L3 Top-1 | 37.5% |
+| Prefix L1 (раздел) | 57.1% |
+| Prefix L2 (подраздел) | 46.4% |
+| Prefix L3 | 37.5% |
 
-**Ключевое наблюдение:** Dense recall@50 = только **52%** — embedder в половине случаев НЕ находит правильный код даже в top-50. Это потолок embedder'а; никакой reranker / LLM / routing этого не исправит. **Fine-tuning эмбеддера на 43 train-парах ИИ25 + 269 verified из appeals_log — следующий главный шаг.**
+#### Распределение причин ошибок (Phase 0, 56 кейсов)
 
-End-to-end метрика (с LLM + section routing) на ii25_test пока не измерена — это первое что нужно сделать в новой сессии.
+```
+retrieval_recall │████████████░░░░░░░░░░░░ 17/56 (30%) — gold нет даже в dense top-50
+     reranker    │██████████████████████████████ 30/56 (54%) — gold в top-50, но не в top-10
+    llm_final    │███░░░░░░░░░░░░░░░░░░░░░░  6/56 (11%) — gold в top-10, LLM выбрал другой
+      correct    │█░░░░░░░░░░░░░░░░░░░░░░░░  3/56  (5%) — Top-1 правильный
+```
+
+**Главный bottleneck:** reranker (54%) — heuristic reranker не вытаскивает правильный код из dense top-50 в top-10. Атака через LLM Router (Phase 2) и fine-tune эмбеддера (Phase 6).
+
+#### Сравнение embedding-моделей (retrieval-only)
+
+| Модель | recall@10 | recall@50 |
+|---|---:|---:|
+| **e5-base + adapter_v3** (domain-tuned) | **41.1%** | **69.6%** |
+| BGE-M3 off-the-shelf | 33.9% (-7.2pp) | 55.4% (-14.2pp) |
+
+adapter_v3 = 4 МБ линейный адаптер, обученный на PTO+ii25_train данных домена.  
+BGE-M3 = 1.5 ГБ general-purpose, нужен LoRA fine-tune для конкуренции.
+
+### Синтетические фикстуры (11 кейсов)
+
+| Метрика | v1 (Apr-22) | v2 + hierarchy | Цель MVP |
+|---|---:|---:|---|
+| Точность вида обращения | 90.0% | **90.9%** | >= 90% ✅ |
+| Prefix L1 (раздел) | 90.0% | **100%** | >= 85% ✅ |
+| Prefix L2 (подраздел) | — | **100%** | — |
+| **Exact Top-1** | 40.0% | 45.5% | >= 70% ⚠ |
 
 Подробные отчёты:
-- [docs/accuracy_report_v2.md](docs/accuracy_report_v2.md) — последний eval (перезаписывается)
-- [docs/ii25_retrieval_report.md](docs/ii25_retrieval_report.md) — отчёт retrieval-only на ии25
-- [data/ii25_report.json](data/ii25_report.json) — статистика по датасету
-- [docs/HANDOFF_classification_quality.md](docs/HANDOFF_classification_quality.md) — план для следующего шага
+- [docs/checkpoint1_decision.md](docs/checkpoint1_decision.md) — Checkpoint 1 analysis (Phase 0 vs Phase 1)
+- [docs/accuracy_report_v2.md](docs/accuracy_report_v2.md) — последний eval
+- [data/eval_baselines/](data/eval_baselines/) — все baseline JSON-файлы
 
-**Что дало прирост Top-1:**
-1. **Per-question segmentation** — решил проблему многовопросных обращений (+13.6 pp на синтетике)
-2. **Hierarchy-aware reranking** — branch agreement + parent similarity boost
-3. **Section routing** (главное на real data) — отдельный LLM-вызов выбирает 1-3 тематики из 21 по описаниям из методички УПП РФ → фильтрация retrieval → +36 pp Top-1 на real-12
+---
 
-**Путь дальнейшего улучшения:**
-- **Fine-tuning эмбеддера** на ии25_train (43) + appeals_log verified (~269) + historical (40) — должно повысить Dense recall@50 с 52% до 80%+
-- Расширение fixture-набора через скрипт импорта (формат: код в имени файла)
-- Опционально включить CrossEncoder (`ENABLE_CROSS_ENCODER_RERANKER=true`)
+## Новые возможности (Phase 1, 2026-05-29)
+
+### L1-diversity guard — защита от cascade error
+
+Если heuristic reranker возвращает пул, где все кандидаты принадлежат одному L1-разделу, агент автоматически «впрыскивает» кандидатов из двух других разделов.
+
+**Почему это важно:** Неправильный L1 на этапе retrieval → LLM видит только один раздел → выбирает «лучшее из плохого» вместо правильного. Пример: обращение про полёты дронов над объектами попало в «Оборона и безопасность», хотя правильный код — в «Воздушный транспорт».
+
+### Dynamic candidate cap
+
+```python
+per_q_cap = max(8, min(TOP_K, 400 // n_q))
+```
+
+При 5 вопросах в обращении каждый вопрос получает cap 80 кандидатов (или TOP_K если меньше). Защищает контекст LLM от переполнения при любом количестве вопросов.
+
+### Топ-3 альтернативы
+
+LLM возвращает `alternative_codes` для каждого вопроса — 2-3 кода-кандидата с уровнем уверенности. Отображаются оператору как подсказка при ручном исправлении.
+
+### Обновлённая LLM — Qwen3.6-35B-A3B
+
+Ario перешёл на новую модель: `Qwen/Qwen3.6-35B-A3B` (MoE архитектура, 128K контекст). По сравнению с предыдущим `Qwen3-32B-AWQ`:
+- Контекст 32K → 128K (нет переполнения при 5+ вопросах)
+- MoE: active params ~3.8B при inference → примерно в 3-4x быстрее
+- Устранена причина 400 Bad Request ошибок на длинных многовопросных обращениях
 
 ---
 
@@ -431,11 +464,15 @@ cd "C:\путь\до\папки\Class OG Final"
 
 | Компонент | Технология |
 |---|---|
-| Языковая модель | **Groq** — `llama-3.3-70b-versatile` (основной), **Gemini** `gemini-2.5-flash` (альтернатива), **Ollama** `qwen2.5-14b` (локальный), **Ario** `Qwen/Qwen3-32B-AWQ` (корпоративный Directum360) |
-| Эмбеддинги | `intfloat/multilingual-e5-base` (локально) |
-| Векторный поиск | numpy cosine similarity |
+| Языковая модель (основная) | **Ario** — `Qwen/Qwen3.6-35B-A3B` (MoE, 128K контекст, ~3.8x быстрее Qwen3-32B) |
+| Языковая модель (альтернативы) | **Groq** `llama-3.3-70b-versatile`, **Gemini** `gemini-2.5-flash`, **Ollama** `qwen2.5-14b` |
+| Эмбеддинги | `intfloat/multilingual-e5-base` + `adapter_v3` (domain-tuned линейный адаптер 768d) |
+| Векторное хранилище | numpy cosine similarity (`data/vector_db_adapted_v3/`) |
 | Lexical поиск | Token overlap с нормализацией русских суффиксов |
-| Reranker | Heuristic (lexical + level + hierarchy boosts) + опц. CrossEncoder `BAAI/bge-reranker-base` |
+| Reranker | Heuristic: lexical + level + hierarchy boosts (branch agreement + parent similarity) |
+| L1-diversity guard | Anti-cascade-error: впрыск кандидатов из других L1-разделов при монотонном пуле |
+| Dynamic candidate cap | `per_q_cap = max(8, min(TOP_K, 400 // n_q))` — защита от overflow 128K контекста |
+| Alternatives | LLM возвращает топ-3 альтернативных кода с confidence для каждого вопроса |
 | Сегментация | Детерминистические regex-маркеры (`1.`, «во-первых», абзацы) |
 | API | FastAPI + uvicorn |
 | Текст из PDF | PyMuPDF |
@@ -473,8 +510,8 @@ LLM_PROVIDER=ario        # Ario Directum360 (корпоративный)
 
 # Ario (корпоративный) — дополнительные параметры
 ARIO_API_KEY=100111ac-d413-4721-9357-5d04aaf7386d
-ARIO_BASE_URL=https://gpt.ario.directum360.ru/v1
-ARIO_MODEL=Qwen/Qwen3-32B-AWQ
+ARIO_BASE_URL=https://llm.ario.directum360.ru/v1
+ARIO_MODEL=Qwen/Qwen3.6-35B-A3B
 ```
 
 ---
@@ -674,6 +711,8 @@ python scripts/import_ii25_dataset.py --source "C:\path\to\dataset_folder"
 | [FINETUNING.md](docs/FINETUNING.md) | Как запустить и интерпретировать дообучение |
 | [accuracy_report_v1.md](docs/accuracy_report_v1.md) | Отчёт оценки точности v1 (10 обращений, 2026-04-22) |
 | [accuracy_report_v2.md](docs/accuracy_report_v2.md) | Отчёт точности v2 (последний прогон eval, перезаписывается) |
+| [checkpoint1_decision.md](docs/checkpoint1_decision.md) | Checkpoint 1 — Phase 0 vs Phase 1, embedding/CE/constrained decoding |
 | [ii25_retrieval_report.md](docs/ii25_retrieval_report.md) | Retrieval-only метрики на 56 кейсах ии25 |
-| [HANDOFF_classification_quality.md](docs/HANDOFF_classification_quality.md) | **Handoff для следующего агента** — текущее состояние + приоритетные задачи |
-| [docs/superpowers/plans/](docs/superpowers/plans/) | План EPIC-08 (повышение точности классификации) |
+| [HANDOFF_classification_quality.md](docs/HANDOFF_classification_quality.md) | Handoff — текущее состояние + приоритетные задачи |
+| [docs/superpowers/specs/](docs/superpowers/specs/) | Spec Phase 1-6 (hierarchical classification design) |
+| [data/eval_baselines/](data/eval_baselines/) | Все baseline JSON-снапшоты с метриками |
