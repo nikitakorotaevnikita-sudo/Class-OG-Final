@@ -1242,15 +1242,15 @@ class ClassifierAgent:
             entry = self.code_index.get(l3)
             return entry["name"] if entry else ""
 
-        # Dynamic per-question candidate cap to fit 32K context window.
-        # Each candidate ~180-220 tokens; appeal_text ~1500 tokens; JSON structure ~1000.
-        # Reserve ~3000 tokens for LLM output. Budget for candidates: ~24K tokens = ~120 cands total.
-        # Use safer 100 to leave headroom for variable candidate sizes.
+        # Dynamic per-question candidate cap. Qwen3.6-35B-A3B has 128K context window.
+        # Each candidate ~180-220 tokens; appeal_text ~1500; JSON structure ~1000; LLM output ~3000.
+        # Budget for candidates: ~120K tokens = ~550 cands total. Safety: cap at 400.
+        # (Previous Qwen3-32B had 32K → cap was 100. Quadrupled headroom on new model.)
         n_q = max(len(questions_with_candidates), 1)
-        per_q_cap = max(8, min(TOP_K_CANDIDATES, 100 // n_q))
+        per_q_cap = max(8, min(TOP_K_CANDIDATES, 400 // n_q))
         if per_q_cap < TOP_K_CANDIDATES:
             print(
-                f"  [Context] {n_q} вопросов × TOP_K={TOP_K_CANDIDATES} превышает контекст; "
+                f"  [Context] {n_q} вопросов × TOP_K={TOP_K_CANDIDATES} > headroom; "
                 f"урезаю до {per_q_cap} кандидатов на вопрос."
             )
 
