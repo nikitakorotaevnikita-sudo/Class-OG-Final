@@ -343,6 +343,11 @@ L3-тема — это тематическое направление (напр
 
 4. Запрещено: один код на разные вопросы; fallback "0001.0002.0027.0126" при наличии альтернатив.
 
+5. АЛЬТЕРНАТИВНЫЕ КОДЫ:
+   В поле "alternative_codes" верни 2-3 СЛЕДУЮЩИХ по релевантности кода из candidates (после selected_code).
+   Это коды, которые ТОЖЕ подходят к вопросу, но менее точно. Помогает оператору верифицировать выбор.
+   Если строго подходит только 1 код — верни пустой массив [].
+
 Верни JSON строго в формате:
 {{
   "vid_obrascheniya": "Жалоба|Заявление|предложение",
@@ -354,10 +359,8 @@ L3-тема — это тематическое направление (напр
       "question_text": "...",
       "l3_options": ["XXXX.XXXX.XXXX ...", ...],
       "selected_l3_code": "XXXX.XXXX.XXXX",
-      "candidates": [
-
-      ],
       "selected_code": "XXXX.XXXX.XXXX.XXXX",
+      "alternative_codes": ["XXXX.XXXX.XXXX.XXXX", "XXXX.XXXX.XXXX.XXXX"],
       "predmet_vedeniya": "...",
       "confidence": 0.87,
       "reasoning": "..."
@@ -538,6 +541,15 @@ class ClassifierAgent:
         )
         try:
             r = client.post("/chat/completions", json=payload)
+            if r.status_code >= 400:
+                # Capture body BEFORE raise_for_status discards it
+                body_preview = (r.text or "")[:500]
+                msgs_len = sum(len(m.get("content", "")) for m in messages)
+                print(
+                    f"  [Ario] HTTP {r.status_code} on /chat/completions "
+                    f"(payload: {len(messages)} msgs, ~{msgs_len} chars total). "
+                    f"Response body: {body_preview}"
+                )
             r.raise_for_status()
             raw = r.json()["choices"][0]["message"]["content"].strip()
         finally:
