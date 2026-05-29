@@ -367,6 +367,47 @@ input, select, textarea { font: inherit; }
 .q-meta .lbl { color: var(--muted); }
 .q-meta .val { color: var(--text); word-break: break-word; }
 .q-meta .val.code { font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.q-meta .q-path { color: var(--subtle); font-size: 12.5px; }
+.q-meta .q-reasoning { color: var(--muted); }
+
+/* Alternatives (top-K candidates the LLM didn't pick as #1) */
+.q-alts {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+.q-alts-label {
+  font-size: 11px; font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  margin-bottom: 8px;
+}
+.q-alts-list { display: flex; flex-direction: column; gap: 6px; }
+.q-alt-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+.q-alt-item .code {
+  font-variant-numeric: tabular-nums; letter-spacing: -.01em;
+  color: var(--navy); font-weight: 600;
+}
+.q-alt-name { color: var(--muted); }
+
+/* Confidence bar inside .q-block */
+.q-confidence { margin-top: 12px; }
+.q-confidence .conf-track { height: 8px; background: var(--surface-2); border-radius: 4px; overflow: hidden; }
+.q-confidence .conf-fill { height: 100%; border-radius: 4px; transition: width .25s ease; }
+.q-confidence .conf-fill-green { background: var(--green); }
+.q-confidence .conf-fill-amber { background: var(--amber); }
+.q-confidence .conf-fill-red { background: var(--red); }
+.q-confidence-label { font-size: 12px; color: var(--muted); margin-top: 6px; }
 
 .verify-row { display: flex; gap: 10px; margin-top: 14px; }
 .verify-row .btn { flex: 1; }

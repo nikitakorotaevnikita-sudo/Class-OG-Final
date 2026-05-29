@@ -137,14 +137,12 @@
 
   function confidenceBar(value) {
     const pct = Math.round((Number(value) || 0) * 100);
-    const cls = value >= 0.80 ? 'conf-bar-green' :
-                value >= 0.65 ? 'conf-bar-amber' : 'conf-bar-red';
+    const fillCls = value >= 0.80 ? 'conf-fill-green' :
+                    value >= 0.65 ? 'conf-fill-amber' : 'conf-fill-red';
     return `
-      <div class="conf-bar-wrap" style="margin-top:8px">
-        <div class="conf-bar-bg">
-          <div class="conf-bar-fill ${cls}" style="width:${pct}%"></div>
-        </div>
-        <div class="text-xs text-muted">Уверенность: ${pct}%</div>
+      <div class="q-confidence">
+        <div class="conf-track"><div class="conf-fill ${fillCls}" style="width:${pct}%"></div></div>
+        <div class="q-confidence-label">Уверенность: ${pct}%</div>
       </div>
     `;
   }
@@ -158,28 +156,51 @@
     `;
   }
 
+  function altBadgeClass(conf) {
+    if (conf == null) return '';
+    return conf >= 0.80 ? 'badge-green' : conf >= 0.65 ? 'badge-amber' : 'badge-red';
+  }
+
   function renderQuestion(q, idx, total) {
-    const alts = (q.alternatives || []).length
-      ? `<div class="question-alts">Альтернативы: ${
-          q.alternatives.map((a) => `<span class="font-mono">${esc(a.code)}</span>`).join(', ')
-        }</div>`
+    const alternatives = q.alternatives || [];
+    const altsHtml = alternatives.length
+      ? `<div class="q-alts">
+          <div class="q-alts-label">Альтернативы (топ-${alternatives.length})</div>
+          <div class="q-alts-list">
+            ${alternatives.map((a) => {
+              const conf = typeof a.confidence === 'number' ? Math.round(a.confidence * 100) : null;
+              const badge = conf != null
+                ? `<span class="badge ${altBadgeClass(a.confidence)}">${conf}%</span>`
+                : '';
+              return `
+                <div class="q-alt-item">
+                  <span class="code">${esc(a.code)}</span>
+                  <span class="q-alt-name">${esc(a.name || a.full_path || '')}</span>
+                  ${badge}
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>`
       : '';
     return `
-      <article class="question-block">
-        <div class="question-header">${total > 1 ? `Вопрос ${idx + 1} из ${total}` : 'Вопрос'}</div>
-        <div class="question-grid">
-          <div class="question-grid-label">Код:</div>
-          <div class="font-mono question-grid-val">${esc(q.code)}</div>
-          <div class="question-grid-label">Тема:</div>
-          <div class="question-grid-val">${esc(q.name)}</div>
-          <div class="question-grid-label">Путь:</div>
-          <div class="text-xs" style="color:var(--subtle)">${esc(q.full_path)}</div>
-          <div class="question-grid-label">Ведение:</div>
-          <div class="question-grid-val">${esc(q.predmet_vedeniya)}</div>
-          <div class="question-grid-label">Обоснование:</div>
-          <div style="color:var(--muted)">${esc(q.reasoning || '-')}</div>
+      <article class="q-block">
+        <div class="q-block-head">
+          <strong>${total > 1 ? `Вопрос ${idx + 1} из ${total}` : 'Вопрос'}</strong>
         </div>
-        ${alts}
+        <div class="q-meta">
+          <div class="lbl">Код:</div>
+          <div class="val code">${esc(q.code)}</div>
+          <div class="lbl">Тема:</div>
+          <div class="val">${esc(q.name)}</div>
+          <div class="lbl">Путь:</div>
+          <div class="val q-path">${esc(q.full_path)}</div>
+          <div class="lbl">Ведение:</div>
+          <div class="val">${esc(q.predmet_vedeniya)}</div>
+          <div class="lbl">Обоснование:</div>
+          <div class="val q-reasoning">${esc(q.reasoning || '-')}</div>
+        </div>
+        ${altsHtml}
         ${confidenceBar(q.confidence)}
       </article>
     `;
