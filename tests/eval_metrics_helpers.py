@@ -212,7 +212,12 @@ def compute_per_stage_metrics(*, per_case_rows: Sequence[dict[str, Any]]) -> dic
     }
 
     # Optional stage recall metrics — compute if present in any row
-    for key in ["dense_recall_at_10", "dense_recall_at_50", "reranked_recall_at_10"]:
+    for key in [
+        "dense_recall_at_10", "dense_recall_at_50", "reranked_recall_at_10",
+        # Смысловые метрики (по итогам CustDev: точный L4 не критичен, важна ветка)
+        "final_l1_match", "final_l2_match", "final_l3_match", "final_l4_match",
+        "top3_exact", "top3_l3_match", "top3_l2_match",
+    ]:
         flagged = [r for r in evaluable_rows if key in r]
         if flagged:
             true_count = sum(1 for r in flagged if r.get(key) is True)

@@ -23,10 +23,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from classifier_agent import ClassifierAgent  # noqa: E402
+from config import ENABLE_HEURISTIC_RERANKER  # noqa: E402
 from eval_metrics_helpers import (  # noqa: E402
     attribute_failure,
     compute_per_stage_metrics,
     first_expected_rank,
+    prefix_match,
 )
 
 
@@ -120,7 +122,11 @@ def write_summary_md(
     ]
     if "top1_accuracy_pct" in summary:
         lines.append(f"| Top-1 accuracy | {summary['correct']}/{summary['evaluable']} = {summary['top1_accuracy_pct']}% |")
-    for key in ["dense_recall_at_10_pct", "dense_recall_at_50_pct", "reranked_recall_at_10_pct"]:
+    for key in [
+        "dense_recall_at_10_pct", "dense_recall_at_50_pct", "reranked_recall_at_10_pct",
+        "final_l1_match_pct", "final_l2_match_pct", "final_l3_match_pct", "final_l4_match_pct",
+        "top3_exact_pct", "top3_l3_match_pct", "top3_l2_match_pct",
+    ]:
         if key in summary:
             lines.append(f"| {key.replace('_pct', '').replace('_', ' ')} | {summary[key]}% |")
     lines.append("")
@@ -253,17 +259,33 @@ def evaluate_record_final(
     dense_candidates = agent._search_candidates(text, top_k=50)
     lexical_candidates = agent._search_lexical_candidates(text, top_k=30)
     merged = agent._merge_candidate_pools(dense_candidates, lexical_candidates)
-    reranked = agent._rerank_candidates(text, merged, top_k=10)
+    if ENABLE_HEURISTIC_RERANKER:
+        reranked = agent._rerank_candidates(text, merged, top_k=10)
+    else:
+        # Зеркалим поведение агента: при отключённом реранкере LLM видит dense top-K
+        reranked = dense_candidates[:10]
 
     # LLM final
     try:
         result = agent.classify(text)
         final_codes = [q.code for q in result.questions if q.code]
         final_top1 = final_codes[0] if final_codes else None
+        # Top-3 оператора: выбранный код + alternatives (по каждому вопросу)
+        final_alternatives = [
+            {"code": q.code, "alternative_codes": [a["code"] for a in (q.alternatives or [])]}
+            for q in result.questions
+        ]
+        final_top3_codes = []
+        for q in result.questions:
+            if q.code:
+                final_top3_codes.append(q.code)
+            final_top3_codes.extend(a["code"] for a in (q.alternatives or []))
         llm_error = None
     except Exception as exc:  # noqa: BLE001
         final_codes = []
         final_top1 = None
+        final_alternatives = []
+        final_top3_codes = []
         llm_error = str(exc)
 
     elapsed = round(time.time() - started, 3)
@@ -286,6 +308,16 @@ def evaluate_record_final(
         "reranked_recall_at_10": (reranked_rank is not None and reranked_rank <= 10),
         "final_top1_code": final_top1,
         "final_codes": final_codes,
+        "final_alternatives": final_alternatives,
+        "final_top3_codes": final_top3_codes,
+        # Смысловые метрики (CustDev: важна ветка, не точный номер)
+        "final_l1_match": prefix_match(final_top1, gold_codes, 1),
+        "final_l2_match": prefix_match(final_top1, gold_codes, 2),
+        "final_l3_match": prefix_match(final_top1, gold_codes, 3),
+        "final_l4_match": prefix_match(final_top1, gold_codes, 4),
+        "top3_exact": (gold_code in final_top3_codes) if final_top3_codes else False,
+        "top3_l3_match": any(prefix_match(c, gold_codes, 3) for c in final_top3_codes),
+        "top3_l2_match": any(prefix_match(c, gold_codes, 2) for c in final_top3_codes),
         "llm_error": llm_error,
         "elapsed": elapsed,
     }

@@ -43,6 +43,7 @@ from config import (
     OLLAMA_MODEL, OLLAMA_BASE_URL,
     ARIO_API_KEY, ARIO_BASE_URL, ARIO_MODEL,
     ENABLE_CROSS_ENCODER_RERANKER, CROSS_ENCODER_MODEL,
+    ENABLE_HEURISTIC_RERANKER,
     ENABLE_QUERY_EXPANSION,
     HIERARCHY_BRANCH_WEIGHT, HIERARCHY_PARENT_WEIGHT,
     ENABLE_HIERARCHY_PRUNING, HIERARCHY_PRUNE_THRESHOLD,
@@ -340,13 +341,24 @@ L3-тема — это тематическое направление (напр
    • 0096 vs 0097: новое строительство/реконструкция → 0096; ремонт/благоустройство → 0097
    • 0007 vs 0014: пенсии/льготы/соцработник → 0007; лекарства/поликлиники/медпомощь → 0014
    • 0004 vs 0013: опека/алименты/маткапитал → 0004; детсад/школа/поступление → 0013
+   • ЖКХ (0005.0005.0056) vs инфраструктура поселений (0003.0009.0097):
+     проблема внутри дома, с УК/ТСЖ, начислениями, внутридомовыми сетями → ЖКХ 0005.0005.0056;
+     сети и объекты поселения в целом (водоснабжение посёлка, уличные колонки, магистрали) → 0003.0009.0097
+   • Автодороги (0003.0009.0099) vs благоустройство (0003.0009.0097):
+     дороги общего пользования, улицы, трассы — их состояние, содержание, расчистка снега → 0099;
+     дворы, придомовые и подъездные территории, тротуары → 0097
 
 4. Запрещено: один код на разные вопросы; fallback "0001.0002.0027.0126" при наличии альтернатив.
 
-5. АЛЬТЕРНАТИВНЫЕ КОДЫ:
-   В поле "alternative_codes" верни 2-3 СЛЕДУЮЩИХ по релевантности кода из candidates (после selected_code).
-   Это коды, которые ТОЖЕ подходят к вопросу, но менее точно. Помогает оператору верифицировать выбор.
-   Если строго подходит только 1 код — верни пустой массив [].
+5. АЛЬТЕРНАТИВНЫЕ КОДЫ (обязательно 3 — страховка оператора, он выбирает из трёх).
+   Портфель альтернатив должен покрывать РАЗНЫЕ типы возможной ошибки selected_code:
+   - Альтернатива 1: ближайший по смыслу СОСЕД selected_code в той же L3-теме
+     (страхует случай: тема верна, но конкретный вопрос выбран не тот).
+   - Альтернатива 2: лучший кандидат из ДРУГОЙ правдоподобной L3-темы — твой второй выбор Этапа 1
+     (страхует случай: тема выбрана неверно).
+   - Альтернатива 3: если selected_code — уточняющий код 5-го уровня (5 сегментов) —
+     обязательно его родительский код 4-го уровня; иначе ещё один сильный кандидат из любой темы.
+   Пустой массив — только если candidates содержит единственный код.
 
 Верни JSON строго в формате:
 {{
@@ -1213,6 +1225,11 @@ class ClassifierAgent:
         if self.ce_reranker is not None:
             heuristic_top = self._rerank_candidates(query, merged, top_k=30)
             final = self.ce_reranker.rerank(query, heuristic_top, top_k=TOP_K_CANDIDATES)
+        elif not ENABLE_HEURISTIC_RERANKER:
+            # Чистый dense-ранкинг: merged используется только как фильтр
+            # (routing/whitelist могли сузить пул), порядок — по dense similarity
+            merged_codes = {c["code"] for c in merged}
+            final = [c for c in dense_pool if c["code"] in merged_codes][:TOP_K_CANDIDATES]
         else:
             final = self._rerank_candidates(query, merged, top_k=TOP_K_CANDIDATES)
 
@@ -1663,6 +1680,21 @@ class ClassifierAgent:
                         "name":      alt_entry["name"],
                         "full_path": alt_entry["full_path"],
                     })
+
+            # Детерминированная страховка: если выбран уточняющий L5-код, его
+            # L4-родитель обязан быть в альтернативах (LLM это правило выполняет
+            # нестабильно, а аннотаторы часто используют родительский L4).
+            code_parts = code.split(".") if code else []
+            if len(code_parts) >= 5:
+                parent4 = ".".join(code_parts[:4])
+                parent_entry = self.code_index.get(parent4)
+                if parent_entry and all(a["code"] != parent4 for a in alt_entries):
+                    alt_entries.insert(0, {
+                        "code":      parent4,
+                        "name":      parent_entry["name"],
+                        "full_path": parent_entry["full_path"],
+                    })
+                    alt_entries = alt_entries[:2]
 
             # Anti-cascade-error post-process: if selected_code + all alternatives share
             # the same L1 (first 4-digit segment), inject the best cross-L1 candidate

@@ -50,6 +50,11 @@ LEXICAL_POOL_SIZE: int = int(os.getenv("LEXICAL_POOL_SIZE", "30"))
 TOP_K_RESULT:     int = 3
 MIN_CONFIDENCE:  float = float(os.getenv("MIN_CONFIDENCE", "0.65"))
 
+# ── Heuristic reranker (merge dense+lexical + branch/parent бусты) ─────────────
+# По замерам на ii25_test реранкер выталкивает золотой код из top-10
+# (dense recall@10 41.1% → 10.7%). При false LLM получает чистый dense top-K.
+ENABLE_HEURISTIC_RERANKER: bool = os.getenv("ENABLE_HEURISTIC_RERANKER", "true").lower() == "true"
+
 # ── CrossEncoder reranker (опциональный, после heuristic rerank) ────────────────
 ENABLE_CROSS_ENCODER_RERANKER: bool = os.getenv("ENABLE_CROSS_ENCODER_RERANKER", "false").lower() == "true"
 CROSS_ENCODER_MODEL: str = os.getenv("CROSS_ENCODER_MODEL", "BAAI/bge-reranker-base")

@@ -299,3 +299,27 @@ def test_compute_per_stage_metrics_skips_no_gold():
     assert summary["evaluable"] == 1
     assert summary["correct"] == 1
     assert summary["top1_accuracy_pct"] == 100.0
+
+
+def test_compute_per_stage_metrics_aggregates_semantic_keys():
+    rows = [
+        {
+            "failure_attribution": "correct",
+            "final_l3_match": True,
+            "final_l2_match": True,
+            "top3_exact": True,
+            "top3_l3_match": True,
+        },
+        {
+            "failure_attribution": "reranker",
+            "final_l3_match": False,
+            "final_l2_match": True,
+            "top3_exact": False,
+            "top3_l3_match": True,
+        },
+    ]
+    summary = compute_per_stage_metrics(per_case_rows=rows)
+    assert summary["final_l3_match_pct"] == 50.0
+    assert summary["final_l2_match_pct"] == 100.0
+    assert summary["top3_exact_pct"] == 50.0
+    assert summary["top3_l3_match_pct"] == 100.0
