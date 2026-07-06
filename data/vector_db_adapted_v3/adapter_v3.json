@@ -1,0 +1,6 @@
+{
+  "version": "v3_blend",
+  "adapter_v1_ratio": 0.9,
+  "adapter_v2_ratio": 0.09999999999999998,
+  "description": "v1=43 ii25_train, v2=6502 PTO epoch1, blend 90/10"
+}
