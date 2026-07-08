@@ -5,6 +5,9 @@ __pycache__/
 .env
 data/appeals_log.jsonl
 data/request_log.jsonl
-models/
+models/*
+!models/adapter_v1.npz
+!models/adapter_v1.json
+!models/ltr_v1.json
 docs/
 tests/

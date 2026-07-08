@@ -1,0 +1,27 @@
+{
+  "timestamp": "2026-06-10T16:50:16.859997",
+  "dataset": "data\\ii25_test.jsonl",
+  "stage": "all",
+  "tag": "v0.3.prompt-v2-top50",
+  "summary": {
+    "total": 56,
+    "evaluable": 56,
+    "correct": 15,
+    "top1_accuracy_pct": 26.8,
+    "failure_breakdown": {
+      "retrieval_recall": 17,
+      "llm_final": 15,
+      "reranker": 9
+    },
+    "dense_recall_at_10_pct": 41.1,
+    "dense_recall_at_50_pct": 69.6,
+    "reranked_recall_at_10_pct": 41.1,
+    "final_l1_match_pct": 73.2,
+    "final_l2_match_pct": 71.4,
+    "final_l3_match_pct": 57.1,
+    "final_l4_match_pct": 30.4,
+    "top3_exact_pct": 48.2,
+    "top3_l3_match_pct": 76.8,
+    "top3_l2_match_pct": 82.1
+  }
+}

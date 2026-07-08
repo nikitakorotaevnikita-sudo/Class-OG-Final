@@ -1,0 +1,20 @@
+{
+  "timestamp": "2026-05-28T11:50:07.921131",
+  "dataset": "data\\ii25_test.jsonl",
+  "stage": "all",
+  "tag": "v0.4.tooling",
+  "summary": {
+    "total": 56,
+    "evaluable": 56,
+    "correct": 3,
+    "top1_accuracy_pct": 5.4,
+    "failure_breakdown": {
+      "retrieval_recall": 17,
+      "reranker": 30,
+      "llm_final": 6
+    },
+    "dense_recall_at_10_pct": 41.1,
+    "dense_recall_at_50_pct": 69.6,
+    "reranked_recall_at_10_pct": 12.5
+  }
+}

@@ -1,5 +1,7 @@
 # Секреты
 .env
+.env.backup*
+.env.*.backup
 
 # Виртуальное окружение Python
 venv/
@@ -7,9 +9,32 @@ venv/
 
 # Векторная база (большой файл, пересобирается из данных)
 data/vector_db/
+data/vector_db_adapted/
+# Отвергнутые эксперименты векторных баз (боевая — vector_db_adapted_v3 — коммитится)
+data/vector_db_adapted_v2/
+data/vector_db_bge_m3/
 
-# Дообученные модели (большие файлы)
-models/
+# PTO-эксперименты (adapter_v2 / SVC — не в проде)
+data/pto_*
+data/test_sample_pto.jsonl
+data/retrieval_v3_report.json
+data/retrieval_v3_fixed_report.json
+
+# Временные файлы экспериментов
+tmp_*
+temp_*.cmd
+
+# Кэшированные query embeddings (пересобираются скриптом encode_queries.py)
+data/ii25_*_query_embs.npy
+data/ii25_*_query_meta.json
+
+# Дообученные модели — большие файлы исключены, лёгкие артефакты коммитим
+models/*
+!models/.gitkeep
+!models/adapter_v1.npz
+!models/adapter_v1.json
+!models/ltr_v1.json
+!models/ltr_gbm_v1.joblib
 
 # Старая векторная база ChromaDB
 data/chroma_db/
@@ -37,3 +62,7 @@ desktop.ini
 
 # dev-only 3.13 env (not the project 3.11 venv)
 venv313/
+
+# Eval results (raw output, generated per-run)
+eval_results/*
+!eval_results/.gitkeep

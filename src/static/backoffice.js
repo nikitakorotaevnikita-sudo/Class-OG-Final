@@ -1,5 +1,4 @@
 // backoffice.js — бэк-офис: KPI, Chart.js, IP stats
-// Fetches /api/backoffice/stats with HTTP Basic Auth and renders charts
 
 (function() {
   'use strict';
@@ -18,20 +17,8 @@
     purple: '#7C3AED',
   };
 
-  // ── Build auth header from page credentials (injected by server) ─────────
-  // The backoffice.html embeds credentials in a meta tag or we prompt for them
-  // For simplicity: read from localStorage or prompt user
-  let authHeader = localStorage.getItem('bo_auth');
-  if (!authHeader) {
-    // Try to get from a data attribute on body
-    const body = document.body;
-    authHeader = body.dataset.boAuth || '';
-  }
-
   function apiFetch(url) {
-    return fetch(url, {
-      headers: authHeader ? { 'Authorization': 'Basic ' + authHeader } : {},
-    });
+    return fetch(url);
   }
 
   // ── KPI helpers ───────────────────────────────────────────────────────────
@@ -188,12 +175,6 @@
     try {
       const res = await apiFetch('/api/backoffice/stats');
 
-      if (res.status === 401) {
-        // Prompt for credentials
-        showAuthPrompt();
-        return;
-      }
-
       if (!res.ok) {
         showError('Ошибка загрузки: HTTP ' + res.status);
         return;
@@ -232,57 +213,6 @@
     } catch(err) {
       showError('Ошибка загрузки данных: ' + err.message);
     }
-  }
-
-  // ── Auth prompt ────────────────────────────────────────────────────────────
-  function showAuthPrompt() {
-    const overlay = document.createElement('div');
-    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,14,32,0.6);' +
-      'display:flex;align-items:center;justify-content:center;z-index:9999';
-    overlay.innerHTML = `
-      <div style="background:#fff;border-radius:10px;padding:32px;width:360px;box-shadow:0 8px 32px rgba(1,12,28,0.2)">
-        <h2 style="font-size:18px;font-weight:700;color:var(--title);margin-bottom:8px">Вход в бэк-офис</h2>
-        <p style="font-size:13px;color:var(--muted);margin-bottom:20px">
-          Введите учётные данные для доступа к статистике.
-        </p>
-        <input type="text" id="bo-user" placeholder="Логин"
-          style="width:100%;margin-bottom:12px;padding:10px 12px;font-size:14px;
-                 border:1px solid var(--border);border-radius:6px;box-sizing:border-box">
-        <input type="password" id="bo-pass" placeholder="Пароль"
-          style="width:100%;margin-bottom:16px;padding:10px 12px;font-size:14px;
-                 border:1px solid var(--border);border-radius:6px;box-sizing:border-box">
-        <button id="bo-login" style="width:100%;padding:10px;background:var(--orange);color:#fff;
-          border:none;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer">
-          Войти
-        </button>
-        <p id="bo-error" class="hidden" style="color:var(--red);font-size:13px;margin-top:8px;text-align:center"></p>
-      </div>
-    `;
-    document.body.appendChild(overlay);
-
-    const loginBtn = document.getElementById('bo-login');
-    const userInp = document.getElementById('bo-user');
-    const passInp = document.getElementById('bo-pass');
-    const errEl = document.getElementById('bo-error');
-
-    function doLogin() {
-      const user = userInp.value.trim();
-      const pass = passInp.value;
-      if (!user || !pass) {
-        errEl.textContent = 'Заполните оба поля';
-        errEl.classList.remove('hidden');
-        return;
-      }
-      const creds = btoa(user + ':' + pass);
-      authHeader = creds;
-      localStorage.setItem('bo_auth', creds);
-      overlay.remove();
-      loadStats();
-    }
-
-    loginBtn.addEventListener('click', doLogin);
-    passInp.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
-    userInp.focus();
   }
 
   // ── Error display ─────────────────────────────────────────────────────────

@@ -258,28 +258,72 @@
 
     finetuneLoading.classList.remove('hidden');
     finetuneResult.classList.add('hidden');
+    btnFinetune.disabled = true;
 
     fetch('/api/finetune', {
-      method: 'POST'
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        source: 'combined',
+        force: true
+      })
     })
     .then(function(response) {
       if (!response.ok) {
-        throw new Error('Fine-tune failed: ' + response.status);
+        throw new Error('Fine-tune start failed: ' + response.status);
       }
       return response.json();
     })
     .then(function(data) {
-      finetuneLoading.classList.add('hidden');
       finetuneResult.classList.remove('hidden');
-      finetuneResult.textContent = 'Дообучение завершено. Модель обновлена.';
-      showToast('Дообучение модели завершено');
+      finetuneResult.textContent = data.message || 'Дообучение запущено';
+      pollFinetuneStatus();
     })
     .catch(function(error) {
       finetuneLoading.classList.add('hidden');
       finetuneResult.classList.remove('hidden');
       finetuneResult.textContent = 'Ошибка: ' + error.message;
+      btnFinetune.disabled = false;
     });
   });
+
+  function pollFinetuneStatus() {
+    fetch('/api/finetune/status')
+      .then(function(response) {
+        if (!response.ok) {
+          throw new Error('Status failed: ' + response.status);
+        }
+        return response.json();
+      })
+      .then(function(data) {
+        finetuneResult.classList.remove('hidden');
+        finetuneResult.textContent = data.message || data.status || 'Дообучение выполняется';
+
+        if (data.status === 'completed') {
+          finetuneLoading.classList.add('hidden');
+          btnFinetune.disabled = false;
+          showToast('Дообучение модели завершено');
+          return;
+        }
+
+        if (data.status === 'failed') {
+          finetuneLoading.classList.add('hidden');
+          btnFinetune.disabled = false;
+          finetuneResult.textContent = 'Ошибка: ' + (data.message || 'дообучение не выполнено');
+          return;
+        }
+
+        setTimeout(pollFinetuneStatus, 3000);
+      })
+      .catch(function(error) {
+        finetuneLoading.classList.add('hidden');
+        btnFinetune.disabled = false;
+        finetuneResult.classList.remove('hidden');
+        finetuneResult.textContent = 'Ошибка получения статуса: ' + error.message;
+      });
+  }
 
   // Initial load
   loadHistoricalCount();

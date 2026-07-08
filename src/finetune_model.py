@@ -165,6 +165,11 @@ def main():
         default="verified",
         help="Data source: verified (operator-log), historical (expert-labeled), combined (3x weight for historical)",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Skip FINETUNE_THRESHOLD check. Useful for historical-only imports and demos.",
+    )
     args = parser.parse_args()
 
     print()
@@ -183,7 +188,7 @@ def main():
     print(f"    подтверждено: {stats['confirmed']}")
     print(f"    исправлено:   {stats['corrected']}")
 
-    if len(verified) < FINETUNE_THRESHOLD:
+    if not args.force and args.source == "verified" and len(verified) < FINETUNE_THRESHOLD:
         print(f"\n  Недостаточно данных.")
         print(f"  Нужно минимум {FINETUNE_THRESHOLD} записей, есть {len(verified)}.")
         print(f"  Продолжите верификацию обращений в operator_cli.py")

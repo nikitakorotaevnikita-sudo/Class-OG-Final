@@ -111,21 +111,17 @@ FINETUNE_THRESHOLD=50    # verified entries needed to trigger fine-tuning
 - Repository: https://github.com/nikitakorotaevnikita-sudo/OG
 - Branch: `master`
 
-## Session Start Instructions
+## Session Start Protocol
 
 At the **beginning of each session**, Claude Code MUST:
 
-1. **Read Obsidian notes** — check for any updates in:
-   - `C:/Users/Администратор/Desktop/Работа/Obsidian vault/Прототипы/ИИ Агенты/`
-   - Look for files modified today (`date: today`) and recent planning files
-   - Check `2026-*-статус-проекта*.md` for current state
-
-2. **Sync ticket statuses** — compare Obsidian tickets with actual project state:
-   - Read `Работа по проекту/TICKET-*.md` files
-   - Check which tickets are marked ⚪ "Not started" but have corresponding ✅ completed files in the project
-   - Update ticket statuses in Obsidian when discrepancies are found
-
-3. **Give a brief session summary** — before starting work, output:
+1. **Read Hub instructions** — `C:/Users/Korotaev_NO/Desktop/Obsidian vault/AI Agent Hub/instructions/core.md`
+2. **Read Hub session-start** — `C:/Users/Korotaev_NO/Desktop/Obsidian vault/AI Agent Hub/instructions/session-start.md`
+3. **Read project Obsidian notes** — check for updates in:
+   - `C:/Users/Korotaev_NO/Desktop/Obsidian vault/Прототипы/ИИ Агенты/agent_appeals/`
+   - Look for files modified today and recent planning files
+4. **Read relevant tickets** — check `Тикеты/TICKET-*.md` for current state
+5. **Give session summary** — before starting work, output:
    ```
    ## Session Summary
    - Last session: [date]
@@ -133,4 +129,12 @@ At the **beginning of each session**, Claude Code MUST:
    - What's next: [next step]
    - Open issues: [any blockers]
    ```
+
+## Hub Instructions
+
+This project follows the AI Agent Hub standards:
+- **Language:** Russian for user communication, English for technical docs
+- **Stack:** Python 3.11 / FastAPI, Vanilla JS/HTML/CSS, pytest, Docker
+- **Principle:** Agent proposes, human approves. юридически значимые действия — через human-in-the-loop.
+- **Docs:** General rules in Hub, local info only in project README
 

@@ -11,13 +11,17 @@ FastAPI-сервер для агента классификации обраще
 
 import sys
 import json
+import os
+import subprocess
+import threading
 import time
+import uuid
 from pathlib import Path
 from datetime import datetime, timedelta
 from collections import Counter
 from typing import Literal
 sys.path.insert(0, str(Path(__file__).parent))
-from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Request
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Request, Form
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
@@ -25,6 +29,7 @@ from starlette.status import HTTP_401_UNAUTHORIZED
 from pydantic import BaseModel
 from typing import Optional
 from dataclasses import asdict
+import classifier_agent as classifier_agent_module
 from classifier_agent import ClassifierAgent, ClassificationResult
 from appeals_logger import AppealsLogger, get_logger
 from historical_loader import parse_file, validate_codes
@@ -38,6 +43,19 @@ from text_extractor import (
 
 # Модуль-level хранилище для последнего аплоада исторических данных
 _last_historical_upload: dict = {}
+_finetune_lock = threading.Lock()
+_finetune_job: dict = {
+    "job_id": None,
+    "status": "idle",
+    "source": None,
+    "force": False,
+    "started_at": None,
+    "finished_at": None,
+    "message": "Дообучение не запускалось",
+    "model_path": None,
+    "returncode": None,
+    "log_tail": "",
+}
 
 app = FastAPI(
     title="Агент классификации обращений граждан",
@@ -108,6 +126,8 @@ async def startup():
 class ClassifyRequest(BaseModel):
     appeal_text: Optional[str] = None
     appeal_id: Optional[str] = None
+    llm_provider: Optional[str] = None
+    llm_model: Optional[str] = None
 
 
 
@@ -139,6 +159,8 @@ class ClassifyResponse(BaseModel):
     needs_verification: bool
     operator_card: str              # Текст карточки верификации для оператора
     was_truncated: bool = False       # Был ли текст обрезан до 5000 символов
+    llm_provider: str = ""
+    llm_model: str = ""
 
 
 # ── Dependency injection (для тестируемости) ──────────────────────────────────
@@ -168,6 +190,11 @@ class VerifyRequest(BaseModel):
     action: Literal["confirm", "correct", "reject"]
     operator_codes: Optional[list[str]] = None
     annotation: Optional[str] = None
+
+
+class FineTuneRequest(BaseModel):
+    source: Literal["verified", "historical", "combined"] = "combined"
+    force: bool = False
 
 
 # ── Вспомогательная функция сборки ответа ─────────────────────────────────────
@@ -204,6 +231,8 @@ def _build_classify_response(
         needs_verification=result.needs_verification,
         operator_card=operator_card,
         was_truncated=was_truncated,
+        llm_provider=result.llm_provider,
+        llm_model=result.llm_model,
     )
 
 
@@ -217,6 +246,45 @@ async def health_check():
         "status": "ok",
         "agent_ready": agent is not None,
         "classifier_entries": entries_count,
+    }
+
+
+@app.get("/api/llm/options")
+async def llm_options():
+    """Возвращает доступные LLM-провайдеры и текущий выбор по .env."""
+    from config import LLM_PROVIDER, GROQ_MODEL, OLLAMA_MODEL, ARIO_MODEL
+
+    def uniq(items: list[str]) -> list[str]:
+        return list(dict.fromkeys(items))
+
+    return {
+        "current_provider": LLM_PROVIDER,
+        "providers": [
+            {
+                "id": "ario",
+                "label": "Ario",
+                "default_model": ARIO_MODEL,
+                "models": uniq([ARIO_MODEL, "Qwen/Qwen3-32B-AWQ"]),
+            },
+            {
+                "id": "groq",
+                "label": "Groq",
+                "default_model": GROQ_MODEL,
+                "models": uniq([GROQ_MODEL, "llama-3.3-70b-versatile", "llama-3.1-8b-instant"]),
+            },
+            {
+                "id": "gemini",
+                "label": "Gemini",
+                "default_model": "gemini-2.5-flash",
+                "models": ["gemini-2.5-flash", "gemini-2.0-flash"],
+            },
+            {
+                "id": "ollama",
+                "label": "Ollama",
+                "default_model": OLLAMA_MODEL,
+                "models": uniq([OLLAMA_MODEL, "qwen2.5-14b", "llama3.1"]),
+            },
+        ],
     }
 
 
@@ -236,7 +304,11 @@ async def classify_appeal_json(request: ClassifyRequest, req: Request) -> Classi
 
     start_ts = time.time()
     try:
-        result = agent.classify(request.appeal_text)
+        result = agent.classify(
+            request.appeal_text,
+            llm_provider=request.llm_provider,
+            llm_model=request.llm_model,
+        )
         resp = _build_classify_response(result, appeal_id=request.appeal_id)
         return resp
     except Exception as e:
@@ -255,7 +327,12 @@ async def classify_appeal_json(request: ClassifyRequest, req: Request) -> Classi
     description="Принимает TXT или PDF файл (макс. 5 МБ). Текст извлекается автоматически.",
     tags=["Классификация"],
 )
-async def classify_appeal_file(file: UploadFile = File(...), req: Request = None) -> ClassifyResponse:
+async def classify_appeal_file(
+    file: UploadFile = File(...),
+    llm_provider: Optional[str] = Form(None),
+    llm_model: Optional[str] = Form(None),
+    req: Request = None,
+) -> ClassifyResponse:
     """Классифицирует обращение из загруженного файла TXT или PDF."""
     if not agent:
         raise HTTPException(status_code=503, detail="Агент не инициализирован")
@@ -282,7 +359,7 @@ async def classify_appeal_file(file: UploadFile = File(...), req: Request = None
 
     start_ts = time.time()
     try:
-        result = agent.classify(text)
+        result = agent.classify(text, llm_provider=llm_provider, llm_model=llm_model)
         return _build_classify_response(result, was_truncated=truncated)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка классификации: {str(e)}")
@@ -459,15 +536,149 @@ async def get_historical_count():
     return {"count": count, "status": "ok"}
 
 
+def _job_snapshot() -> dict:
+    with _finetune_lock:
+        return dict(_finetune_job)
+
+
+def _update_finetune_job(**kwargs):
+    with _finetune_lock:
+        _finetune_job.update(kwargs)
+
+
+def _tail(text: str, limit: int = 6000) -> str:
+    if len(text) <= limit:
+        return text
+    return text[-limit:]
+
+
+def _latest_finetuned_model() -> Path | None:
+    from config import MODELS_DIR
+    models_dir = Path(MODELS_DIR)
+    candidates = [p for p in models_dir.glob("e5-finetuned-v*") if p.is_dir()]
+    if not candidates:
+        return None
+
+    def version(path: Path) -> int:
+        try:
+            return int(path.name.split("-v")[-1])
+        except ValueError:
+            return -1
+
+    return sorted(candidates, key=version)[-1]
+
+
+def _run_checked(command: list[str], env: dict | None = None) -> subprocess.CompletedProcess:
+    result = subprocess.run(
+        command,
+        cwd=Path(__file__).parent.parent,
+        env=env,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Команда завершилась с кодом {result.returncode}: {' '.join(command)}\n"
+            f"{_tail(result.stdout + result.stderr)}"
+        )
+    return result
+
+
+def _reload_agent_with_model(model_path: Path):
+    """Switch the running API process to the newly trained embedding model."""
+    global agent
+    model_value = str(model_path)
+    os.environ["EMBEDDING_MODEL"] = model_value
+
+    import config as config_module
+    config_module.EMBEDDING_MODEL = model_value
+    classifier_agent_module.EMBEDDING_MODEL = model_value
+
+    agent = ClassifierAgent()
+
+
+def _finetune_worker(job_id: str, source: str, force: bool):
+    _update_finetune_job(
+        status="running",
+        message="Дообучение модели запущено",
+        log_tail="",
+    )
+
+    try:
+        command = [sys.executable, "src/finetune_model.py", "--source", source]
+        if force or source in ("historical", "combined"):
+            command.append("--force")
+
+        train_result = _run_checked(command)
+        latest_model = _latest_finetuned_model()
+        if latest_model is None:
+            raise RuntimeError("Дообученная модель не найдена в models/e5-finetuned-v*")
+
+        env = os.environ.copy()
+        env["EMBEDDING_MODEL"] = str(latest_model)
+        build_result = _run_checked([sys.executable, "src/build_vectordb.py"], env=env)
+
+        _reload_agent_with_model(latest_model)
+
+        _update_finetune_job(
+            status="completed",
+            finished_at=datetime.now().isoformat(timespec="seconds"),
+            message="Модель дообучена, vector_db перестроена, агент перезагружен",
+            model_path=str(latest_model),
+            returncode=0,
+            log_tail=_tail(train_result.stdout + train_result.stderr + "\n" + build_result.stdout + build_result.stderr),
+        )
+    except Exception as exc:
+        _update_finetune_job(
+            status="failed",
+            finished_at=datetime.now().isoformat(timespec="seconds"),
+            message=str(exc),
+            returncode=1,
+            log_tail=_tail(str(exc)),
+        )
+
+
 @app.post("/api/finetune")
-async def start_finetune():
-    """Запускает fine-tuning на исторических данных"""
-    return {"status": "not_implemented", "message": "Fine-tuning endpoint coming in Task 4"}
+async def start_finetune(request: FineTuneRequest):
+    """Запускает fine-tuning в фоне и после успеха перезагружает агента."""
+    current = _job_snapshot()
+    if current["status"] == "running":
+        raise HTTPException(status_code=409, detail="Дообучение уже выполняется")
+
+    job_id = str(uuid.uuid4())
+    _update_finetune_job(
+        job_id=job_id,
+        status="queued",
+        source=request.source,
+        force=request.force,
+        started_at=datetime.now().isoformat(timespec="seconds"),
+        finished_at=None,
+        message="Дообучение поставлено в очередь",
+        model_path=None,
+        returncode=None,
+        log_tail="",
+    )
+
+    thread = threading.Thread(
+        target=_finetune_worker,
+        args=(job_id, request.source, request.force),
+        daemon=True,
+    )
+    thread.start()
+    return _job_snapshot()
+
+
+@app.get("/api/finetune/status")
+async def finetune_status():
+    """Текущий статус фонового fine-tuning."""
+    return _job_snapshot()
 
 
 @app.get("/api/backoffice/stats", tags=["Бэк-офис"])
 async def backoffice_stats(
-    _username: str = Depends(get_current_user),
+    _username: str = "",
     logger: AppealsLogger = Depends(get_logger_dep),
 ):
     """

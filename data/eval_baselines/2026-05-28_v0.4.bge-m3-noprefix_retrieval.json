@@ -1,0 +1,18 @@
+{
+  "timestamp": "2026-05-28T09:17:39.627647",
+  "dataset": "data\\ii25_test.jsonl",
+  "stage": "retrieval",
+  "tag": "v0.4.bge-m3-noprefix",
+  "summary": {
+    "total": 56,
+    "evaluable": 56,
+    "correct": 0,
+    "top1_accuracy_pct": 0.0,
+    "failure_breakdown": {
+      "retrieval_recall": 26,
+      "reranker": 30
+    },
+    "dense_recall_at_10_pct": 33.9,
+    "dense_recall_at_50_pct": 53.6
+  }
+}
