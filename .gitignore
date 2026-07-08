@@ -34,3 +34,6 @@ build/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# dev-only 3.13 env (not the project 3.11 venv)
+venv313/
