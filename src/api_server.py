@@ -33,6 +33,7 @@ import classifier_agent as classifier_agent_module
 from classifier_agent import ClassifierAgent, ClassificationResult
 from appeals_logger import AppealsLogger, get_logger
 from historical_loader import parse_file, validate_codes
+from integration_api import router as integration_router
 from text_extractor import (
     extract_text,
     TextExtractionError,
@@ -62,6 +63,7 @@ app = FastAPI(
     description="Автоматическая классификация по 59-ФЗ и классификатору обращений граждан РФ",
     version="1.0.0",
 )
+app.include_router(integration_router)
 
 # Статика и главная страница
 _STATIC_DIR = Path(__file__).parent / "static"
@@ -118,6 +120,7 @@ agent: Optional[ClassifierAgent] = None
 async def startup():
     global agent
     agent = ClassifierAgent()
+    app.state.agent = agent
     print("Агент классификации запущен и готов к работе.")
 
 
