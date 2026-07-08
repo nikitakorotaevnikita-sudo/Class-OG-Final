@@ -64,6 +64,7 @@ from section_router import (
     build_l3_routing_prompt, parse_l3_routing_response,
 )
 from appeals_logger import get_logger
+from fio_extractor import normalize_fio
 
 
 _WORD_RE = re.compile(r"[a-zа-яё0-9]{3,}", re.IGNORECASE)
@@ -243,6 +244,15 @@ class ClassificationResult:
     log_id: Optional[str] = field(default=None)  # ID записи в appeals_log.jsonl
     llm_provider: str = field(default="")
     llm_model: str = field(default="")
+    applicant_fio: Optional[str] = field(default=None)  # «Фамилия И.О.» или None
+    summary: str = field(default="")                    # краткая суть, ≤250 символов
+
+
+def extract_extra_fields(llm_result: dict) -> tuple[Optional[str], str]:
+    """Из ответа LLM достаёт (applicant_fio «Фамилия И.О.», summary ≤250)."""
+    fio = normalize_fio(llm_result.get("applicant_fio"))
+    summary = (llm_result.get("summary") or "").strip()[:250]
+    return fio, summary
 
 
 # ── Промпты ────────────────────────────────────────────────────────────────────
@@ -255,6 +265,7 @@ SYSTEM_PROMPT = """Ты — эксперт по классификации об�
 3. Выявить все вопросы, содержащиеся в обращении
 4. Для каждого вопроса подобрать наиболее подходящую категорию из предложенных кандидатов классификатора
 5. Определить предмет ведения для каждого вопроса
+6. Извлечь ФИО заявителя (если указано в тексте) и составить краткую суть обращения (до 250 символов)
 
 Определения по 59-ФЗ:
 - Жалоба — просьба гражданина о восстановлении или защите его нарушенных прав
@@ -365,6 +376,8 @@ L3-тема — это тематическое направление (напр
   "vid_obrascheniya": "Жалоба|Заявление|предложение",
   "tip_obrascheniya": "Индивидуальное|Коллективное|Анонимное",
   "is_ustnoe": false,
+  "applicant_fio": "Фамилия Имя Отчество заявителя из текста, либо null",
+  "summary": "Краткая суть обращения, не более 250 символов",
   "questions": [
     {{
       "ordinal": 1,
@@ -1770,6 +1783,8 @@ class ClassifierAgent:
         overall_confidence = sum(confidences) / len(confidences) if confidences else 0.0
         needs_verification = overall_confidence < MIN_CONFIDENCE
 
+        applicant_fio, summary = extract_extra_fields(llm_result)
+
         result = ClassificationResult(
             vid_obrascheniya=llm_result.get("vid_obrascheniya", ""),
             tip_obrascheniya=llm_result.get("tip_obrascheniya", ""),
@@ -1780,6 +1795,8 @@ class ClassifierAgent:
             raw_appeal=appeal_text,
             llm_provider=provider,
             llm_model=model,
+            applicant_fio=applicant_fio,
+            summary=summary,
         )
 
         # Логируем для накопления данных дообучения
