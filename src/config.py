@@ -72,3 +72,8 @@ MODELS_DIR: str = os.getenv("MODELS_DIR", str(Path(__file__).parent.parent / "mo
 # ── Бэк-офис (Basic Auth) ───────────────────────────────────────────────────────
 BACKOFFICE_USER:     str = os.getenv("BACKOFFICE_USER", "admin")
 BACKOFFICE_PASSWORD: str = os.getenv("BACKOFFICE_PASSWORD", "password")
+
+# ── Интеграция с Directum RX (OData) ────────────────────────────────────────────
+RX_ODATA_URL: str = os.getenv("RX_ODATA_URL", "http://172.16.96.98/integration/odata")
+RX_USER:      str = os.getenv("RX_USER", "Administrator")
+RX_PASSWORD:  str = os.getenv("RX_PASSWORD", "11111")
