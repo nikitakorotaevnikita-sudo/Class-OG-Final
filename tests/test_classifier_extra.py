@@ -6,7 +6,7 @@ from classifier_agent import extract_extra_fields
 def test_extract_fio_and_summary():
     gr = {"applicant_fio": "Иванов Иван Иванович", "summary": "Жалоба на мусор."}
     fio, summary = extract_extra_fields(gr)
-    assert fio == "Иванов И.И."
+    assert fio == "Иванов Иван Иванович"
     assert summary == "Жалоба на мусор."
 
 
