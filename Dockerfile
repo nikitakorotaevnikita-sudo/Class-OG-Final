@@ -12,7 +12,7 @@ COPY data/classifier_flat.json ./data/
 COPY data/classifier_hierarchy.json ./data/
 COPY data/test_appeals.json ./data/
 COPY data/vector_db/ ./data/vector_db/
-COPY data/vector_db_adapted/ ./data/vector_db_adapted/
+COPY data/vector_db_adapted_v3/ ./data/vector_db_adapted_v3/
 COPY data/allowed_codes_top69.json ./data/allowed_codes_top69.json
 COPY models/adapter_v1.npz ./models/adapter_v1.npz
 COPY models/adapter_v1.json ./models/adapter_v1.json
