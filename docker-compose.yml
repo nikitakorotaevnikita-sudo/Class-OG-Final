@@ -3,7 +3,8 @@ services:
   classifier:
     build: .
     ports:
-      - "8005:8005"
+      # host 8010 (адрес для разработчика/RX) → внутренний 8005 приложения
+      - "8010:8005"
     volumes:
       # persistent storage for logs and fine-tuned models
       - ./data/appeals_log.jsonl:/app/data/appeals_log.jsonl
