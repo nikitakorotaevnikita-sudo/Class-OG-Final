@@ -118,6 +118,16 @@ LTR_WEIGHT: float = float(os.getenv("LTR_WEIGHT", "0.30"))
 ENABLE_EMBEDDING_ADAPTER: bool = os.getenv("ENABLE_EMBEDDING_ADAPTER", "false").lower() == "true"
 ADAPTER_PATH: str = os.getenv("ADAPTER_PATH", str(Path(__file__).parent.parent / "models" / "adapter_v1.npz"))
 
+# ── Full-classifier fallback ───────────────────────────────────────────────────
+# Если ретривер промахнулся (в пуле нет близких по смыслу кодов — max cosine
+# similarity топ-кандидата ниже порога), делаем повторный LLM-проход, показывая
+# модели ВЕСЬ классификатор (листья L4+L5) вместо узкого пула кандидатов.
+# Цена: +1 «тяжёлый» LLM-вызов (~60k prompt-токенов) ТОЛЬКО при промахе.
+ENABLE_FULL_CLASSIFIER_FALLBACK: bool = os.getenv("ENABLE_FULL_CLASSIFIER_FALLBACK", "false").lower() == "true"
+# Порог max cosine similarity топ-кандидата, ниже которого считаем промах ретривера.
+# ЗНАЧЕНИЕ МОДЕЛЬ-СПЕЦИФИЧНО: e5 даёт ~0.8+, MiniLM ~0.3-0.4. Тюнить под модель.
+FULL_FALLBACK_SIM_THRESHOLD: float = float(os.getenv("FULL_FALLBACK_SIM_THRESHOLD", "0.40"))
+
 # ── Пути к файлам классификатора ───────────────────────────────────────────────
 CLASSIFIER_FLAT_PATH: str = os.getenv(
     "CLASSIFIER_FLAT_PATH", str(_data_dir / "classifier_flat.json")

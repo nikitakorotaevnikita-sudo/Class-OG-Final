@@ -164,6 +164,7 @@ class ClassifyResponse(BaseModel):
     was_truncated: bool = False       # Был ли текст обрезан до 5000 символов
     llm_provider: str = ""
     llm_model: str = ""
+    full_fallback_used: bool = False  # Сработал ли full-classifier fallback (ретривер промахнулся)
 
 
 # ── Dependency injection (для тестируемости) ──────────────────────────────────
@@ -236,6 +237,7 @@ def _build_classify_response(
         was_truncated=was_truncated,
         llm_provider=result.llm_provider,
         llm_model=result.llm_model,
+        full_fallback_used=result.full_fallback_used,
     )
 
 

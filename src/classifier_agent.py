@@ -50,6 +50,7 @@ from config import (
     ENABLE_SECTION_ROUTING, SECTION_ROUTING_MAX_TOPICS,
     ENABLE_LTR_RERANKER, LTR_MODEL_PATH, LTR_WEIGHT,
     ENABLE_EMBEDDING_ADAPTER, ADAPTER_PATH,
+    ENABLE_FULL_CLASSIFIER_FALLBACK, FULL_FALLBACK_SIM_THRESHOLD,
     ENABLE_L3_ROUTING, L3_ROUTING_MAX_THEMES,
     ENABLE_MULTI_QUERY_EXPAND, MQE_N_VARIANTS,
     ENABLE_ALLOWED_CODES, ALLOWED_CODES_PATH,
@@ -246,6 +247,7 @@ class ClassificationResult:
     llm_model: str = field(default="")
     applicant_fio: Optional[str] = field(default=None)  # «Фамилия И.О.» или None
     summary: str = field(default="")                    # краткая суть, ≤250 символов
+    full_fallback_used: bool = field(default=False)     # сработал ли full-classifier fallback
 
 
 def extract_extra_fields(llm_result: dict) -> tuple[Optional[str], str]:
@@ -361,6 +363,12 @@ L3-тема — это тематическое направление (напр
 
 4. Запрещено: один код на разные вопросы; fallback "0001.0002.0027.0126" при наличии альтернатив.
 
+4b. ПРИЗНАК НЕДОСТАТОЧНОСТИ КАНДИДАТОВ: если для какого-либо вопроса среди
+   предложенных кандидатов НЕТ нужной тематической ветки (например, обращение о
+   здравоохранении, а в кандидатах только соцобеспечение/ЖКХ) — установи
+   верхнеуровневое поле "candidates_insufficient": true. Это значит, что векторный
+   поиск промахнулся и нужен повторный проход по полному классификатору.
+
 5. АЛЬТЕРНАТИВНЫЕ КОДЫ (обязательно 3 — страховка оператора, он выбирает из трёх).
    Портфель альтернатив должен покрывать РАЗНЫЕ типы возможной ошибки selected_code:
    - Альтернатива 1: ближайший по смыслу СОСЕД selected_code в той же L3-теме
@@ -376,6 +384,7 @@ L3-тема — это тематическое направление (напр
   "vid_obrascheniya": "Жалоба|Заявление|предложение",
   "tip_obrascheniya": "Индивидуальное|Коллективное|Анонимное",
   "is_ustnoe": false,
+  "candidates_insufficient": false,
   "applicant_fio": "Фамилия Имя Отчество заявителя из текста, либо null",
   "summary": "Краткая суть обращения, не более 250 символов",
   "questions": [
@@ -384,6 +393,49 @@ L3-тема — это тематическое направление (напр
       "question_text": "...",
       "l3_options": ["XXXX.XXXX.XXXX ...", ...],
       "selected_l3_code": "XXXX.XXXX.XXXX",
+      "selected_code": "XXXX.XXXX.XXXX.XXXX",
+      "alternative_codes": ["XXXX.XXXX.XXXX.XXXX", "XXXX.XXXX.XXXX.XXXX"],
+      "predmet_vedeniya": "...",
+      "confidence": 0.87,
+      "reasoning": "..."
+    }}
+  ]
+}}"""
+
+
+# ── Full-classifier fallback: весь классификатор в контексте ────────────────────
+# Используется, когда ретривер промахнулся (нет близких кандидатов). Вместо узкого
+# пула показываем модели ПОЛНЫЙ список листьев классификатора; она сегментирует
+# обращение и выбирает selected_code напрямую из полного перечня.
+FULL_CLASSIFIER_FALLBACK_TEMPLATE = """Классифицируй обращение гражданина.
+
+ВНИМАНИЕ: векторный поиск не нашёл близких кандидатов, поэтому ниже — ПОЛНЫЙ
+перечень кодов классификатора (листья). Выбирай selected_code ТОЛЬКО из него.
+
+ТЕКСТ ОБРАЩЕНИЯ:
+{appeal_text}
+
+ПОЛНЫЙ КЛАССИФИКАТОР (код — название — путь):
+{full_classifier}
+
+ПРАВИЛА:
+1. Раздели обращение на отдельные вопросы (если их несколько).
+2. Для каждого вопроса выбери НАИБОЛЕЕ точный код из полного перечня выше.
+   selected_code ОБЯЗАН быть кодом из перечня (скопируй точь-в-точь).
+3. alternative_codes — до 3 запасных кодов из перечня (страховка оператора).
+4. Один код не должен повторяться для разных вопросов.
+
+Верни JSON строго в формате:
+{{
+  "vid_obrascheniya": "Жалоба|Заявление|предложение",
+  "tip_obrascheniya": "Индивидуальное|Коллективное|Анонимное",
+  "is_ustnoe": false,
+  "applicant_fio": "Фамилия Имя Отчество заявителя из текста, либо null",
+  "summary": "Краткая суть обращения, не более 250 символов",
+  "questions": [
+    {{
+      "ordinal": 1,
+      "question_text": "...",
       "selected_code": "XXXX.XXXX.XXXX.XXXX",
       "alternative_codes": ["XXXX.XXXX.XXXX.XXXX", "XXXX.XXXX.XXXX.XXXX"],
       "predmet_vedeniya": "...",
@@ -1559,6 +1611,96 @@ class ClassifierAgent:
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
 
+    def _full_leaf_listing(self) -> str:
+        """Полный перечень листьев классификатора (L4+L5) как текст 'код — название'.
+        Кэшируется на инстансе (строится один раз). Путь (full_path) НЕ включаем:
+        он удваивает объём (~123k токенов → перелёт за 131k контекст модели);
+        код+название ≈ 61k токенов — с запасом под вывод."""
+        cached = getattr(self, "_full_leaf_cache", None)
+        if cached is not None:
+            return cached
+        lines = [
+            f"{m['code']} — {m['name']}"
+            for m in self.metadata
+            if m.get("level") in (4, 5)
+        ]
+        self._full_leaf_cache = "\n".join(lines)
+        return self._full_leaf_cache
+
+    @staticmethod
+    def _max_candidate_similarity(questions_with_candidates: list[dict]) -> float:
+        """Максимальная DENSE cosine-similarity среди кандидатов всех вопросов.
+        Учитываются только dense-кандидаты (source == 'dense'): лексические имеют
+        синтетическую similarity ~0.76+ и исказили бы сигнал промаха.
+        Низкое значение ⇒ векторный поиск не нашёл ничего близкого (промах)."""
+        best = 0.0
+        for q in questions_with_candidates:
+            for c in q.get("candidates", []):
+                if c.get("source", "dense") != "dense":
+                    continue
+                best = max(best, float(c.get("similarity", 0.0)))
+        return best
+
+    def _classify_with_full_classifier(
+        self,
+        appeal_text: str,
+        llm_provider: str | None = None,
+        llm_model: str | None = None,
+    ) -> dict:
+        """Фоллбэк-классификация: показываем LLM весь классификатор (листья) и
+        просим выбрать коды напрямую. Возвращает dict в том же формате, что
+        _classify_with_llm (questions[] + vid/tip/is_ustnoe + fio/summary)."""
+        provider, model = self._resolve_llm(llm_provider, llm_model)
+        user_message = FULL_CLASSIFIER_FALLBACK_TEMPLATE.format(
+            appeal_text=appeal_text[:4000],
+            full_classifier=self._full_leaf_listing(),
+        )
+        if provider == "ario":
+            raw = self._ario_call(
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_message},
+                ],
+                model=model,
+                max_tokens=8000,
+                temperature=0.1,
+                timeout=180,
+                schema=None,
+            )
+        elif provider == "gemini":
+            response = self._get_gemini_client().models.generate_content(
+                model=model,
+                contents=user_message,
+                config=GenerateContentConfig(system_instruction=SYSTEM_PROMPT, temperature=0.1),
+            )
+            raw = response.text.strip()
+        elif provider == "ollama":
+            response = self._get_ollama_client().post(
+                "/chat/completions",
+                json={
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": user_message},
+                    ],
+                    "temperature": 0.1,
+                },
+            )
+            response.raise_for_status()
+            raw = response.json()["choices"][0]["message"]["content"].strip()
+        else:
+            response = self._get_groq_client().chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_message},
+                ],
+                temperature=0.1,
+                response_format={"type": "json_object"},
+            )
+            raw = response.choices[0].message.content.strip()
+        return json.loads(raw)
+
     def classify(
         self,
         appeal_text: str,
@@ -1646,6 +1788,34 @@ class ClassifierAgent:
 
         # Шаг 3: Классификация через LLM (один вызов, кандидаты разнесены по вопросам)
         llm_result = self._classify_with_llm(appeal_text, questions_with_candidates, provider, model)
+
+        # Шаг 3b: Full-classifier fallback — если ретривер промахнулся (в пуле нет
+        # близких по смыслу кодов), переклассифицируем, показав LLM весь классификатор.
+        full_fallback_used = False
+        if ENABLE_FULL_CLASSIFIER_FALLBACK:
+            max_sim = self._max_candidate_similarity(questions_with_candidates)
+            llm_flagged = bool(llm_result.get("candidates_insufficient"))
+            low_sim = max_sim < FULL_FALLBACK_SIM_THRESHOLD
+            if llm_flagged or low_sim:
+                trigger = "LLM: нет подходящей ветки" if llm_flagged else f"max sim {max_sim:.3f} < {FULL_FALLBACK_SIM_THRESHOLD}"
+                print(
+                    f"  [Fallback] промах ретривера ({trigger}) "
+                    f"→ повторная классификация по ПОЛНОМУ классификатору"
+                )
+                try:
+                    fb = self._classify_with_full_classifier(appeal_text, provider, model)
+                    if fb and fb.get("questions"):
+                        llm_result = fb
+                        full_fallback_used = True
+                        # При фоллбэке допустимы ЛЮБЫЕ коды классификатора — снимаем
+                        # per-question ограничение, чтобы strict-валидация не подменяла.
+                        all_codes = set(self.code_index.keys())
+                        valid_code_sets = {
+                            int(q.get("ordinal") or i + 1): all_codes
+                            for i, q in enumerate(fb["questions"])
+                        }
+                except Exception as e:
+                    print(f"  [Fallback] ошибка полного прохода: {type(e).__name__}: {e}")
 
         # Шаг 4: Обогащение результатов + строгая валидация выбранных кодов
         classified_questions = []
@@ -1797,6 +1967,7 @@ class ClassifierAgent:
             llm_model=model,
             applicant_fio=applicant_fio,
             summary=summary,
+            full_fallback_used=full_fallback_used,
         )
 
         # Логируем для накопления данных дообучения
