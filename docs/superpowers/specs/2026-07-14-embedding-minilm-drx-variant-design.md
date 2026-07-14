@@ -58,8 +58,10 @@ ENABLE_EMBEDDING_ADAPTER=false
 - `embeddings.npy` — shape (2108, **384**), float32
 - `metadata.json` — те же 2108 записей классификатора (структура идентична проду)
 
-Без адаптера, без файла `adapter_*.json`. Директория — в `.gitignore` (как остальные
-`data/vector_db*`), в образ попадает через bind-mount (см. 3.3), не через `COPY`.
+Без адаптера, без файла `adapter_*.json`. `.gitignore` перечисляет отвергнутые БД
+поимённо (общего глоба `vector_db*` нет; боевая `vector_db_adapted_v3` коммитится) —
+поэтому `data/vector_db_minilm/` добавляется в `.gitignore` **явной строкой**. В образ
+директория попадает через bind-mount (см. 3.3), не через `COPY`.
 
 ### 3.3 Docker — второй сервис в `docker-compose.yml`
 Новый сервис `classifier-minilm` рядом с существующим `classifier`:
@@ -143,5 +145,5 @@ ClassificationResult). Отличается **только** источник в
 - Пустые лог-файлы `data/appeals_log_minilm.jsonl`, `data/request_log_minilm.jsonl`
   создаются перед первым `up` (иначе Windows bind-mount создаст директории); gitignored.
 - Правка `docker-compose.yml` (+сервис `classifier-minilm`), `.gitignore`
-  (+`.env.minilm`, +`data/*_minilm.jsonl`; `data/vector_db_minilm` уже под общим правилом `vector_db*`).
+  (+`.env.minilm`, +`data/vector_db_minilm/`, +`data/*_minilm.jsonl` — все тремя явными строками).
 - Оба контейнера подняты, смоук на 8011 зелёный.
