@@ -19,10 +19,22 @@
 При ошибке LLM ячейка помечается «[⚠ НЕ ОБЕЗЛИЧЕНО — проверить вручную]»
 (исходный текст с ПДн НЕ выводится, чтобы не допустить утечку).
 """
-import sys, time
+import sys, time, re
 import httpx
 import openpyxl
 from openpyxl.styles import Alignment, Font, PatternFill
+
+# Детерминированная подстраховка для структурированных ПДн (LLM иногда пропускает).
+_EMAIL = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
+_PHONE = re.compile(r"(?<!\d)(?:\+7|8)?[\s(\-]*9\d{2}[\s)\-]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}(?!\d)")
+_SNILS = re.compile(r"\b\d{3}-\d{3}-\d{3}\s?\d{2}\b")
+
+
+def _regex_scrub(s: str) -> str:
+    s = _EMAIL.sub(lambda m: m.group(0) if "example@example.com" in m.group(0) else "example@example.com", s)
+    s = _PHONE.sub("0000000000", s)
+    s = _SNILS.sub("000-000-000 00", s)
+    return s
 
 sys.path.insert(0, "src")
 sys.stdout.reconfigure(encoding="utf-8")
@@ -95,7 +107,7 @@ for row in range(2, ws.max_row + 1):
             fail += 1
             cell.value = "[⚠ НЕ ОБЕЗЛИЧЕНО — ошибка LLM, проверить вручную]"
         else:
-            cell.value = res
+            cell.value = _regex_scrub(res)  # LLM + детерминированная подстраховка
         cell.alignment = Alignment(vertical="top", wrap_text=True)
     if row % 5 == 0:
         print(f"  строк обработано: {row-1}/{ws.max_row-1}", flush=True)
