@@ -51,6 +51,7 @@ from config import (
     ENABLE_LTR_RERANKER, LTR_MODEL_PATH, LTR_WEIGHT,
     ENABLE_EMBEDDING_ADAPTER, ADAPTER_PATH,
     ENABLE_FULL_CLASSIFIER_FALLBACK, FULL_FALLBACK_SIM_THRESHOLD,
+    ENABLE_REPEAT_DETECTION, REPEAT_APPEAL_CODE,
     ENABLE_L3_ROUTING, L3_ROUTING_MAX_THEMES,
     ENABLE_MULTI_QUERY_EXPAND, MQE_N_VARIANTS,
     ENABLE_ALLOWED_CODES, ALLOWED_CODES_PATH,
@@ -369,6 +370,12 @@ L3-тема — это тематическое направление (напр
    верхнеуровневое поле "candidates_insufficient": true. Это значит, что векторный
    поиск промахнулся и нужен повторный проход по полному классификатору.
 
+4c. ПРИЗНАК ПОВТОРНОГО ОБРАЩЕНИЯ: если из текста видно, что гражданин обращается
+   НЕ впервые (например: «обращаюсь повторно», «не в первый раз», «ответа так и не
+   получил», «ранее обращался», «на моё предыдущее обращение») — установи
+   верхнеуровневое поле "is_repeat_appeal": true. Тематическую классификацию при
+   этом НЕ меняй (повторность — отдельный признак, обрабатывается отдельно).
+
 5. АЛЬТЕРНАТИВНЫЕ КОДЫ (обязательно 3 — страховка оператора, он выбирает из трёх).
    Портфель альтернатив должен покрывать РАЗНЫЕ типы возможной ошибки selected_code:
    - Альтернатива 1: ближайший по смыслу СОСЕД selected_code в той же L3-теме
@@ -385,6 +392,7 @@ L3-тема — это тематическое направление (напр
   "tip_obrascheniya": "Индивидуальное|Коллективное|Анонимное",
   "is_ustnoe": false,
   "candidates_insufficient": false,
+  "is_repeat_appeal": false,
   "applicant_fio": "Фамилия Имя Отчество заявителя из текста, либо null",
   "summary": "Краткая суть обращения, не более 250 символов",
   "questions": [
@@ -444,6 +452,29 @@ FULL_CLASSIFIER_FALLBACK_TEMPLATE = """Классифицируй обращен
     }}
   ]
 }}"""
+
+
+# ── Детекция повторного обращения ───────────────────────────────────────────────
+import re as _re
+
+# Маркеры повторного обращения (гражданин уже обращался / не получил ответа).
+_REPEAT_MARKERS = _re.compile(
+    r"повторн"
+    r"|не\s+в\s+перв\w+\s+раз"
+    r"|ответ\w*\s+(?:так\s+и\s+)?не\s+(?:получ|дал|присл|поступ|пришл)"
+    r"|ране[ей]\s+(?:уже\s+)?(?:обраща|писа|направля|подава)"
+    r"|уже\s+(?:обраща|писа|направля|подава)"
+    r"|(?:предыдущ|прошл)\w*\s+обращени"
+    r"|на\s+(?:мо[её]|наше)\s+(?:предыдущее|прошлое|прежнее)\s+обращени"
+    r"|обраща\w+\s+(?:к\s+вам\s+)?(?:вновь|снова)",
+    _re.IGNORECASE,
+)
+
+
+def detect_repeat_markers(text: str) -> bool:
+    """True, если в тексте есть явные маркеры повторного обращения
+    («повторно», «не в первый раз», «ответа не получил», «ранее обращался» и т.п.)."""
+    return bool(text and _REPEAT_MARKERS.search(text))
 
 
 # ── Класс агента ───────────────────────────────────────────────────────────────
@@ -1947,6 +1978,31 @@ class ClassifierAgent:
                     q.confidence = min(q.confidence, 0.5)
                     if "all_questions_same_code" not in q.verification_reasons:
                         q.verification_reasons.append("all_questions_same_code")
+
+        # Шаг 3c: Детекция повторного обращения — доп. вопрос «Результаты рассмотрения».
+        if ENABLE_REPEAT_DETECTION:
+            is_repeat = detect_repeat_markers(appeal_text) or bool(llm_result.get("is_repeat_appeal"))
+            already = any(q.code == REPEAT_APPEAL_CODE for q in classified_questions)
+            if is_repeat and not already:
+                entry = self.code_index.get(REPEAT_APPEAL_CODE)
+                if entry:
+                    by_marker = detect_repeat_markers(appeal_text)
+                    classified_questions.append(ClassifiedQuestion(
+                        question_text="Признак повторного обращения",
+                        code=REPEAT_APPEAL_CODE,
+                        name=entry["name"],
+                        level=entry["level"],
+                        full_path=entry["full_path"],
+                        predmet_vedeniya="",
+                        confidence=0.9,
+                        reasoning=("Обнаружены признаки повторного обращения "
+                                   f"({'явные маркеры в тексте' if by_marker else 'по оценке модели'}): "
+                                   "гражданин обращается не впервые / не получил ответа. "
+                                   "Присвоен код «Результаты рассмотрения обращения»."),
+                        alternatives=[],
+                        verification_reasons=["repeat_appeal_detected"],
+                    ))
+                    print(f"  [Повтор] обнаружено повторное обращение → +{REPEAT_APPEAL_CODE}")
 
         # Шаг 4: Итоговая уверенность
         confidences = [q.confidence for q in classified_questions]

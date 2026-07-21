@@ -128,6 +128,13 @@ ENABLE_FULL_CLASSIFIER_FALLBACK: bool = os.getenv("ENABLE_FULL_CLASSIFIER_FALLBA
 # ЗНАЧЕНИЕ МОДЕЛЬ-СПЕЦИФИЧНО: e5 даёт ~0.8+, MiniLM ~0.3-0.4. Тюнить под модель.
 FULL_FALLBACK_SIM_THRESHOLD: float = float(os.getenv("FULL_FALLBACK_SIM_THRESHOLD", "0.40"))
 
+# ── Детекция повторного обращения ──────────────────────────────────────────────
+# Если в тексте видно, что гражданин обращается повторно / не получил ответа —
+# дополнительно присваивается код «Результаты рассмотрения обращения».
+# Триггер: regex-маркеры ИЛИ флаг LLM is_repeat_appeal.
+ENABLE_REPEAT_DETECTION: bool = os.getenv("ENABLE_REPEAT_DETECTION", "false").lower() == "true"
+REPEAT_APPEAL_CODE: str = os.getenv("REPEAT_APPEAL_CODE", "0001.0002.0027.0125")
+
 # ── Пути к файлам классификатора ───────────────────────────────────────────────
 CLASSIFIER_FLAT_PATH: str = os.getenv(
     "CLASSIFIER_FLAT_PATH", str(_data_dir / "classifier_flat.json")
