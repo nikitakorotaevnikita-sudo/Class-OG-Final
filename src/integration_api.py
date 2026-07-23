@@ -28,14 +28,30 @@ def _clip_reasoning(text: str) -> str:
 class RxQuestion(BaseModel):
     code: str
     question: str
-    reasoning: str = ""   # Обоснование модели: почему выбран этот код (<=1000 симв.)
 
 
 class ClassifyDocumentResponse(BaseModel):
     document_id: int
     applicant_fio: Optional[str]
     summary: str
+    reasoning: str = ""   # Обоснование модели по всем вопросам, сплошным текстом (<=1000 симв.)
     questions: list[RxQuestion]
+
+
+def _build_reasoning(questions) -> str:
+    """Склеить обоснования по всем вопросам в один сплошной текст (<=1000 симв.).
+
+    При нескольких вопросах каждое обоснование префиксуется кодом, чтобы
+    было видно, к какому коду оно относится; всё соединяется пробелами.
+    """
+    parts = []
+    multi = len(questions) > 1
+    for q in questions:
+        r = (q.reasoning or "").strip()
+        if not r:
+            continue
+        parts.append(f"[{q.code}] {r}" if multi else r)
+    return _clip_reasoning(" ".join(parts))
 
 
 @router.post("/classify-document", response_model=ClassifyDocumentResponse)
@@ -66,7 +82,7 @@ async def classify_document(body: ClassifyDocumentRequest, request: Request):
         document_id=body.document_id,
         applicant_fio=result.applicant_fio,
         summary=result.summary,
-        questions=[RxQuestion(code=q.code, question=q.name,
-                              reasoning=_clip_reasoning(q.reasoning))
+        reasoning=_build_reasoning(result.questions),
+        questions=[RxQuestion(code=q.code, question=q.name)
                    for q in result.questions],
     )

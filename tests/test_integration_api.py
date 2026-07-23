@@ -46,9 +46,26 @@ def test_classify_document_ok(monkeypatch):
         "document_id": 26,
         "applicant_fio": "Иванов И.И.",
         "summary": "суть",
-        "questions": [{"code": "0001.0002.0003.0004", "question": "вопрос текстом",
-                       "reasoning": "выбран по смыслу обращения"}],
+        "reasoning": "выбран по смыслу обращения",
+        "questions": [{"code": "0001.0002.0003.0004", "question": "вопрос текстом"}],
     }
+
+
+def test_reasoning_multi_question_continuous(monkeypatch):
+    """Несколько вопросов -> один сплошной блок с префиксами кодов."""
+    class _MultiAgent:
+        def classify(self, text):
+            return _Result(applicant_fio=None, summary="суть",
+                           questions=[
+                               _Q(code="0001.0002.0003.0004", name="в1", reasoning="первое обоснование"),
+                               _Q(code="0005.0006.0007.0008", name="в2", reasoning="второе обоснование"),
+                           ])
+
+    monkeypatch.setattr(rx_client, "get_document_text", lambda doc_id: ("текст", "d.pdf"))
+    client = TestClient(_app(_MultiAgent()))
+    data = client.post("/integration/classify-document", json={"document_id": 26}).json()
+    assert data["reasoning"] == "[0001.0002.0003.0004] первое обоснование [0005.0006.0007.0008] второе обоснование"
+    assert all("reasoning" not in q for q in data["questions"])
 
 
 def test_reasoning_clipped_to_1000(monkeypatch):
@@ -64,7 +81,7 @@ def test_reasoning_clipped_to_1000(monkeypatch):
     client = TestClient(_app(_LongAgent()))
     resp = client.post("/integration/classify-document", json={"document_id": 26})
     assert resp.status_code == 200
-    r = resp.json()["questions"][0]["reasoning"]
+    r = resp.json()["reasoning"]
     assert len(r) == 1000
     assert r.endswith("…")
 
