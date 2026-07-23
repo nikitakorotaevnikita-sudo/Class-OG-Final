@@ -17,10 +17,18 @@ class ClassifyDocumentRequest(BaseModel):
     document_id: int
 
 
+REASONING_MAX_LEN = 1000  # Ограничение длины обоснования в ответе RX (символов)
+
+
+def _clip_reasoning(text: str) -> str:
+    text = text or ""
+    return text if len(text) <= REASONING_MAX_LEN else text[:REASONING_MAX_LEN - 1] + "…"
+
+
 class RxQuestion(BaseModel):
     code: str
     question: str
-    reasoning: str = ""   # Обоснование модели: почему выбран этот код
+    reasoning: str = ""   # Обоснование модели: почему выбран этот код (<=1000 симв.)
 
 
 class ClassifyDocumentResponse(BaseModel):
@@ -58,6 +66,7 @@ async def classify_document(body: ClassifyDocumentRequest, request: Request):
         document_id=body.document_id,
         applicant_fio=result.applicant_fio,
         summary=result.summary,
-        questions=[RxQuestion(code=q.code, question=q.name, reasoning=q.reasoning)
+        questions=[RxQuestion(code=q.code, question=q.name,
+                              reasoning=_clip_reasoning(q.reasoning))
                    for q in result.questions],
     )

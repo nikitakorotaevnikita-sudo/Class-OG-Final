@@ -51,6 +51,24 @@ def test_classify_document_ok(monkeypatch):
     }
 
 
+def test_reasoning_clipped_to_1000(monkeypatch):
+    long = "а" * 5000
+
+    class _LongAgent:
+        def classify(self, text):
+            return _Result(applicant_fio="Иванов И.И.", summary="суть",
+                           questions=[_Q(code="0001.0002.0003.0004", name="в", reasoning=long)])
+
+    monkeypatch.setattr(rx_client, "get_document_text",
+                        lambda doc_id: ("текст", "doc.pdf"))
+    client = TestClient(_app(_LongAgent()))
+    resp = client.post("/integration/classify-document", json={"document_id": 26})
+    assert resp.status_code == 200
+    r = resp.json()["questions"][0]["reasoning"]
+    assert len(r) == 1000
+    assert r.endswith("…")
+
+
 def test_classify_document_not_found(monkeypatch):
     def raise_nf(doc_id):
         raise rx_client.DocumentNotFound("нет")
