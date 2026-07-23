@@ -11,6 +11,7 @@ import rx_client
 class _Q:
     code: str
     name: str
+    reasoning: str = ""
 
 
 @dataclass
@@ -23,7 +24,8 @@ class _Result:
 class _FakeAgent:
     def classify(self, text):
         return _Result(applicant_fio="Иванов И.И.", summary="суть",
-                       questions=[_Q(code="0001.0002.0003.0004", name="вопрос текстом")])
+                       questions=[_Q(code="0001.0002.0003.0004", name="вопрос текстом",
+                                     reasoning="выбран по смыслу обращения")])
 
 
 def _app(agent):
@@ -44,7 +46,8 @@ def test_classify_document_ok(monkeypatch):
         "document_id": 26,
         "applicant_fio": "Иванов И.И.",
         "summary": "суть",
-        "questions": [{"code": "0001.0002.0003.0004", "question": "вопрос текстом"}],
+        "questions": [{"code": "0001.0002.0003.0004", "question": "вопрос текстом",
+                       "reasoning": "выбран по смыслу обращения"}],
     }
 
 

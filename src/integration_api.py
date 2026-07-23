@@ -20,6 +20,7 @@ class ClassifyDocumentRequest(BaseModel):
 class RxQuestion(BaseModel):
     code: str
     question: str
+    reasoning: str = ""   # Обоснование модели: почему выбран этот код
 
 
 class ClassifyDocumentResponse(BaseModel):
@@ -57,5 +58,6 @@ async def classify_document(body: ClassifyDocumentRequest, request: Request):
         document_id=body.document_id,
         applicant_fio=result.applicant_fio,
         summary=result.summary,
-        questions=[RxQuestion(code=q.code, question=q.name) for q in result.questions],
+        questions=[RxQuestion(code=q.code, question=q.name, reasoning=q.reasoning)
+                   for q in result.questions],
     )
