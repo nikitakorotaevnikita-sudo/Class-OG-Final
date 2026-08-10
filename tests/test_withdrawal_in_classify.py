@@ -61,6 +61,33 @@ def test_withdrawal_request_adds_code(monkeypatch):
     assert topical in codes, "тематическая классификация должна сохраниться"
 
 
+def test_withdrawal_code_goes_first(monkeypatch):
+    """Просьба отозвать важнее тематики — код прекращения должен быть Top-1."""
+    monkeypatch.setattr(classifier_mod, "ENABLE_WITHDRAWAL_DETECTION", True)
+    topical = "0005.0005.0056.1160"
+    agent = _agent(monkeypatch, [_q(topical)], [_candidate(topical, "Вывоз ТКО")])
+
+    result = agent.classify("Прошу отозвать моё обращение, вопрос решён")
+
+    assert result.questions[0].code == WITHDRAWAL_CODE
+    assert [q.code for q in result.questions] == [WITHDRAWAL_CODE, topical]
+
+
+def test_withdrawal_first_even_when_repeat_also_detected(monkeypatch):
+    monkeypatch.setattr(classifier_mod, "ENABLE_WITHDRAWAL_DETECTION", True)
+    monkeypatch.setattr(classifier_mod, "ENABLE_REPEAT_DETECTION", True)
+    topical = "0005.0005.0056.1160"
+    agent = _agent(monkeypatch, [_q(topical)], [_candidate(topical, "Вывоз ТКО")])
+    agent.code_index[classifier_mod.REPEAT_APPEAL_CODE] = {
+        "code": classifier_mod.REPEAT_APPEAL_CODE, "name": "Результаты рассмотрения",
+        "level": 4, "full_path": "Государство / обращения / результаты",
+    }
+
+    result = agent.classify("Обращаюсь повторно. Прошу отозвать моё обращение.")
+
+    assert result.questions[0].code == WITHDRAWAL_CODE
+
+
 def test_no_withdrawal_no_extra_code(monkeypatch):
     monkeypatch.setattr(classifier_mod, "ENABLE_WITHDRAWAL_DETECTION", True)
     topical = "0005.0005.0056.1160"

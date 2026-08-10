@@ -2074,6 +2074,8 @@ class ClassifierAgent:
                     print(f"  [Повтор] обнаружено повторное обращение → +{REPEAT_APPEAL_CODE}")
 
         # Шаг 3d: Просьба прекратить рассмотрение / отозвать обращение.
+        # Такой код ставится ПЕРВЫМ: если гражданин просит отозвать обращение,
+        # процедурное решение важнее тематики (тематика остаётся доп. вопросом).
         if ENABLE_WITHDRAWAL_DETECTION:
             by_marker = detect_withdrawal_markers(appeal_text)
             is_withdrawal = by_marker or bool(llm_result.get("is_withdrawal_request"))
@@ -2081,7 +2083,7 @@ class ClassifierAgent:
             if is_withdrawal and not already:
                 entry = self.code_index.get(WITHDRAWAL_APPEAL_CODE)
                 if entry:
-                    classified_questions.append(ClassifiedQuestion(
+                    classified_questions.insert(0, ClassifiedQuestion(
                         question_text="Просьба прекратить рассмотрение обращения",
                         code=WITHDRAWAL_APPEAL_CODE,
                         name=entry["name"],
