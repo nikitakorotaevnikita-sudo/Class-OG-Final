@@ -52,6 +52,7 @@ from config import (
     ENABLE_EMBEDDING_ADAPTER, ADAPTER_PATH,
     ENABLE_FULL_CLASSIFIER_FALLBACK, FULL_FALLBACK_SIM_THRESHOLD,
     ENABLE_REPEAT_DETECTION, REPEAT_APPEAL_CODE,
+    ENABLE_WITHDRAWAL_DETECTION, WITHDRAWAL_APPEAL_CODE,
     ENABLE_L3_ROUTING, L3_ROUTING_MAX_THEMES,
     ENABLE_MULTI_QUERY_EXPAND, MQE_N_VARIANTS,
     ENABLE_ALLOWED_CODES, ALLOWED_CODES_PATH,
@@ -406,6 +407,12 @@ L3-тема — это тематическое направление (напр
    верхнеуровневое поле "is_repeat_appeal": true. Тематическую классификацию при
    этом НЕ меняй (повторность — отдельный признак, обрабатывается отдельно).
 
+4d. ПРОСЬБА ПРЕКРАТИТЬ РАССМОТРЕНИЕ: если гражданин просит прекратить рассмотрение,
+   отозвать обращение/письмо/заявление, снять его с рассмотрения или сообщает, что
+   вопрос снят и рассмотрение не требуется — установи верхнеуровневое поле
+   "is_withdrawal_request": true. Тематическую классификацию при этом НЕ меняй
+   (просьба о прекращении — отдельный признак, обрабатывается отдельно).
+
 5. АЛЬТЕРНАТИВНЫЕ КОДЫ (обязательно 3 — страховка оператора, он выбирает из трёх).
    Портфель альтернатив должен покрывать РАЗНЫЕ типы возможной ошибки selected_code:
    - Альтернатива 1: ближайший по смыслу СОСЕД selected_code в той же L3-теме
@@ -423,6 +430,7 @@ L3-тема — это тематическое направление (напр
   "is_ustnoe": false,
   "candidates_insufficient": false,
   "is_repeat_appeal": false,
+  "is_withdrawal_request": false,
   "applicant_fio": "Фамилия Имя Отчество заявителя из текста, либо null",
   "summary": "Краткая суть обращения, не более 250 символов",
   "questions": [
@@ -505,6 +513,31 @@ def detect_repeat_markers(text: str) -> bool:
     """True, если в тексте есть явные маркеры повторного обращения
     («повторно», «не в первый раз», «ответа не получил», «ранее обращался» и т.п.)."""
     return bool(text and _REPEAT_MARKERS.search(text))
+
+
+# ── Детекция просьбы прекратить рассмотрение / отозвать обращение ───────────────
+
+# Объект действия обязателен: «прекратить»/«отозвать» сами по себе встречаются
+# и в обычных обращениях («прекратить незаконное строительство», «отозвать
+# лицензию»), поэтому маркер срабатывает только рядом с обращением/заявлением.
+_APPEAL_OBJ = r"(?:обращени|заявлени|письм|жалоб|запрос)"
+_WITHDRAWAL_MARKERS = _re.compile(
+    rf"прекрат\w*\s+рассмотрени"
+    rf"|снят[ьи]?\s+с\s+рассмотрени"
+    rf"|не\s+рассматрива\w*\s+(?:мо[её]\w*\s+|сво[её]\w*\s+)?{_APPEAL_OBJ}"
+    rf"|отозва\w*\s+(?:мо[её]\w*\s+|сво[её]\w*\s+|ранее\s+)?{_APPEAL_OBJ}"
+    rf"|отзыва\w*\s+(?:мо[её]\w*\s+|сво[её]\w*\s+)?{_APPEAL_OBJ}"
+    rf"|аннулиров\w*\s+(?:мо[её]\w*\s+|сво[её]\w*\s+)?{_APPEAL_OBJ}"
+    rf"|отказыва\w*\s+от\s+(?:ранее\s+)?(?:поданн\w*\s+|направленн\w*\s+)?{_APPEAL_OBJ}"
+    rf"|закрыть\s+(?:мо[её]\w*\s+|сво[её]\w*\s+)?{_APPEAL_OBJ}",
+    _re.IGNORECASE,
+)
+
+
+def detect_withdrawal_markers(text: str) -> bool:
+    """True, если гражданин просит прекратить рассмотрение или отозвать обращение
+    («прошу прекратить рассмотрение», «отзываю заявление», «снять с рассмотрения»)."""
+    return bool(text and _WITHDRAWAL_MARKERS.search(text))
 
 
 # ── Класс агента ───────────────────────────────────────────────────────────────
@@ -2039,6 +2072,31 @@ class ClassifierAgent:
                         verification_reasons=["repeat_appeal_detected"],
                     ))
                     print(f"  [Повтор] обнаружено повторное обращение → +{REPEAT_APPEAL_CODE}")
+
+        # Шаг 3d: Просьба прекратить рассмотрение / отозвать обращение.
+        if ENABLE_WITHDRAWAL_DETECTION:
+            by_marker = detect_withdrawal_markers(appeal_text)
+            is_withdrawal = by_marker or bool(llm_result.get("is_withdrawal_request"))
+            already = any(q.code == WITHDRAWAL_APPEAL_CODE for q in classified_questions)
+            if is_withdrawal and not already:
+                entry = self.code_index.get(WITHDRAWAL_APPEAL_CODE)
+                if entry:
+                    classified_questions.append(ClassifiedQuestion(
+                        question_text="Просьба прекратить рассмотрение обращения",
+                        code=WITHDRAWAL_APPEAL_CODE,
+                        name=entry["name"],
+                        level=entry["level"],
+                        full_path=entry["full_path"],
+                        predmet_vedeniya="",
+                        confidence=0.9,
+                        reasoning=("Обнаружена просьба прекратить рассмотрение "
+                                   f"({'явные маркеры в тексте' if by_marker else 'по оценке модели'}): "
+                                   "гражданин просит отозвать обращение / снять его с рассмотрения. "
+                                   "Присвоен код «Прекращение рассмотрения обращения»."),
+                        alternatives=[],
+                        verification_reasons=["withdrawal_request_detected"],
+                    ))
+                    print(f"  [Отзыв] просьба прекратить рассмотрение → +{WITHDRAWAL_APPEAL_CODE}")
 
         # Шаг 4: Итоговая уверенность
         confidences = [q.confidence for q in classified_questions]

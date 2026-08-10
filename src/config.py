@@ -135,6 +135,13 @@ FULL_FALLBACK_SIM_THRESHOLD: float = float(os.getenv("FULL_FALLBACK_SIM_THRESHOL
 ENABLE_REPEAT_DETECTION: bool = os.getenv("ENABLE_REPEAT_DETECTION", "false").lower() == "true"
 REPEAT_APPEAL_CODE: str = os.getenv("REPEAT_APPEAL_CODE", "0001.0002.0027.0125")
 
+# ── Детекция просьбы прекратить рассмотрение / отозвать обращение ──────────────
+# Гражданин просит прекратить рассмотрение, отозвать письмо, снять с рассмотрения —
+# дополнительно присваивается код «Прекращение рассмотрения обращения».
+# Триггер: regex-маркеры ИЛИ флаг LLM is_withdrawal_request.
+ENABLE_WITHDRAWAL_DETECTION: bool = os.getenv("ENABLE_WITHDRAWAL_DETECTION", "false").lower() == "true"
+WITHDRAWAL_APPEAL_CODE: str = os.getenv("WITHDRAWAL_APPEAL_CODE", "0001.0002.0027.0131")
+
 # ── Пути к файлам классификатора ───────────────────────────────────────────────
 CLASSIFIER_FLAT_PATH: str = os.getenv(
     "CLASSIFIER_FLAT_PATH", str(_data_dir / "classifier_flat.json")
