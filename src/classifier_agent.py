@@ -233,36 +233,6 @@ class ClassifiedQuestion:
     verification_reasons: list = field(default_factory=list)
 
 
-def dedupe_questions(questions: list) -> list:
-    """Схлопнуть вопросы с одинаковым кодом в одну карточку.
-
-    LLM нередко дробит одно обращение на несколько «вопросов» и присваивает им
-    один и тот же код — оператор видит 2-4 идентичные карточки (12 % обращений
-    в выборке Заказчика на 68 обр.). Порядок первого появления кода сохраняется,
-    уверенность берётся максимальная, тексты и обоснования склеиваются.
-    """
-    merged: dict = {}
-    order: list = []
-    for q in questions:
-        kept = merged.get(q.code)
-        if kept is None:
-            merged[q.code] = q
-            order.append(q.code)
-            continue
-        kept.confidence = max(kept.confidence, q.confidence)
-        for attr, sep in (("question_text", "; "), ("reasoning", " ")):
-            addition = (getattr(q, attr) or "").strip()
-            current = (getattr(kept, attr) or "").strip()
-            if addition and addition not in current:
-                setattr(kept, attr, f"{current}{sep}{addition}" if current else addition)
-        for reason in q.verification_reasons:
-            if reason not in kept.verification_reasons:
-                kept.verification_reasons.append(reason)
-        if "merged_duplicate_questions" not in kept.verification_reasons:
-            kept.verification_reasons.append("merged_duplicate_questions")
-    return [merged[code] for code in order]
-
-
 @dataclass
 class ClassificationResult:
     """Полный результат классификации обращения"""
@@ -2008,12 +1978,6 @@ class ClassifierAgent:
                     q.confidence = min(q.confidence, 0.5)
                     if "all_questions_same_code" not in q.verification_reasons:
                         q.verification_reasons.append("all_questions_same_code")
-
-        # Схлопываем карточки-дубли: один код — один вопрос для оператора
-        before_dedupe = len(classified_questions)
-        classified_questions = dedupe_questions(classified_questions)
-        if len(classified_questions) < before_dedupe:
-            print(f"  [Дедуп] карточек: {before_dedupe} -> {len(classified_questions)}")
 
         # Шаг 3c: Детекция повторного обращения — доп. вопрос «Результаты рассмотрения».
         if ENABLE_REPEAT_DETECTION:
