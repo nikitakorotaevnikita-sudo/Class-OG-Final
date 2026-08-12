@@ -1,4 +1,7 @@
-FROM python:3.11-slim
+# Версия Python вынесена в ARG: прод собирается на 3.11 (проверенная база),
+# совместимость с 3.13 проверяется той же сборкой через --build-arg.
+ARG PYTHON_VERSION=3.11
+FROM python:${PYTHON_VERSION}-slim
 
 WORKDIR /app
 
