@@ -3,8 +3,9 @@ services:
   classifier:
     build: .
     ports:
-      # host 8010 (адрес для разработчика/RX) → внутренний 8005 приложения
-      - "8010:8005"
+      # host 8010 (адрес для разработчика/RX) → внутренний 8005 приложения.
+      # При переносе на другую машину порт меняется через HOST_PORT в .env.
+      - "${HOST_PORT:-8010}:8005"
     volumes:
       # persistent storage for logs and fine-tuned models
       - ./data/appeals_log.jsonl:/app/data/appeals_log.jsonl
@@ -15,8 +16,11 @@ services:
       - ./data/vector_db_adapted_v3:/app/data/vector_db_adapted_v3:ro
       # Adapters and trained components
       - ./models:/app/models
-      # HF model cache (read-only; lets the container reuse host-downloaded weights)
-      - C:/Users/Korotaev_NO/.cache/huggingface:/root/.cache/huggingface:ro
+      # Кэш моделей Hugging Face (read-only): контейнер переиспользует веса,
+      # уже скачанные на хост. Путь машинно-зависимый — задаётся HF_CACHE_DIR
+      # в .env. Если переменная не задана и папки нет, Docker смонтирует пустой
+      # каталог и контейнер скачает multilingual-e5-base (~435 МБ) из интернета.
+      - ${HF_CACHE_DIR:-./.hf-cache}:/root/.cache/huggingface:ro
       # Allowed-codes whitelist (changes don't require image rebuild)
       - ./data/allowed_codes_top69.json:/app/data/allowed_codes_top69.json:ro
     env_file:
