@@ -1,0 +1,42 @@
+# Проверочный образ: прогон тестов проекта на Python 3.13.
+# НЕ продуктивный — служит только для верификации совместимости.
+#
+# Отличия от боевого Dockerfile:
+#   * torch ставится CPU-only (боевой тянет CUDA, образ ~8.8 ГБ вместо ~2 ГБ);
+#   * ставится pytest, а tests/ монтируется при запуске (в .dockerignore они
+#     исключены из контекста сборки — боевому образу тесты не нужны);
+#   * не копируются веса моделей (тесты их не грузят).
+#
+# Сборка и запуск:
+#   docker build -f Dockerfile.py313check -t og-py313check .
+#   docker run --rm -v "$PWD/tests:/app/tests:ro" og-py313check
+FROM python:3.13.2-slim
+
+WORKDIR /app
+
+# CPU-only torch ставим ДО requirements: sentence-transformers увидит уже
+# установленный torch и не потянет CUDA-сборку.
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt && pip install --no-cache-dir pytest
+
+COPY src/ ./src/
+COPY scripts/ ./scripts/
+COPY data/classifier_flat.json data/classifier_hierarchy.json data/test_appeals.json ./data/
+COPY data/allowed_codes_top69.json ./data/
+COPY data/vector_db/ ./data/vector_db/
+COPY models/adapter_v1.npz models/adapter_v1.json models/ltr_v1.json ./models/
+COPY .env.example .env
+
+# Печатаем версии — чтобы в логе сборки было видно, что реально встало
+RUN python -c "import sys, numpy, torch, pandas, fastapi, pydantic, sentence_transformers as st; \
+print('python     ', sys.version.split()[0]); \
+print('numpy      ', numpy.__version__); \
+print('torch      ', torch.__version__); \
+print('pandas     ', pandas.__version__); \
+print('fastapi    ', fastapi.__version__); \
+print('pydantic   ', pydantic.VERSION); \
+print('sent-transf', st.__version__)"
+
+CMD ["python", "-m", "pytest", "tests/", "-q", "--ignore=tests/e2e"]

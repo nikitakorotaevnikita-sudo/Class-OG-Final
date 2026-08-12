@@ -18,40 +18,39 @@ Write-Host "  Citizens Appeals Classification Agent -- Setup     " -ForegroundCo
 Write-Host "=====================================================" -ForegroundColor Cyan
 
 # =============================================================================
-# STEP 1: Check Python 3.11
+# STEP 1: Check Python (3.11 or 3.13 are both supported)
 # =============================================================================
-Write-Host "`n[STEP 1] Checking Python 3.11..." -ForegroundColor Yellow
+Write-Host "`n[STEP 1] Checking Python (3.11 or 3.13)..." -ForegroundColor Yellow
 
 $python = $null
+$supported = "3\.(11|13)"
 
-try {
-    $ver = & py -3.11 --version 2>&1
-    if ($ver -match "3\.11") { $python = "py -3.11"; Write-Host "   OK: $ver (via py launcher)" -ForegroundColor Green }
-} catch {}
-
-if (-not $python) {
+foreach ($tag in @("3.13", "3.11")) {
+    if ($python) { break }
     try {
-        $ver = & python3.11 --version 2>&1
-        if ($ver -match "3\.11") { $python = "python3.11"; Write-Host "   OK: $ver" -ForegroundColor Green }
+        $ver = & py "-$tag" --version 2>&1
+        if ($ver -match $supported) { $python = "py -$tag"; Write-Host "   OK: $ver (via py launcher)" -ForegroundColor Green }
     } catch {}
 }
 
-if (-not $python) {
+foreach ($exe in @("python3.13", "python3.11", "python")) {
+    if ($python) { break }
     try {
-        $ver = & python --version 2>&1
-        if ($ver -match "3\.11") { $python = "python"; Write-Host "   OK: $ver" -ForegroundColor Green }
+        $ver = & $exe --version 2>&1
+        if ($ver -match $supported) { $python = $exe; Write-Host "   OK: $ver" -ForegroundColor Green }
     } catch {}
 }
 
 if (-not $python) {
     Write-Host ""
-    Write-Host "ERROR: Python 3.11 not found." -ForegroundColor Red
+    Write-Host "ERROR: no supported Python found (need 3.11 or 3.13)." -ForegroundColor Red
     Write-Host ""
-    Write-Host "Please install Python 3.11 manually:" -ForegroundColor White
+    Write-Host "Install one of these:" -ForegroundColor White
+    Write-Host "  https://www.python.org/downloads/release/python-3132/" -ForegroundColor White
     Write-Host "  https://www.python.org/downloads/release/python-3119/" -ForegroundColor White
     Write-Host ""
     Write-Host "IMPORTANT: Check 'Add Python to PATH' during install." -ForegroundColor Yellow
-    Write-Host "           Use version 3.11.x only (not 3.12, not 3.14)" -ForegroundColor Yellow
+    Write-Host "           Supported: 3.11.x or 3.13.x (not 3.12, not 3.14)" -ForegroundColor Yellow
     Write-Host ""
     Write-Host "After install, restart PowerShell and run .\setup.ps1 again." -ForegroundColor White
     exit 1

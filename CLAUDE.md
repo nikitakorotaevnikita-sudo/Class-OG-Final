@@ -33,7 +33,25 @@ python src/finetune_model.py
 uvicorn src.api_server:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-**Python version: 3.11 required.** Python 3.12+ breaks ML dependencies; 3.14 is incompatible with `sentence-transformers`.
+**Python version: 3.11 (prod) or 3.13.** Prod runs 3.11; 3.13.2 is verified — full test
+suite gives the same result as 3.11 (126 passed, the same 5 pre-existing failures).
+3.12 is not tested. 3.14 is still incompatible with `sentence-transformers`.
+
+On 3.13 `numpy` must be 2.x (no cp313 wheels exist for numpy 1.26) — `requirements.txt`
+picks the major automatically via environment markers, so 3.11 keeps the verified 1.x.
+
+Verify compatibility without touching the host interpreter:
+
+```bash
+docker build -f Dockerfile.py313check -t og-py313check .
+docker run --rm -v "$PWD/tests:/app/tests:ro" og-py313check
+```
+
+The prod image takes the interpreter from a build arg (`3.11` by default):
+
+```bash
+docker build --build-arg PYTHON_VERSION=3.13.2 -t classifier-py313 .
+```
 
 ## Architecture
 
@@ -102,7 +120,9 @@ FINETUNE_THRESHOLD=50    # verified entries needed to trigger fine-tuning
 ## Important constraints
 
 - Scripts import from `src/` using `sys.path.insert(0, 'src')` — always run from project root.
-- `numpy<2.0` is pinned (`numpy>=1.26.0,<2.0`) — numpy 2.x removes `np.float_` used by older dependencies.
+- `numpy` major is chosen by environment marker: `<2.0` below Python 3.12 (the version prod
+  is verified on), `>=2.1` from 3.12 up (numpy 1.26 has no cp313 wheels). Project code uses
+  no aliases removed in numpy 2.0, so the bump needs no source changes.
 - `data/vector_db/` and `models/` are excluded from Git (see `.gitignore`); `data/appeals_log.jsonl` is tracked.
 - `setup.ps1` is ASCII-only — Cyrillic strings cause PowerShell parse errors on Windows with CP1251 encoding.
 
