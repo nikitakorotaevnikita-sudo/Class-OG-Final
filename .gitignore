@@ -1,18 +1,17 @@
-# Секреты
+# Секреты — любые .env кроме шаблона (.env.minilm и прочие варианты стендов)
 .env
-.env.backup*
-.env.*.backup
+.env.*
+!.env.example
 
 # Виртуальное окружение Python
 venv/
 .venv/
 
-# Векторная база (большой файл, пересобирается из данных)
+# Векторные базы — бинарники, пересобираются скриптами. Закрыты все, кроме
+# боевой vector_db_adapted_v3: она коммитится намеренно, её копирует Dockerfile.
+data/vector_db_*/
+!data/vector_db_adapted_v3/
 data/vector_db/
-data/vector_db_adapted/
-# Отвергнутые эксперименты векторных баз (боевая — vector_db_adapted_v3 — коммитится)
-data/vector_db_adapted_v2/
-data/vector_db_bge_m3/
 
 # PTO-эксперименты (adapter_v2 / SVC — не в проде)
 data/pto_*
@@ -24,9 +23,14 @@ data/retrieval_v3_fixed_report.json
 tmp_*
 temp_*.cmd
 
-# Кэшированные query embeddings (пересобираются скриптом encode_queries.py)
-data/ii25_*_query_embs.npy
-data/ii25_*_query_meta.json
+# Кэшированные query embeddings (пересобираются скриптом encode_queries.py).
+# Шаблон со * в конце — чтобы ловить и варианты с тегом модели (*_minilm и т.п.)
+data/ii25_*_query_embs*.npy
+data/ii25_*_query_meta*.json
+
+# Логи прогонов на альтернативных моделях (боевые логи — отслеживаются)
+data/appeals_log_*.jsonl
+data/request_log_*.jsonl
 
 # Дообученные модели — большие файлы исключены, лёгкие артефакты коммитим
 models/*
