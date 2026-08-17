@@ -52,6 +52,7 @@ from config import (
     ENABLE_EMBEDDING_ADAPTER, ADAPTER_PATH,
     ENABLE_FULL_CLASSIFIER_FALLBACK, FULL_FALLBACK_SIM_THRESHOLD,
     ENABLE_QUESTION_DEDUP,
+    LLM_APPEAL_CHAR_LIMIT, FULL_FALLBACK_INCLUDE_PATH,
     ENABLE_REPEAT_DETECTION, REPEAT_APPEAL_CODE,
     ENABLE_WITHDRAWAL_DETECTION, WITHDRAWAL_APPEAL_CODE,
     ENABLE_L3_ROUTING, L3_ROUTING_MAX_THEMES,
@@ -233,6 +234,18 @@ class ClassifiedQuestion:
     alternatives: list
     # Служебные причины снижения confidence (для логов/отладки, НЕ показывать оператору)
     verification_reasons: list = field(default_factory=list)
+
+
+def _clip_for_llm(text: str) -> str:
+    """Обрезать обращение до лимита, уходящего в LLM (LLM_APPEAL_CHAR_LIMIT).
+
+    Вынесено в функцию, чтобы лимит задавался конфигом, а не был зашит в двух
+    местах числом 4000: у модели с контекстом 262k резать почти не нужно.
+    """
+    limit = LLM_APPEAL_CHAR_LIMIT
+    if not text or limit <= 0 or len(text) <= limit:
+        return text or ""
+    return text[:limit]
 
 
 def dedupe_questions(questions: list) -> list:
@@ -1569,7 +1582,7 @@ class ClassifierAgent:
 
         questions_json = json.dumps(compact_questions, ensure_ascii=False, indent=2)
         user_message = CLASSIFICATION_PROMPT_TEMPLATE_L3GROUP.format(
-            appeal_text=appeal_text[:4000],
+            appeal_text=_clip_for_llm(appeal_text),
             questions_json=questions_json,
         )
 
@@ -1714,18 +1727,24 @@ class ClassifierAgent:
             f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
 
     def _full_leaf_listing(self) -> str:
-        """Полный перечень листьев классификатора (L4+L5) как текст 'код — название'.
-        Кэшируется на инстансе (строится один раз). Путь (full_path) НЕ включаем:
-        он удваивает объём (~123k токенов → перелёт за 131k контекст модели);
-        код+название ≈ 61k токенов — с запасом под вывод."""
+        """Полный перечень листьев классификатора (L4+L5) для фоллбэка.
+
+        Формат зависит от FULL_FALLBACK_INCLUDE_PATH (замер на 1876 листьях):
+          * выкл — «код — название», 62 939 токенов. Единственный вариант для
+            модели с контекстом 131k;
+          * вкл  — «код — название | путь», 140 898 токенов (54% от 262k).
+            Путь помогает различать соседние ветки — на этом теряется точность:
+            7 из 11 ошибок в выборке Заказчика были уходом в другой раздел L1.
+
+        Кэшируется на инстансе, поэтому смена флага требует нового агента."""
         cached = getattr(self, "_full_leaf_cache", None)
         if cached is not None:
             return cached
-        lines = [
-            f"{m['code']} — {m['name']}"
-            for m in self.metadata
-            if m.get("level") in (4, 5)
-        ]
+        leaves = [m for m in self.metadata if m.get("level") in (4, 5)]
+        if FULL_FALLBACK_INCLUDE_PATH:
+            lines = [f"{m['code']} — {m['name']} | {m.get('full_path', '')}" for m in leaves]
+        else:
+            lines = [f"{m['code']} — {m['name']}" for m in leaves]
         self._full_leaf_cache = "\n".join(lines)
         return self._full_leaf_cache
 
@@ -1754,7 +1773,7 @@ class ClassifierAgent:
         _classify_with_llm (questions[] + vid/tip/is_ustnoe + fio/summary)."""
         provider, model = self._resolve_llm(llm_provider, llm_model)
         user_message = FULL_CLASSIFIER_FALLBACK_TEMPLATE.format(
-            appeal_text=appeal_text[:4000],
+            appeal_text=_clip_for_llm(appeal_text),
             full_classifier=self._full_leaf_listing(),
         )
         if provider == "ario":
