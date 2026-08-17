@@ -44,8 +44,24 @@ def _q(ordinal, code, text, conf=0.5):
             "alternative_codes": []}
 
 
+def test_dedup_disabled_keeps_duplicate_cards(monkeypatch):
+    """При выключенном флаге дубли НЕ схлопываются (поведение прода)."""
+    monkeypatch.setattr(classifier_mod, "ENABLE_QUESTION_DEDUP", False)
+    code = "0003.0011.0123.0850"
+    agent = _agent(
+        monkeypatch,
+        llm_questions=[_q(1, code, "про отказ"), _q(2, code, "про аренду")],
+        candidates=[_candidate(code, "Арендные отношения")],
+    )
+
+    result = agent.classify("Обращение с двумя формулировками одного вопроса")
+
+    assert [q.code for q in result.questions] == [code, code]
+
+
 def test_classify_collapses_repeated_code_into_one_question(monkeypatch):
     """Кейс из ОС Заказчика: одно обращение -> 3 карточки с одним кодом."""
+    monkeypatch.setattr(classifier_mod, "ENABLE_QUESTION_DEDUP", True)
     code = "0003.0011.0123.0850"
     agent = _agent(
         monkeypatch,

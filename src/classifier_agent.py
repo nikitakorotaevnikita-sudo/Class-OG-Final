@@ -51,6 +51,7 @@ from config import (
     ENABLE_LTR_RERANKER, LTR_MODEL_PATH, LTR_WEIGHT,
     ENABLE_EMBEDDING_ADAPTER, ADAPTER_PATH,
     ENABLE_FULL_CLASSIFIER_FALLBACK, FULL_FALLBACK_SIM_THRESHOLD,
+    ENABLE_QUESTION_DEDUP,
     ENABLE_REPEAT_DETECTION, REPEAT_APPEAL_CODE,
     ENABLE_WITHDRAWAL_DETECTION, WITHDRAWAL_APPEAL_CODE,
     ENABLE_L3_ROUTING, L3_ROUTING_MAX_THEMES,
@@ -2049,11 +2050,13 @@ class ClassifierAgent:
                     if "all_questions_same_code" not in q.verification_reasons:
                         q.verification_reasons.append("all_questions_same_code")
 
-        # Схлопываем карточки-дубли: один код — один вопрос для оператора
-        before_dedupe = len(classified_questions)
-        classified_questions = dedupe_questions(classified_questions)
-        if len(classified_questions) < before_dedupe:
-            print(f"  [Дедуп] карточек: {before_dedupe} -> {len(classified_questions)}")
+        # Схлопываем карточки-дубли: один код — один вопрос для оператора.
+        # Под флагом: по умолчанию выключено, карточки идут как их вернула модель.
+        if ENABLE_QUESTION_DEDUP:
+            before_dedupe = len(classified_questions)
+            classified_questions = dedupe_questions(classified_questions)
+            if len(classified_questions) < before_dedupe:
+                print(f"  [Дедуп] карточек: {before_dedupe} -> {len(classified_questions)}")
 
         # Шаг 3c: Детекция повторного обращения — доп. вопрос «Результаты рассмотрения».
         if ENABLE_REPEAT_DETECTION:
