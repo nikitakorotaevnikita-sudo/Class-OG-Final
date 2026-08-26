@@ -507,6 +507,7 @@ async def save_settings(request: SettingsSaveRequest):
 @app.post("/api/settings/test-rx", tags=["Настройки"])
 async def test_rx_connection(request: RxTestRequest):
     """Проверить связь с Directum RX. Пустой пароль → используется сохранённый."""
+    from starlette.concurrency import run_in_threadpool
     import rx_client
     import settings_store
 
@@ -514,7 +515,10 @@ async def test_rx_connection(request: RxTestRequest):
     if password is not None and password.strip() in ("", settings_store.MASK):
         password = None
 
-    return rx_client.check_connection(
+    # check_connection синхронный и на недостижимом хосте висит до таймаута.
+    # В event loop это заморозило бы весь сервис — уводим в пул потоков.
+    return await run_in_threadpool(
+        rx_client.check_connection,
         url=(request.RX_ODATA_URL or None),
         user=(request.RX_USER or None),
         password=password,
