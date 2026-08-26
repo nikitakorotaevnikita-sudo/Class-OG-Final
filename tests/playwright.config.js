@@ -1,11 +1,12 @@
 // playwright.config.js — Playwright E2E configuration for Class OG Final
-// Run: npx playwright test
+// Run: npx playwright test --config tests/playwright.config.js
 // Requires: npm install -D @playwright/test playwright
 
 const { defineConfig } = require('@playwright/test');
 
 module.exports = defineConfig({
-  testDir: './tests/e2e',
+  // testDir резолвится относительно каталога этого конфига (tests/), а не корня проекта.
+  testDir: './e2e',
   timeout: 30 * 1000,
   use: {
     baseURL: 'http://localhost:8000',
