@@ -207,8 +207,11 @@ set /p RX_URL=   RX OData URL [http://172.16.96.98/integration/odata]:
 if not defined RX_URL set RX_URL=http://172.16.96.98/integration/odata
 set /p RX_USR=   RX User [Administrator]:
 if not defined RX_USR set RX_USR=Administrator
-set /p RX_PWD=   RX Password [11111]:
-if not defined RX_PWD set RX_PWD=11111
+:: Пароль НЕ подставляем: раньше сюда прописывался пароль стенда, и сервис
+:: молча ходил в RX под чужой учёткой. Пусто - значит вызов по document_id
+:: вернёт 502, и это видно сразу.
+set /p RX_PWD=   RX Password (Enter = skip; needed only for calls by document_id):
+if not defined RX_PWD echo    WARN: RX password empty - calls by document_id will fail with 502
 
 powershell -Command "(Get-Content '.env') -replace 'RX_ODATA_URL=.*', 'RX_ODATA_URL=!RX_URL!' | Set-Content '.env' -Encoding UTF8"
 powershell -Command "(Get-Content '.env') -replace 'RX_USER=.*', 'RX_USER=!RX_USR!' | Set-Content '.env' -Encoding UTF8"
