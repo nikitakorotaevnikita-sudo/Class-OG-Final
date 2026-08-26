@@ -468,6 +468,63 @@ async def get_stats(
     }
 
 
+# ── Настройки (бэк-офис → вкладка «Настройки») ────────────────────────────────
+
+class SettingsSaveRequest(BaseModel):
+    values: dict[str, str]
+
+
+class RxTestRequest(BaseModel):
+    """Проверка подключения. Пустые поля → берутся текущие значения конфига."""
+    RX_ODATA_URL: Optional[str] = None
+    RX_USER: Optional[str] = None
+    RX_PASSWORD: Optional[str] = None
+
+
+@app.get("/api/settings", tags=["Настройки"])
+async def get_settings():
+    """Текущие настройки LLM и RX для формы бэк-офиса. Секреты маскируются."""
+    import settings_store
+    return settings_store.read_settings()
+
+
+@app.post("/api/settings", tags=["Настройки"])
+async def save_settings(request: SettingsSaveRequest):
+    """Записать настройки в .env и применить их без перезапуска сервиса."""
+    import settings_store
+    try:
+        result = settings_store.save_settings(request.values, agent=agent)
+    except settings_store.SettingsError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Не удалось записать .env: {e}")
+
+    if not result["saved"]:
+        return {**result, "message": "Изменений нет"}
+    return {**result, "message": f"Сохранено настроек: {len(result['saved'])}"}
+
+
+@app.post("/api/settings/test-rx", tags=["Настройки"])
+async def test_rx_connection(request: RxTestRequest):
+    """Проверить связь с Directum RX. Пустой пароль → используется сохранённый."""
+    from starlette.concurrency import run_in_threadpool
+    import rx_client
+    import settings_store
+
+    password = request.RX_PASSWORD
+    if password is not None and password.strip() in ("", settings_store.MASK):
+        password = None
+
+    # check_connection синхронный и на недостижимом хосте висит до таймаута.
+    # В event loop это заморозило бы весь сервис — уводим в пул потоков.
+    return await run_in_threadpool(
+        rx_client.check_connection,
+        url=(request.RX_ODATA_URL or None),
+        user=(request.RX_USER or None),
+        password=password,
+    )
+
+
 @app.post("/api/upload-historical")
 async def upload_historical(file: UploadFile = File(...)):
     """Загрузить файл исторических данных для валидации"""

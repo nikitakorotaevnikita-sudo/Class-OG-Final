@@ -168,6 +168,7 @@ BACKOFFICE_USER:     str = os.getenv("BACKOFFICE_USER", "admin")
 BACKOFFICE_PASSWORD: str = os.getenv("BACKOFFICE_PASSWORD", "password")
 
 # ── Интеграция с Directum RX (OData) ────────────────────────────────────────────
-RX_ODATA_URL: str = os.getenv("RX_ODATA_URL", "http://172.16.96.98/integration/odata")
+RX_ODATA_URL: str = os.getenv("RX_ODATA_URL", "http://localhost/integration/odata")
 RX_USER:      str = os.getenv("RX_USER", "Administrator")
-RX_PASSWORD:  str = os.getenv("RX_PASSWORD", "11111")
+# Пароль только из .env — держать боевой креденшл в исходниках нельзя.
+RX_PASSWORD:  str = os.getenv("RX_PASSWORD", "")
