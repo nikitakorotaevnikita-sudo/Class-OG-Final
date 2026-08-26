@@ -22,6 +22,45 @@ def build_client() -> httpx.Client:
     return httpx.Client(auth=(RX_USER, RX_PASSWORD), timeout=60.0, verify=False)
 
 
+def check_connection(url: str | None = None,
+                     user: str | None = None,
+                     password: str | None = None) -> dict:
+    """Проверить доступность RX и корректность кредов.
+
+    Запрашивает корень OData-сервиса. Без аргументов берёт текущий конфиг —
+    так кнопка «Проверить подключение» видит ровно то, с чем работает агент.
+    Различает три исхода: сеть не пустила, креды не подошли, всё хорошо.
+    """
+    url = (url or RX_ODATA_URL).rstrip("/")
+    user = user or RX_USER
+    password = password if password is not None else RX_PASSWORD
+
+    try:
+        with httpx.Client(auth=(user, password), timeout=15.0, verify=False) as client:
+            r = client.get(url)
+    except httpx.HTTPError as e:
+        return {
+            "ok": False,
+            "status": None,
+            "url": url,
+            "detail": f"Нет соединения с {url}: {type(e).__name__}: {e}",
+        }
+
+    if r.status_code == 401:
+        detail = f"Сервис отвечает, но креды отклонены (401) для пользователя {user}"
+    elif r.status_code == 200:
+        detail = f"Подключение успешно: {url} отвечает 200"
+    else:
+        detail = f"Неожиданный ответ {r.status_code} от {url}"
+
+    return {
+        "ok": r.status_code == 200,
+        "status": r.status_code,
+        "url": url,
+        "detail": detail,
+    }
+
+
 def _last_version_id(versions: list) -> int:
     return max(versions, key=lambda v: v.get("Number", 0))["Id"]
 

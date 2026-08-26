@@ -42,7 +42,14 @@
       </div>
     </section>
 
-    <section class="backoffice-workspace">
+    <div class="tabs" role="tablist" aria-label="Разделы бэк-офиса">
+      <button class="tab" type="button" role="tab" id="tab-stats"
+              aria-controls="panel-stats" aria-selected="true">Статистика</button>
+      <button class="tab" type="button" role="tab" id="tab-settings"
+              aria-controls="panel-settings" aria-selected="false">Настройки</button>
+    </div>
+
+    <section class="backoffice-workspace" id="panel-stats" role="tabpanel" aria-labelledby="tab-stats">
       <section class="kpi-grid" aria-label="KPI">
         <article class="kpi accent-orange">
           <div class="kpi-label">Всего классификаций</div>
@@ -100,9 +107,41 @@
         </article>
       </section>
     </section>
+
+    <section class="backoffice-workspace hidden" id="panel-settings"
+             role="tabpanel" aria-labelledby="tab-settings">
+      <section class="tool-section" aria-label="Настройки">
+        <div class="section-heading">
+          <div>
+            <h2>Настройки</h2>
+            <p>Значения записываются в <code id="settings-env-path">.env</code> и применяются сразу,
+               без перезапуска сервиса. Перед записью создаётся резервная копия файла.</p>
+          </div>
+        </div>
+
+        <div id="settings-loading" class="loading-line">
+          <span class="spinner"></span>
+          <span>Загрузка настроек...</span>
+        </div>
+
+        <div id="settings-groups" class="settings-groups hidden"></div>
+
+        <div class="settings-actions">
+          <button id="settings-save" class="btn" type="button" disabled>Сохранить</button>
+          <button id="settings-test-rx" class="btn btn-ghost" type="button" disabled>Проверить подключение к RX</button>
+          <button id="settings-reload" class="btn btn-ghost" type="button">Сбросить изменения</button>
+        </div>
+        <p class="settings-note">Поля с ключами и паролями показаны маской. Пустое поле — значение остаётся прежним.</p>
+
+        <div id="settings-status" class="settings-status"></div>
+      </section>
+    </section>
   </main>
+
+  <div id="toast" class="hidden toast"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="/static/backoffice.js"></script>
+  <script src="/static/settings.js"></script>
 </body>
 </html>
