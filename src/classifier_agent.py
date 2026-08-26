@@ -52,7 +52,6 @@ from config import (
     ENABLE_EMBEDDING_ADAPTER, ADAPTER_PATH,
     ENABLE_FULL_CLASSIFIER_FALLBACK, FULL_FALLBACK_SIM_THRESHOLD,
     ENABLE_QUESTION_DEDUP,
-    ENABLE_LLM_SEGMENTATION, MAX_SEGMENTS,
     LLM_APPEAL_CHAR_LIMIT, FULL_FALLBACK_INCLUDE_PATH,
     ENABLE_REPEAT_DETECTION, REPEAT_APPEAL_CODE,
     ENABLE_WITHDRAWAL_DETECTION, WITHDRAWAL_APPEAL_CODE,
@@ -407,19 +406,6 @@ L3-тема — это тематическое направление (напр
    • Автодороги (0003.0009.0099) vs благоустройство (0003.0009.0097):
      дороги общего пользования, улицы, трассы — их состояние, содержание, расчистка снега → 0099;
      дворы, придомовые и подъездные территории, тротуары → 0097
-   • СОЦИАЛЬНАЯ СФЕРА (раздел 0002) — самые частые смешения:
-     - 0390 vs 0420: качество лечения, работа врачей, запись, отказ в помощи, сроки → 0390 «Лечение
-       и оказание медицинской помощи»; выдача/наличие/оплата лекарств, льготные препараты → 0420
-       «Лекарственное обеспечение»
-     - 0327 vs 0325: жалоба на конкретную школу/сад/вуз, действия педагога, качество обучения →
-       0327 «Контроль качества и надзор»; сами требования, программы, ФГОС, учебники → 0325
-       «Образовательные стандарты»
-     - 0253 vs 0312: пособие/выплата в связи с безработицей, служба занятости → 0253 «Социальные
-       выплаты безработным»; льготы ветеранам, инвалидам, многодетным, проезд, ЖКУ-компенсации →
-       0312 «Дополнительные льготы отдельным категориям»
-     - 0272 vs 0294: претензия к РАБОТЕ органа (соцзащита, ПФР, МФЦ: сроки, отказ, грубость) →
-       0272 «Деятельность органов системы социального обеспечения»; сама мера поддержки, её
-       назначение и размер, соцобслуживание на дому → 0294 «Социальное обеспечение и поддержка»
 
 4. Запрещено: один код на разные вопросы; fallback "0001.0002.0027.0126" при наличии альтернатив.
 
@@ -782,61 +768,6 @@ class ClassifierAgent:
                 pass  # jsonschema not installed, skip validation
 
         return raw
-
-    SEGMENTATION_SYSTEM = (
-        "Ты выделяешь из обращения гражданина ВСЕ отдельные вопросы (предметы обращения). "
-        "Вопрос — это то, по чему ведомство должно принять отдельное решение. "
-        "Выделяй вопрос даже если он вписан в текст без нумерации и без слов-маркеров. "
-        "НЕ выделяй в отдельные вопросы: приветствия, ФИО и адрес заявителя, ссылки на "
-        "прошлые обращения, просьбу ответить письменно, благодарности. "
-        "Каждый вопрос переформулируй кратко и самостоятельно (одна фраза по сути). "
-        "Верни строго JSON: {\"questions\": [\"...\", \"...\"]}. "
-        "Если обращение об одном предмете — верни один элемент."
-    )
-
-    def _llm_split_questions(
-        self,
-        text: str,
-        provider: str,
-        model: str,
-        max_segments: int = None,
-    ) -> list[AppealQuestion]:
-        """Выделение вопросов обращения через LLM.
-
-        Детерминированный сегментатор ловит только явные маркеры, из-за чего вопросы
-        без нумерации теряются (14 из 37 замечаний ПУР — «добавить вопрос»).
-        Возвращает [] при любой проблеме — вызывающий код тогда идёт
-        детерминированным путём, поведение не ухудшается.
-        """
-        limit = MAX_SEGMENTS if max_segments is None else max_segments
-        try:
-            raw = self._ario_call(
-                messages=[
-                    {"role": "system", "content": self.SEGMENTATION_SYSTEM},
-                    {"role": "user", "content": _clip_for_llm(text)},
-                ],
-                model=model,
-                max_tokens=1200,
-                temperature=0.0,
-            )
-            data = json.loads(raw)
-            items = data.get("questions") if isinstance(data, dict) else None
-            if not isinstance(items, list):
-                return []
-            out = []
-            for item in items:
-                if not isinstance(item, str) or not item.strip():
-                    continue
-                out.append(AppealQuestion(text=item.strip(),
-                                          ordinal=len(out) + 1,
-                                          evidence="llm"))
-                if len(out) >= limit:
-                    break
-            return out
-        except Exception as exc:                                 # noqa: BLE001
-            print(f"  [Сегментация LLM] не удалась, откат на маркеры: "
-                  f"{type(exc).__name__}: {str(exc)[:80]}")
-            return []
 
     def _split_appeal_questions(self, text: str, max_segments: int = 7) -> list[AppealQuestion]:
         """Делегирует module-level функции — позволяет тестировать без агента."""
@@ -1901,17 +1832,10 @@ class ClassifierAgent:
         provider, model = self._resolve_llm(llm_provider, llm_model)
 
         # Шаг 1: Сегментация обращения на отдельные вопросы
-        segments = []
-        if ENABLE_LLM_SEGMENTATION:
-            segments = self._llm_split_questions(appeal_text, provider, model)
-            if segments:
-                print(f"  [Сегментация LLM] Выделено {len(segments)} вопрос(ов)")
-        if not segments:
-            segments = split_appeal_questions(appeal_text)
+        segments = split_appeal_questions(appeal_text)
         if not segments:
             segments = [AppealQuestion(text=appeal_text.strip(), ordinal=1, evidence="single")]
-        print(f"  [Сегментация] Выделено {len(segments)} вопрос(ов) "
-              f"(способ: {segments[0].evidence})")
+        print(f"  [Сегментация] Выделено {len(segments)} вопрос(ов)")
 
         # Шаг 1b: Опциональное LLM query expansion — переформулировать сегменты в терминах классификатора
         expansions: dict[int, str] = {}
