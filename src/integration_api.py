@@ -1,4 +1,10 @@
-"""Роутер интеграции с Directum RX: классификация документа по id."""
+"""Роутер интеграции с Directum RX.
+
+RX передаёт текст обращения прямо в запросе (`appeal_text`). Если текста нет,
+а указан `document_id`, сервис по-прежнему может забрать тело документа из RX
+по OData — прежний способ вызова остаётся рабочим.
+Формат ответа в обоих случаях одинаковый.
+"""
 
 import sys
 from pathlib import Path
@@ -14,7 +20,11 @@ router = APIRouter(prefix="/integration", tags=["Интеграция RX"])
 
 
 class ClassifyDocumentRequest(BaseModel):
-    document_id: int
+    # Текст обращения — основной способ: RX присылает его сразу
+    appeal_text: Optional[str] = None
+    # Идентификатор документа: возвращается в ответе как есть; если текста нет,
+    # используется для получения тела документа из RX по OData
+    document_id: Optional[int] = None
 
 
 REASONING_MAX_LEN = 1000  # Ограничение длины обоснования в ответе RX (символов)
@@ -31,7 +41,7 @@ class RxQuestion(BaseModel):
 
 
 class ClassifyDocumentResponse(BaseModel):
-    document_id: int
+    document_id: Optional[int]
     applicant_fio: Optional[str]
     summary: str
     reasoning: str = ""   # Обоснование модели по всем вопросам, сплошным текстом (<=1000 симв.)
@@ -60,18 +70,28 @@ async def classify_document(body: ClassifyDocumentRequest, request: Request):
     if agent is None:
         raise HTTPException(status_code=503, detail="Агент не инициализирован")
 
-    try:
-        text, _filename = rx_client.get_document_text(body.document_id)
-    except rx_client.DocumentNotFound:
-        raise HTTPException(status_code=404,
-                            detail=f"Документ {body.document_id} не найден в RX")
-    except rx_client.BodyFetchError as e:
-        raise HTTPException(status_code=502,
-                            detail=f"Не удалось получить тело документа из RX: {e}")
-
-    if not text or not text.strip():
+    # Текст из запроса — основной путь. Обращение к OData нужно только тогда,
+    # когда текста нет, но передан document_id (прежний способ вызова).
+    if body.appeal_text is not None:
+        text = body.appeal_text
+        if not text.strip():
+            raise HTTPException(status_code=400,
+                                detail="Текст обращения пустой")
+    elif body.document_id is not None:
+        try:
+            text, _filename = rx_client.get_document_text(body.document_id)
+        except rx_client.DocumentNotFound:
+            raise HTTPException(status_code=404,
+                                detail=f"Документ {body.document_id} не найден в RX")
+        except rx_client.BodyFetchError as e:
+            raise HTTPException(status_code=502,
+                                detail=f"Не удалось получить тело документа из RX: {e}")
+        if not text or not text.strip():
+            raise HTTPException(status_code=400,
+                                detail="Документ не содержит извлекаемого текста")
+    else:
         raise HTTPException(status_code=400,
-                            detail="Документ не содержит извлекаемого текста")
+                            detail="Нужен appeal_text либо document_id")
 
     try:
         result = agent.classify(text)
