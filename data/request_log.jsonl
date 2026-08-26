@@ -4131,3 +4131,26 @@
 {"timestamp": "2026-08-12T14:42:20.427711", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 1.068, "confidence": null, "candidates_count": 50, "error": null}
 {"timestamp": "2026-08-12T14:42:25.636802", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 5.183, "confidence": null, "candidates_count": 50, "error": null}
 {"timestamp": "2026-08-12T14:42:25", "ip": "172.19.0.1", "endpoint": "/classify", "elapsed_seconds": 6.316, "log_id": "cf4275ba-0857-45cb-8b5d-4b00983b5f11"}
+{"timestamp": "2026-08-26T12:16:46.999527", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 4.516, "confidence": null, "candidates_count": 50, "error": null}
+{"timestamp": "2026-08-26T12:18:47.664798", "event": "groq_request", "success": false, "attempt": 5, "elapsed_seconds": null, "confidence": null, "candidates_count": 50, "error": "Unexpected error: The read operation timed out"}
+{"timestamp": "2026-08-26T12:18:48.013393", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 0.28, "confidence": null, "candidates_count": 50, "error": null}
+{"timestamp": "2026-08-26T12:20:48.758632", "event": "groq_request", "success": false, "attempt": 5, "elapsed_seconds": null, "confidence": null, "candidates_count": 50, "error": "Unexpected error: The read operation timed out"}
+{"timestamp": "2026-08-26T12:21:08.204426", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 0.282, "confidence": null, "candidates_count": 50, "error": null}
+{"timestamp": "2026-08-26T12:23:08.815210", "event": "groq_request", "success": false, "attempt": 5, "elapsed_seconds": null, "confidence": null, "candidates_count": 50, "error": "Unexpected error: The read operation timed out"}
+{"timestamp": "2026-08-26T12:24:29.369962", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 0.494, "confidence": null, "candidates_count": 50, "error": null}
+{"timestamp": "2026-08-26T12:24:34.781608", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 5.411, "confidence": null, "candidates_count": 50, "error": null}
+{"timestamp": "2026-08-26T12:24:35.103534", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 0.256, "confidence": null, "candidates_count": 50, "error": null}
+{"timestamp": "2026-08-26T12:24:39.963221", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 4.859, "confidence": null, "candidates_count": 50, "error": null}
+{"timestamp": "2026-08-26T12:28:28.837396", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 0.33, "confidence": null, "candidates_count": 50, "error": null}
+{"timestamp": "2026-08-26T12:28:34.101305", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 5.263, "confidence": null, "candidates_count": 50, "error": null}
+{"timestamp": "2026-08-26T13:07:28.485462", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 0.367, "confidence": null, "candidates_count": 50, "error": null}
+{"timestamp": "2026-08-26T13:09:29.185119", "event": "groq_request", "success": false, "attempt": 5, "elapsed_seconds": null, "confidence": null, "candidates_count": 50, "error": "Unexpected error: The read operation timed out"}
+{"timestamp": "2026-08-26T13:09:29", "ip": "127.0.0.1", "endpoint": "/classify", "elapsed_seconds": 121.068, "log_id": ""}
+{"timestamp": "2026-08-26T14:58:11.702153", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 0.392, "confidence": null, "candidates_count": 50, "error": null}
+{"timestamp": "2026-08-26T14:58:17.145339", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 5.441, "confidence": null, "candidates_count": 50, "error": null}
+{"timestamp": "2026-08-26T15:20:04.617878", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 0.447, "confidence": null, "candidates_count": 50, "error": null}
+{"timestamp": "2026-08-26T15:20:09.805872", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 5.186, "confidence": null, "candidates_count": 50, "error": null}
+{"timestamp": "2026-08-26T15:28:01.867837", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 1.279, "confidence": null, "candidates_count": 100, "error": null}
+{"timestamp": "2026-08-26T15:28:14.487552", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 12.618, "confidence": null, "candidates_count": 100, "error": null}
+{"timestamp": "2026-08-26T15:28:48.507466", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 0.548, "confidence": null, "candidates_count": 50, "error": null}
+{"timestamp": "2026-08-26T15:28:55.585199", "event": "groq_request", "success": true, "attempt": 1, "elapsed_seconds": 7.077, "confidence": null, "candidates_count": 50, "error": null}
