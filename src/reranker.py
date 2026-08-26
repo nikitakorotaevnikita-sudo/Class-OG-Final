@@ -12,10 +12,9 @@ import os
 import sys
 from pathlib import Path
 
-os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
-os.environ.setdefault("HF_HUB_DISABLE_SSL", "1")
-
 sys.path.insert(0, str(Path(__file__).parent))
+
+import env_bootstrap  # noqa: F401  — .env до HF-библиотек
 
 from config import CROSS_ENCODER_MODEL, CE_RERANK_TOP_N, CE_BLEND_WEIGHT
 

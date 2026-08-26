@@ -17,6 +17,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+import env_bootstrap  # noqa: F401  — .env до HF-библиотек
+
 from sentence_transformers import SentenceTransformer
 from config import EMBEDDING_MODEL, CLASSIFIER_FLAT_PATH, VECTOR_DB_DIR
 from annotations_storage import build_search_text, list_annotated_codes

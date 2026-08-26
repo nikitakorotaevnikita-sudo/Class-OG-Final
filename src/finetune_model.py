@@ -26,6 +26,8 @@ from datetime import datetime
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+import env_bootstrap  # noqa: F401  — .env до HF-библиотек
+
 from sentence_transformers import SentenceTransformer, InputExample, evaluation
 from sentence_transformers.losses import MultipleNegativesRankingLoss
 from torch.utils.data import DataLoader

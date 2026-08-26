@@ -16,9 +16,12 @@ import json
 import math
 import os
 import re
-# Set HF mirror before importing sentence_transformers (fixes SSL issues in corporate networks)
-os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
-os.environ["HF_HUB_DISABLE_SSL"] = "1"
+from pathlib import Path as _Path
+
+sys.path.insert(0, str(_Path(__file__).parent))
+# .env до любых HF-библиотек: они читают HF_HUB_OFFLINE / HF_ENDPOINT один раз,
+# в момент импорта. В онлайне выставляет зеркало HF, в офлайне — запрет сети.
+import env_bootstrap  # noqa: F401,E402
 # Fix Groq API connection - corporate proxy breaks Bearer auth
 os.environ["NO_PROXY"] = "api.groq.com,*.groq.com"
 os.environ["no_proxy"] = "api.groq.com,*.groq.com"

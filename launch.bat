@@ -12,8 +12,16 @@ if not exist "venv\Scripts\python.exe" (
     exit /b 1
 )
 
-if not exist "data\vector_db\embeddings.npy" (
-    echo ERROR: Vector DB not found. Run setup.ps1 first.
+:: The DB directory is configurable (VECTOR_DB_DIR): an adapted build lives in
+:: data\vector_db_adapted_v3, so a hardcoded path blocked a healthy install.
+set "VDB_DIR=data\vector_db"
+for /f "tokens=2 delims==" %%a in ('findstr /R "^VECTOR_DB_DIR=" .env 2^>nul') do set "VDB_CFG=%%a"
+if defined VDB_CFG (
+    for %%p in ("!VDB_CFG!") do set "VDB_DIR=data\%%~nxp"
+)
+
+if not exist "!VDB_DIR!\embeddings.npy" (
+    echo ERROR: Vector DB not found in !VDB_DIR!. Run setup.ps1 or install_offline.bat first.
     pause
     exit /b 1
 )
