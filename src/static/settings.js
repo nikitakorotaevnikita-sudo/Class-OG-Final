@@ -106,6 +106,7 @@
     $('settings-loading').classList.add('hidden');
     $('settings-save').disabled = false;
     $('settings-test-rx').disabled = false;
+    $('settings-test-llm').disabled = false;
 
     const envPath = $('settings-env-path');
     if (envPath && data.env_path) envPath.textContent = data.env_path;
@@ -180,6 +181,32 @@
     }
   }
 
+  async function testLlm() {
+    const btn = $('settings-test-llm');
+    const form = readForm();
+    btn.disabled = true;
+    setStatus('Проверяем связь с LLM...', 'info');
+    try {
+      const res = await fetch('/api/settings/test-llm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          CUSTOM_LLM_BASE_URL: form.CUSTOM_LLM_BASE_URL || null,
+          CUSTOM_LLM_MODEL: form.CUSTOM_LLM_MODEL || null,
+          // пустой ключ → сервер возьмёт сохранённый
+          CUSTOM_LLM_API_KEY: form.CUSTOM_LLM_API_KEY || null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
+      setStatus(data.detail, data.ok ? 'success' : 'error');
+    } catch (error) {
+      setStatus('Проверка не выполнена: ' + error.message, 'error');
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
   async function testRx() {
     const btn = $('settings-test-rx');
     const form = readForm();
@@ -214,6 +241,7 @@
     $('tab-stats').addEventListener('click', () => activateTab('stats'));
     $('tab-settings').addEventListener('click', () => activateTab('settings'));
     $('settings-save').addEventListener('click', saveSettings);
+    $('settings-test-llm').addEventListener('click', testLlm);
     $('settings-test-rx').addEventListener('click', testRx);
     $('settings-reload').addEventListener('click', loadSettings);
 

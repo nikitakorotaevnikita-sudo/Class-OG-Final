@@ -474,6 +474,13 @@ class SettingsSaveRequest(BaseModel):
     values: dict[str, str]
 
 
+class LlmTestRequest(BaseModel):
+    """Проверка LLM-endpoint. Пустые поля → берутся текущие значения конфига."""
+    CUSTOM_LLM_BASE_URL: Optional[str] = None
+    CUSTOM_LLM_MODEL: Optional[str] = None
+    CUSTOM_LLM_API_KEY: Optional[str] = None
+
+
 class RxTestRequest(BaseModel):
     """Проверка подключения. Пустые поля → берутся текущие значения конфига."""
     RX_ODATA_URL: Optional[str] = None
@@ -522,6 +529,33 @@ async def test_rx_connection(request: RxTestRequest):
         url=(request.RX_ODATA_URL or None),
         user=(request.RX_USER or None),
         password=password,
+    )
+
+
+@app.post("/api/settings/test-llm", tags=["Настройки"])
+async def test_llm_connection(request: LlmTestRequest):
+    """Проверить связь с OpenAI-совместимым LLM-endpoint.
+
+    Пустые поля берутся из текущего конфига; пустой ключ → сохранённый.
+    Возвращает {ok, detail, models} — список моделей помогает поймать
+    расхождение имени модели с тем, что реально отдаёт сервер.
+    """
+    from starlette.concurrency import run_in_threadpool
+    import config
+    import llm_check
+    import settings_store
+
+    key = request.CUSTOM_LLM_API_KEY
+    if key is not None and key.strip() in ("", settings_store.MASK):
+        key = None
+
+    # Запрос синхронный и на недостижимом хосте висит до таймаута —
+    # в event loop это заморозило бы весь сервис.
+    return await run_in_threadpool(
+        llm_check.check_connection,
+        base_url=(request.CUSTOM_LLM_BASE_URL or config.CUSTOM_LLM_BASE_URL),
+        api_key=(key if key is not None else config.CUSTOM_LLM_API_KEY),
+        model=(request.CUSTOM_LLM_MODEL or config.CUSTOM_LLM_MODEL),
     )
 
 

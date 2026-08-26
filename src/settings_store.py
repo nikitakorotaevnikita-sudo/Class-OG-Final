@@ -26,7 +26,7 @@ SRC_DIR = Path(__file__).parent
 # значением (или пустым) — пользователь его не трогал, перезаписывать не нужно.
 MASK = "••••••••"
 
-LLM_PROVIDERS = ("ario", "groq", "gemini", "ollama")
+LLM_PROVIDERS = ("ario", "custom", "groq", "gemini", "ollama")
 
 
 class SettingsError(ValueError):
@@ -48,6 +48,13 @@ SETTINGS_SPEC: list[dict] = [
             {"key": "ARIO_BASE_URL", "label": "Ario: base URL", "kind": "text",
              "validate": "url"},
             {"key": "ARIO_API_KEY", "label": "Ario: API-ключ", "kind": "secret"},
+            {"key": "CUSTOM_LLM_BASE_URL", "label": "Свой endpoint: base URL",
+             "kind": "text", "validate": "url",
+             "hint": "OpenAI-совместимый адрес, например http://10.0.0.5:8000/v1"},
+            {"key": "CUSTOM_LLM_MODEL", "label": "Свой endpoint: модель", "kind": "text",
+             "hint": "Имя модели как его отдаёт GET /v1/models, например gpt-oss-20b"},
+            {"key": "CUSTOM_LLM_API_KEY", "label": "Свой endpoint: API-ключ", "kind": "secret",
+             "hint": "Если сервер не проверяет ключ — оставить пустым"},
             {"key": "GROQ_MODEL", "label": "Groq: модель", "kind": "text"},
             {"key": "GROQ_API_KEY", "label": "Groq: API-ключ", "kind": "secret"},
             {"key": "GEMINI_API_KEY", "label": "Gemini: API-ключ", "kind": "secret"},

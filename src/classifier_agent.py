@@ -42,6 +42,7 @@ from config import (
     LLM_PROVIDER, GEMINI_API_KEY,
     OLLAMA_MODEL, OLLAMA_BASE_URL,
     ARIO_API_KEY, ARIO_BASE_URL, ARIO_MODEL,
+    CUSTOM_LLM_API_KEY, CUSTOM_LLM_BASE_URL, CUSTOM_LLM_MODEL,
     ENABLE_CROSS_ENCODER_RERANKER, CROSS_ENCODER_MODEL,
     ENABLE_HEURISTIC_RERANKER,
     ENABLE_QUERY_EXPANSION,
@@ -608,6 +609,7 @@ class ClassifierAgent:
             "gemini": "gemini-2.5-flash",
             "ollama": OLLAMA_MODEL,
             "ario": ARIO_MODEL,
+            "custom": CUSTOM_LLM_MODEL,
         }
         if provider not in defaults:
             raise ValueError(f"Неподдерживаемый LLM provider: {provider}")
@@ -643,6 +645,16 @@ class ClassifierAgent:
                 emb = emb / n
         return emb
 
+    @staticmethod
+    def _openai_endpoint(provider: str | None = None) -> tuple[str, str]:
+        """Куда и с каким ключом идти OpenAI-совместимым транспортом.
+
+        `custom` — произвольный endpoint Заказчика, всё остальное — Ario.
+        """
+        if (provider or "").strip().lower() == "custom":
+            return CUSTOM_LLM_BASE_URL, CUSTOM_LLM_API_KEY
+        return ARIO_BASE_URL, ARIO_API_KEY
+
     def _ario_call(
         self,
         *,
@@ -652,6 +664,7 @@ class ClassifierAgent:
         temperature: float = 0.0,
         timeout: int = 60,
         schema: dict | None = None,
+        provider: str | None = None,
     ) -> str:
         """Centralized Ario httpx call with optional post-hoc schema validation.
 
@@ -674,8 +687,12 @@ class ClassifierAgent:
         import httpx
         import json as _json
 
+        _base_url, _api_key = self._openai_endpoint(provider)
+        _default_model = (CUSTOM_LLM_MODEL
+                          if (provider or "").strip().lower() == "custom"
+                          else ARIO_MODEL)
         payload: dict = {
-            "model": model or ARIO_MODEL,
+            "model": model or _default_model,
             "messages": messages,
             "temperature": temperature,
         }
@@ -683,8 +700,8 @@ class ClassifierAgent:
             payload["max_tokens"] = max_tokens
 
         client = httpx.Client(
-            base_url=ARIO_BASE_URL,
-            headers={"Authorization": f"Bearer {ARIO_API_KEY}"},
+            base_url=_base_url,
+            headers={"Authorization": f"Bearer {_api_key}"},
             timeout=timeout,
         )
         try:
@@ -1003,8 +1020,9 @@ class ClassifierAgent:
                 )
                 r.raise_for_status()
                 raw = r.json()["choices"][0]["message"]["content"].strip()
-            elif provider == "ario":
+            elif provider in ("ario", "custom"):
                 raw = self._ario_call(
+                    provider=provider,
                     messages=[
                         {"role": "system", "content": sys_msg},
                         {"role": "user", "content": user_msg},
@@ -1095,8 +1113,9 @@ class ClassifierAgent:
                 )
                 r.raise_for_status()
                 raw = r.json()["choices"][0]["message"]["content"].strip()
-            elif provider == "ario":
+            elif provider in ("ario", "custom"):
                 raw = self._ario_call(
+                    provider=provider,
                     messages=[
                         {"role": "system", "content": sys_msg},
                         {"role": "user", "content": user_msg},
@@ -1165,8 +1184,9 @@ class ClassifierAgent:
                 )
                 r.raise_for_status()
                 raw = r.json()["choices"][0]["message"]["content"].strip()
-            elif provider == "ario":
+            elif provider in ("ario", "custom"):
                 raw = self._ario_call(
+                    provider=provider,
                     messages=[
                         {"role": "system", "content": MULTI_QUERY_SYSTEM},
                         {"role": "user", "content": user_msg},
@@ -1237,8 +1257,9 @@ class ClassifierAgent:
                 )
                 r.raise_for_status()
                 return r.json()["choices"][0]["message"]["content"].strip()
-            elif provider == "ario":
+            elif provider in ("ario", "custom"):
                 return self._ario_call(
+                    provider=provider,
                     messages=[
                         {"role": "system", "content": QUERY_EXPANSION_SYSTEM},
                         {"role": "user", "content": user_msg},
@@ -1573,13 +1594,14 @@ class ClassifierAgent:
                     )
                     response.raise_for_status()
                     raw = response.json()["choices"][0]["message"]["content"].strip()
-                elif provider == "ario":
+                elif provider in ("ario", "custom"):
                     # Qwen3.6 generates verbose reasoning per question (~800-1500 tokens
                     # incl. l3_options array and explanations). With 128K context window
                     # we have plenty of headroom; be generous to avoid mid-JSON truncation.
                     n_q = max(len(compact_questions), 1)
                     explicit_max_tokens = min(16000, n_q * 2500 + 2000)
                     raw = self._ario_call(
+                    provider=provider,
                         messages=[
                             {"role": "system", "content": SYSTEM_PROMPT},
                             {"role": "user",   "content": user_message},
@@ -1726,8 +1748,9 @@ class ClassifierAgent:
             appeal_text=appeal_text[:4000],
             full_classifier=self._full_leaf_listing(),
         )
-        if provider == "ario":
+        if provider in ("ario", "custom"):
             raw = self._ario_call(
+                    provider=provider,
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": user_message},

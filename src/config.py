@@ -31,6 +31,14 @@ ARIO_API_KEY: str = os.environ.get("ARIO_API_KEY", "")
 ARIO_BASE_URL: str = os.getenv("ARIO_BASE_URL", "https://gpt.ario.directum360.ru/v1")
 ARIO_MODEL: str = os.getenv("ARIO_MODEL", "Qwen/Qwen3-32B-AWQ")
 
+# ── Произвольный OpenAI-совместимый endpoint ───────────────────────────────────
+# Для модели, поднятой у Заказчика через vLLM / Ollama / LM Studio и т.п.
+# Транспорт тот же, что у Ario: POST {base}/chat/completions с Bearer-токеном.
+# Выбирается значением LLM_PROVIDER=custom.
+CUSTOM_LLM_BASE_URL: str = os.getenv("CUSTOM_LLM_BASE_URL", "")
+CUSTOM_LLM_MODEL: str = os.getenv("CUSTOM_LLM_MODEL", "")
+CUSTOM_LLM_API_KEY: str = os.environ.get("CUSTOM_LLM_API_KEY", "")
+
 # ── Векторная база (numpy) ─────────────────────────────────────────────────────
 _data_dir = Path(__file__).parent.parent / "data"
 VECTOR_DB_DIR: str = os.getenv(
