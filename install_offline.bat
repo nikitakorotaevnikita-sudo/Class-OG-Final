@@ -2,13 +2,14 @@
 setlocal enabledelayedexpansion
 chcp 65001 >nul 2>&1
 
-set "PROJECT=%~dp0"
-if "%PROJECT:~-1%"=="\" set "PROJECT=%PROJECT:~0,-1%"
-cd /d "%PROJECT%"
+set "BUNDLE=%~dp0"
+if "%BUNDLE:~-1%"=="\" set "BUNDLE=%BUNDLE:~0,-1%"
+cd /d "%BUNDLE%"
 
 echo.
 echo =====================================================
-echo   Citizens Appeals Classification Agent -- Install
+echo   Class OG Final -- OFFLINE Install
+echo   (no internet required)
 echo =====================================================
 echo.
 
@@ -24,12 +25,11 @@ for %%T in (3.13 3.12 3.11) do (
         if !errorlevel! == 0 (
             for /f "tokens=*" %%V in ('py -%%T --version 2^>^&1') do set PYVER=%%V
             set PYTHON=py -%%T
-            echo    OK: !PYVER! [via py launcher]
+            echo    OK: !PYVER!
         )
     )
 )
 
-:: Fallback: bare python / python3.X executables on PATH
 if not defined PYTHON (
     for %%E in (python3.13 python3.12 python3.11 python) do (
         if not defined PYTHON (
@@ -49,25 +49,20 @@ if not defined PYTHON (
 if not defined PYTHON (
     echo.
     echo    ERROR: Python 3.11 / 3.12 / 3.13 not found.
-    echo.
-    echo    Download one of:
-    echo      https://www.python.org/downloads/release/python-31315/
-    echo      https://www.python.org/downloads/release/python-31210/
-    echo      https://www.python.org/downloads/release/python-3119/
-    echo    IMPORTANT: Check "Add Python to PATH" during install.
+    echo    Install Python FIRST, then re-run this script.
     echo.
     pause
     exit /b 1
 )
 
 :: =============================================================
-:: STEP 2: Create virtual environment
+:: STEP 2: Create venv
 :: =============================================================
 echo.
-echo [2/5] Setting up virtual environment...
+echo [2/5] Creating virtual environment...
 
 if exist "venv\Scripts\python.exe" (
-    echo    OK: venv already exists, skipping
+    echo    OK: venv already exists
 ) else (
     %PYTHON% -m venv venv
     if not exist "venv\Scripts\python.exe" (
@@ -79,38 +74,37 @@ if exist "venv\Scripts\python.exe" (
 )
 
 :: =============================================================
-:: STEP 3: Install dependencies
+:: STEP 3: Install from local wheels (NO INTERNET)
 :: =============================================================
 echo.
-echo [3/5] Installing dependencies...
+echo [3/5] Installing dependencies from offline wheels...
 
-venv\Scripts\pip.exe install --upgrade pip --quiet
-venv\Scripts\pip.exe install -r requirements.txt
+venv\Scripts\pip.exe install --upgrade pip --no-index --find-links=offline_bundle\wheels --quiet 2>nul
+venv\Scripts\pip.exe install --no-index --find-links=offline_bundle\wheels -r requirements.txt
 
 if %errorlevel% neq 0 (
-    echo    ERROR: pip install failed. Check requirements.txt
+    echo    ERROR: pip install from wheels failed
+    echo    Make sure all wheels are present in offline_bundle\wheels\
     pause
     exit /b 1
 )
-echo    OK: Dependencies installed
+echo    OK: Dependencies installed (offline)
 
 :: =============================================================
 :: STEP 4: Configure .env
 :: =============================================================
 echo.
-echo [4/5] Checking .env configuration...
+echo [4/5] Configuring .env...
 
 if not exist ".env" (
     copy ".env.example" ".env" >nul
-    echo    Created .env from .env.example
 )
 
-:: --- Select LLM Provider ---
 echo.
 echo    Select LLM provider:
-echo      [1] Groq         - llama-3.3-70b-versatile (recommended, free)
-echo      [2] Gemini       - gemini-2.5-flash (20 req/day free)
-echo      [3] Ollama/Qwen  - qwen2.5-14b (local, no limits)
+echo      [1] Groq         - llama-3.3-70b-versatile
+echo      [2] Gemini       - gemini-2.5-flash
+echo      [3] Ollama/Qwen  - qwen2.5-14b (local)
 echo      [4] Ario         - Qwen3.6-35B-A3B (Directum360)
 echo.
 set /p PROVIDER_CHOICE=   Enter (1/2/3/4):
@@ -125,61 +119,20 @@ if "%PROVIDER_CHOICE%"=="2" (
     set LLM_PROVIDER=groq
 )
 
-:: Update LLM_PROVIDER in .env
 powershell -Command "(Get-Content '.env') -replace 'LLM_PROVIDER=.*', 'LLM_PROVIDER=!LLM_PROVIDER!' | Set-Content '.env' -Encoding UTF8"
 echo    LLM Provider: !LLM_PROVIDER!
 
-:: --- Ask for API key based on provider ---
-if "!LLM_PROVIDER!"=="groq" (
-    echo.
-    echo    Get your free key at: https://console.groq.com/keys
-    echo    The key looks like: gsk_xxxxxxxxxxxxxxxxxxxx
-    echo.
-    set /p USER_KEY=   Enter GROQ_API_KEY:
-    if defined USER_KEY (
-        echo !USER_KEY! | findstr /C:"gsk_" >nul 2>&1
-        if !errorlevel! neq 0 (
-            echo    WARNING: Key should start with gsk_ -- saving as-is
-        )
-        powershell -Command "(Get-Content '.env') -replace 'GROQ_API_KEY=.*', 'GROQ_API_KEY=!USER_KEY!' | Set-Content '.env' -Encoding UTF8"
-        echo    OK: GROQ_API_KEY saved to .env
-    ) else (
-        echo    SKIPPED: No key entered. Edit .env manually later.
-    )
-)
-
-if "!LLM_PROVIDER!"=="gemini" (
-    echo.
-    echo    Get your free key at: https://ai.google.dev/
-    echo    The key looks like: AIzaXXXXXXXXXXXXXXXXXXX
-    echo.
-    set /p USER_KEY=   Enter GEMINI_API_KEY:
-    if defined USER_KEY (
-        powershell -Command "(Get-Content '.env') -replace 'GEMINI_API_KEY=.*', 'GEMINI_API_KEY=!USER_KEY!' | Set-Content '.env' -Encoding UTF8"
-        echo    OK: GEMINI_API_KEY saved to .env
-    ) else (
-        echo    SKIPPED: No key entered. Edit .env manually later.
-    )
-)
-
 if "!LLM_PROVIDER!"=="ario" (
-    echo.
-    echo    Enter your Ario API token:
     echo.
     set /p USER_KEY=   Enter ARIO_API_KEY:
     if defined USER_KEY (
-        :: Check if ARIO_API_KEY line exists in .env
         findstr /C:"ARIO_API_KEY" .env >nul 2>&1
         if !errorlevel!==0 (
             powershell -Command "(Get-Content '.env') -replace 'ARIO_API_KEY=.*', 'ARIO_API_KEY=!USER_KEY!' | Set-Content '.env' -Encoding UTF8"
         ) else (
             echo ARIO_API_KEY=!USER_KEY!>> .env
         )
-        echo    OK: ARIO_API_KEY saved to .env
-    ) else (
-        echo    SKIPPED: No key entered. Edit .env manually later.
     )
-    echo.
     set /p ARIO_URL=   Enter ARIO_BASE_URL [https://llm.ario.directum360.ru/v1]:
     if not defined ARIO_URL set ARIO_URL=https://llm.ario.directum360.ru/v1
     findstr /C:"ARIO_BASE_URL" .env >nul 2>&1
@@ -188,14 +141,14 @@ if "!LLM_PROVIDER!"=="ario" (
     ) else (
         echo ARIO_BASE_URL=!ARIO_URL!>> .env
     )
-    echo    OK: ARIO_BASE_URL = !ARIO_URL!
 )
 
-if "!LLM_PROVIDER!"=="ollama" (
+if "!LLM_PROVIDER!"=="groq" (
     echo.
-    echo    Install Ollama: https://ollama.com
-    echo    Then run: ollama pull qwen2.5-14b
-    echo.
+    set /p USER_KEY=   Enter GROQ_API_KEY (gsk_...):
+    if defined USER_KEY (
+        powershell -Command "(Get-Content '.env') -replace 'GROQ_API_KEY=.*', 'GROQ_API_KEY=!USER_KEY!' | Set-Content '.env' -Encoding UTF8"
+    )
 )
 
 :: --- Configure RX Integration ---
@@ -218,21 +171,28 @@ echo    OK: RX integration configured
 echo    OK: .env configured
 
 :: =============================================================
-:: STEP 5: Build vector database
+:: STEP 5: Setup embedding model + vector DB (offline)
 :: =============================================================
 echo.
-echo [5/5] Building vector database (5-15 min first time)...
+echo [5/5] Setting up embedding model and vector DB...
+
+:: Point to local model
+powershell -Command "$env = Get-Content '.env'; if ($env -notmatch 'EMBEDDING_MODEL=') { Add-Content '.env' 'EMBEDDING_MODEL=offline_bundle/models/multilingual-e5-base' } else { (Get-Content '.env') -replace 'EMBEDDING_MODEL=.*','EMBEDDING_MODEL=offline_bundle/models/multilingual-e5-base' | Set-Content '.env' -Encoding UTF8 }"
+
+if exist "offline_bundle\models\multilingual-e5-base\config.json" (
+    echo    OK: Embedding model found locally
+) else (
+    echo    WARNING: Model not found in offline_bundle\models\
+    echo    You may need to copy it manually or build vector DB with internet.
+)
 
 if exist "data\vector_db\embeddings.npy" (
-    echo    OK: Vector database already exists, skipping
+    echo    OK: Vector database already exists
 ) else (
-    echo    Loading multilingual-e5-base model and vectorizing 2108 entries...
-    echo    Please wait...
-    echo.
+    echo    Building vector database from local model...
     venv\Scripts\python.exe src/build_vectordb.py
     if %errorlevel% neq 0 (
-        echo.
-        echo    ERROR: Vector DB build failed. Check output above.
+        echo    ERROR: Vector DB build failed
         pause
         exit /b 1
     )
@@ -244,7 +204,8 @@ if exist "data\vector_db\embeddings.npy" (
 :: =============================================================
 echo.
 echo =====================================================
-echo   Installation complete! Run launch.bat to start.
+echo   OFFLINE Installation complete!
+echo   Run launch.bat to start the application.
 echo =====================================================
 echo.
 pause
