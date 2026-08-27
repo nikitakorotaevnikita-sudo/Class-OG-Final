@@ -43,6 +43,7 @@ class RxQuestion(BaseModel):
 class ClassifyDocumentResponse(BaseModel):
     document_id: Optional[int]
     applicant_fio: Optional[str]
+    applicant_email: Optional[str] = None
     summary: str
     reasoning: str = ""   # Обоснование модели по всем вопросам, сплошным текстом (<=1000 симв.)
     questions: list[RxQuestion]
@@ -101,6 +102,7 @@ async def classify_document(body: ClassifyDocumentRequest, request: Request):
     return ClassifyDocumentResponse(
         document_id=body.document_id,
         applicant_fio=result.applicant_fio,
+        applicant_email=result.applicant_email,
         summary=result.summary,
         reasoning=_build_reasoning(result.questions),
         questions=[RxQuestion(code=q.code, question=q.name)

@@ -19,6 +19,7 @@ class _Result:
     applicant_fio: str
     summary: str
     questions: list
+    applicant_email: str | None = None
 
 
 class _FakeAgent:
@@ -45,6 +46,7 @@ def test_classify_document_ok(monkeypatch):
     assert data == {
         "document_id": 26,
         "applicant_fio": "Иванов И.И.",
+        "applicant_email": None,
         "summary": "суть",
         "reasoning": "выбран по смыслу обращения",
         "questions": [{"code": "0001.0002.0003.0004", "question": "вопрос текстом"}],

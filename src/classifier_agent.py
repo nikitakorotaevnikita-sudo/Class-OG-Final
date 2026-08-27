@@ -71,6 +71,7 @@ from section_router import (
     build_l3_routing_prompt, parse_l3_routing_response,
 )
 from appeals_logger import get_logger
+from email_extractor import extract_applicant_email
 from fio_extractor import normalize_fio
 
 
@@ -252,6 +253,7 @@ class ClassificationResult:
     llm_provider: str = field(default="")
     llm_model: str = field(default="")
     applicant_fio: Optional[str] = field(default=None)  # «Фамилия И.О.» или None
+    applicant_email: Optional[str] = field(default=None)  # адрес заявителя или None
     summary: str = field(default="")                    # краткая суть, ≤250 символов
     full_fallback_used: bool = field(default=False)     # сработал ли full-classifier fallback
 
@@ -2103,6 +2105,9 @@ class ClassifierAgent:
         needs_verification = overall_confidence < MIN_CONFIDENCE
 
         applicant_fio, summary = extract_extra_fields(llm_result)
+        # Почта берётся из текста регуляркой, а не из ответа LLM: формат строгий,
+        # и опечатка модели сделала бы адрес нерабочим.
+        applicant_email = extract_applicant_email(appeal_text)
 
         result = ClassificationResult(
             vid_obrascheniya=llm_result.get("vid_obrascheniya", ""),
@@ -2115,6 +2120,7 @@ class ClassifierAgent:
             llm_provider=provider,
             llm_model=model,
             applicant_fio=applicant_fio,
+            applicant_email=applicant_email,
             summary=summary,
             full_fallback_used=full_fallback_used,
         )

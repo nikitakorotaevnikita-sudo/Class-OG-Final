@@ -64,6 +64,7 @@ Content-Type: application/json
 {
   "document_id": 26,
   "applicant_fio": "Иванов И.И.",
+  "applicant_email": "ivanov.i.i@yandex.ru",
   "summary": "Краткая суть обращения.",
   "reasoning": "Обоснование модели по всем вопросам, не более 1000 символов.",
   "questions": [
