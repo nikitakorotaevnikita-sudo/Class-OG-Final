@@ -20,6 +20,7 @@
 
 import json
 import queue
+import re
 import threading
 import time
 import uuid
@@ -33,6 +34,11 @@ STATUS_DONE = "done"
 STATUS_ERROR = "error"
 
 _ACTIVE = (STATUS_QUEUED, STATUS_RUNNING)
+
+# Идентификатор приходит из URL и подставляется в путь к файлу, поэтому формат
+# проверяется строго: uuid4().hex и ничего кроме него. Иначе «../../.env»
+# превратился бы в чтение произвольного файла.
+_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
 
 @dataclass
@@ -97,8 +103,17 @@ class JobQueue:
         return job
 
     def get(self, job_id: str) -> Optional[Job]:
+        """Задача из памяти, а если её там нет — с диска.
+
+        Чтение с диска нужно, когда опрос попал в другой процесс: при запуске
+        uvicorn с несколькими воркерами у каждого своя очередь в памяти, но
+        файлы задач общие. Такой опрос отдаст актуальное состояние вместо 404.
+        """
+        if not _ID_RE.match(job_id or ""):
+            return None
         with self._lock:
-            return self._jobs.get(job_id)
+            job = self._jobs.get(job_id)
+        return job if job is not None else self._load_one(job_id)
 
     def position(self, job_id: str) -> Optional[int]:
         """Место в очереди начиная с 1; None, если задача уже не ждёт."""
@@ -184,6 +199,19 @@ class JobQueue:
         tmp = self._path(job.id).with_suffix(".tmp")
         tmp.write_text(json.dumps(job.to_dict(), ensure_ascii=False), encoding="utf-8")
         tmp.replace(self._path(job.id))
+
+    def _load_one(self, job_id: str) -> Optional[Job]:
+        """Прочитать задачу с диска, не втягивая её в память этого процесса."""
+        path = self._path(job_id)
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        data.pop("elapsed_sec", None)
+        try:
+            return Job(**data)
+        except TypeError:
+            return None
 
     def _load_from_disk(self) -> None:
         for path in self._dir.glob("*.json"):

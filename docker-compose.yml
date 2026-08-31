@@ -12,6 +12,9 @@ services:
       - ./data/request_log.jsonl:/app/data/request_log.jsonl
       - ./data/historical_verified.jsonl:/app/data/historical_verified.jsonl
       - ./data/classifier_annotations.json:/app/data/classifier_annotations.json
+      # Фоновые задачи: без монтирования результаты живут только внутри
+      # контейнера и пропадают при его пересоздании
+      - ./data/jobs:/app/data/jobs
       # Active embedding DB (боевая — read-only at runtime)
       - ./data/vector_db_adapted_v3:/app/data/vector_db_adapted_v3:ro
       # Adapters and trained components

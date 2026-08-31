@@ -145,3 +145,38 @@ def test_stats_reports_worker_state(jobs):
 def test_unknown_job_id_returns_none(jobs):
     assert jobs.get("нет-такого") is None
     assert jobs.position("нет-такого") is None
+
+def test_get_reads_job_created_by_another_process(tmp_path):
+    """Опрос может попасть в другой процесс uvicorn — файлы задач общие."""
+    writer = JobQueue(jobs_dir=tmp_path / "jobs")
+    job = writer.submit(lambda: {"code": "0003.0009.0099.0742.0110"})
+    assert wait_for(lambda: writer.get(job.id).status == STATUS_DONE)
+
+    # Второй экземпляр создан ДО постановки задачи и о ней в памяти не знает.
+    reader = JobQueue(jobs_dir=tmp_path / "jobs")
+    reader._jobs.clear()
+    seen = reader.get(job.id)
+    assert seen is not None
+    assert seen.status == STATUS_DONE
+    assert seen.result == {"code": "0003.0009.0099.0742.0110"}
+
+
+@pytest.mark.parametrize("bad_id", [
+    "../../.env",
+    "..\\..\\.env",
+    "0000000000000000000000000000000g",   # не hex
+    "0" * 31,                             # короче uuid4().hex
+    "",
+    "nope",
+])
+def test_get_rejects_ids_that_are_not_uuid_hex(jobs, bad_id):
+    """Идентификатор подставляется в путь, поэтому формат проверяется строго."""
+    assert jobs.get(bad_id) is None
+
+
+def test_traversal_attempt_does_not_read_foreign_file(tmp_path):
+    """Прямая попытка вылезти из каталога задач не должна ничего прочитать."""
+    secret = tmp_path / "secret.json"
+    secret.write_text('{"id": "x", "status": "done"}', encoding="utf-8")
+    jobs = JobQueue(jobs_dir=tmp_path / "jobs")
+    assert jobs.get("../secret") is None

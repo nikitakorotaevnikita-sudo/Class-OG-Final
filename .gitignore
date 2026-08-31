@@ -87,4 +87,5 @@ playwright-report/
 logs/
 
 # Фоновые задачи классификации: в результатах ФИО, почта и суть обращения — ПДн
-data/jobs/
+data/jobs/*
+!data/jobs/.gitkeep
