@@ -1,2 +1,9 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Shell-скрипты и unit-файлы systemd только с LF: при checkout на Windows
+# core.autocrlf=true подставил бы CRLF, и на Linux запуск падает с
+# "bad interpreter: No such file or directory".
+*.sh text eol=lf
+*.service text eol=lf
+*.service.template text eol=lf
