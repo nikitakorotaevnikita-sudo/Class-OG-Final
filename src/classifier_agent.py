@@ -39,6 +39,7 @@ from sentence_transformers import SentenceTransformer
 from dataclasses import dataclass, field
 from typing import Optional
 from config import (
+    LLM_TIMEOUT_SEC,
     GROQ_API_KEY, GROQ_MODEL,
     VECTOR_DB_DIR, EMBEDDING_MODEL,
     TOP_K_CANDIDATES, TOP_K_RESULT, MIN_CONFIDENCE, RETRIEVAL_POOL_SIZE, LEXICAL_POOL_SIZE,
@@ -1614,7 +1615,7 @@ class ClassifierAgent:
                         model=model,
                         max_tokens=explicit_max_tokens,
                         temperature=0.1,
-                        timeout=max(120, n_q * 40),
+                        timeout=max(LLM_TIMEOUT_SEC, n_q * 40),
                         schema=None,
                     )
                 else:
@@ -1763,7 +1764,7 @@ class ClassifierAgent:
                 model=model,
                 max_tokens=8000,
                 temperature=0.1,
-                timeout=180,
+                timeout=max(LLM_TIMEOUT_SEC, 180),
                 schema=None,
             )
         elif provider == "gemini":

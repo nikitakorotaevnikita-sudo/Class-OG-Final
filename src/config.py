@@ -35,6 +35,16 @@ ARIO_MODEL: str = os.getenv("ARIO_MODEL", "Qwen/Qwen3-32B-AWQ")
 # Для модели, поднятой у Заказчика через vLLM / Ollama / LM Studio и т.п.
 # Транспорт тот же, что у Ario: POST {base}/chat/completions с Bearer-токеном.
 # Выбирается значением LLM_PROVIDER=custom.
+# Сколько ждать ответа LLM на основном вызове. Новые сборки модели отвечают
+# дольше двух минут, поэтому по умолчанию 300 с: срабатывать должен таймаут
+# вызывающей стороны, а не наш.
+LLM_TIMEOUT_SEC: int = int(os.getenv("LLM_TIMEOUT_SEC", "300"))
+
+# Фоновая обработка: RX получает идентификатор задачи сразу и опрашивает статус.
+JOBS_DIR: str = os.getenv("JOBS_DIR", str(Path(__file__).parent.parent / "data" / "jobs"))
+JOB_TTL_HOURS: float = float(os.getenv("JOB_TTL_HOURS", "24"))
+JOB_MAX_QUEUED: int = int(os.getenv("JOB_MAX_QUEUED", "100"))
+
 CUSTOM_LLM_BASE_URL: str = os.getenv("CUSTOM_LLM_BASE_URL", "")
 CUSTOM_LLM_MODEL: str = os.getenv("CUSTOM_LLM_MODEL", "")
 CUSTOM_LLM_API_KEY: str = os.environ.get("CUSTOM_LLM_API_KEY", "")
