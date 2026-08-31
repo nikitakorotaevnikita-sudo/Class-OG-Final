@@ -30,6 +30,11 @@ ROOT = Path(__file__).resolve().parent.parent
 BUNDLE = ROOT / "offline_bundle"
 
 OK, WARN, FAIL = "OK  ", "WARN", "FAIL"
+
+# Режим установки: офлайн-стенд требует запрета сети, обычная машина — нет.
+# Переключается флагом --online и меняет часть проверок с блокирующих на
+# предупреждения (одна и та же проверка нужна в обоих случаях, но её вес разный).
+ONLINE = False
 _results: list[tuple[str, str, str]] = []
 
 
@@ -170,12 +175,17 @@ def check_env_file() -> None:
 
     if active.get("HF_HUB_OFFLINE", "").lower() in ("1", "true", "yes", "on"):
         report(OK, "HF_HUB_OFFLINE=1 — сеть в HF-библиотеках запрещена")
+    elif ONLINE:
+        report(OK, "HF_HUB_OFFLINE не задан — модель будет догружаться из сети",
+               "для изолированного стенда флаг обязателен")
     else:
         report(FAIL, "в .env нет активной строки HF_HUB_OFFLINE=1",
                "без неё sentence-transformers пойдёт в сеть и упадёт с FileMetadataError")
 
     model = active.get("EMBEDDING_MODEL", "")
-    if not model:
+    if not model and ONLINE:
+        report(OK, "EMBEDDING_MODEL не задан — берётся intfloat/multilingual-e5-base из сети")
+    elif not model:
         report(FAIL, "в .env нет активной строки EMBEDDING_MODEL",
                "иначе берётся значение по умолчанию intfloat/multilingual-e5-base — это загрузка из интернета")
     elif "/" in model and not (ROOT / model).exists() and not Path(model).exists():
@@ -279,6 +289,8 @@ def check_runtime() -> None:
 
     if data.get("offline"):
         report(OK, "офлайн-режим HF активен (флаг дошёл до huggingface_hub)")
+    elif ONLINE:
+        report(OK, "офлайн-режим HF не включён (обычная машина с доступом в сеть)")
     else:
         report(FAIL, "HF_HUB_OFFLINE не дошёл до huggingface_hub",
                "проверить, что env_bootstrap импортируется до sentence_transformers")
@@ -304,15 +316,24 @@ def check_runtime() -> None:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--stage", choices=("pre", "post"), default="pre")
+    ap.add_argument("--online", action="store_true",
+                    help="машина с доступом в интернет: не требовать офлайн-флагов")
     args = ap.parse_args()
 
-    print(f"\n  Проверка офлайн-установки: стадия {args.stage}")
+    global ONLINE
+    ONLINE = args.online
+
+    mode = "обычной" if ONLINE else "офлайн-"
+    print(f"\n  Проверка {mode}установки: стадия {args.stage}")
     print(f"  Корень проекта: {ROOT}\n")
 
     if args.stage == "pre":
         tag = check_python()
-        check_wheels(tag)
-        check_model()
+        if not ONLINE:
+            # Онлайн-установке комплект не нужен: колёса берутся с PyPI,
+            # модель — с Hugging Face.
+            check_wheels(tag)
+            check_model()
         check_vector_db()
         check_env_file()
     else:

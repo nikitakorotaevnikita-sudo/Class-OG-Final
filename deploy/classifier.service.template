@@ -1,0 +1,32 @@
+[Unit]
+Description=Class OG Final — классификатор обращений граждан (RAG + LLM)
+Documentation=https://github.com/nikitakorotaevnikita-sudo/Class-OG-Final
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+WorkingDirectory=@WORKDIR@
+# Настройки читает сам сервис через python-dotenv из .env в рабочем каталоге.
+# EnvironmentFile здесь намеренно НЕ используется: systemd разбирает файл по
+# своим правилам и спотыкается на значениях с # и кавычками.
+ExecStart=@WORKDIR@/venv/bin/python -m uvicorn src.api_server:app --host 0.0.0.0 --port @PORT@
+Restart=on-failure
+RestartSec=5
+# Модель эмбеддингов грузится до минуты — не считать это зависанием.
+TimeoutStartSec=180
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=classifier
+
+# Минимальное ужесточение: сервису нужен только свой каталог на запись
+# (логи обращений в data/*.jsonl и правка .env из бэк-офиса).
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=@WORKDIR@
+
+[Install]
+WantedBy=multi-user.target
