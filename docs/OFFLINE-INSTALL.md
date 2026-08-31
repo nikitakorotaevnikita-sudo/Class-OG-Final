@@ -10,13 +10,20 @@
 На машине **с интернетом**, из корня проекта:
 
 ```bash
-python scripts/make_offline_bundle.py --python-version 3.11
+python scripts/make_offline_bundle.py --python-version 3.11            # для Windows-стенда
+python scripts/make_offline_bundle.py --python-version 3.11 --linux    # для Linux-стенда
 ```
+
+Для Linux нужен именно `--linux`: он подставляет теги `manylinux2014_x86_64` и
+`manylinux_2_28_x86_64`. Разные пакеты собраны под разные manylinux (numpy — под первый,
+torch — под второй), а тег `linux_x86_64` не подходит вовсе — под ним колёс нет, и комплект
+получится пустым.
 
 Скопировать проект на стенд (**без `venv`** — см. ниже) и там запустить:
 
 ```bash
-install_offline.bat
+install_offline.bat     # Windows
+./install_offline.sh    # Linux
 ```
 
 Установщик сам проверит комплект, создаст окружение из колёс, заполнит `.env`,

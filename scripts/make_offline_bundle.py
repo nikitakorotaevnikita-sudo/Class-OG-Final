@@ -74,7 +74,7 @@ def run(cmd: list[str]) -> int:
     return subprocess.call(cmd)
 
 
-def download_wheels(py_version: str, platform: str, clean: bool) -> bool:
+def download_wheels(py_version: str, platforms: list[str], clean: bool) -> bool:
     """Скачивает колёса под целевой ABI, не собирая ничего из исходников."""
     wheels = BUNDLE / "wheels"
     if clean and wheels.exists():
@@ -83,19 +83,25 @@ def download_wheels(py_version: str, platform: str, clean: bool) -> bool:
 
     # --only-binary=:all: обязателен: без него pip притащит sdist, который на
     # стенде пришлось бы компилировать — а компилятора там нет.
+    #
+    # Платформ может быть несколько: пакеты собраны под разные manylinux. numpy
+    # публикует manylinux2014, torch — manylinux_2_28, и по одному тегу часть
+    # колёс просто не находится. Голый linux_x86_64 не подходит вовсе: под ним
+    # колёс нет, pip молча скачивает пустоту.
     cmd = [
         sys.executable, "-m", "pip", "download",
         "-r", str(ROOT / "requirements.txt"),
         "-d", str(wheels),
         "--only-binary=:all:",
         "--python-version", py_version,
-        "--platform", platform,
     ]
+    for platform in platforms:
+        cmd += ["--platform", platform]
     code = run(cmd)
     if code != 0:
         print("\n  Скачивание колёс не удалось.")
         print("  Частая причина: у пакета нет колеса под целевую пару "
-              f"(python {py_version}, {platform}).")
+              f"(python {py_version}, {', '.join(platforms)}).")
         return False
 
     # pip тянет зависимости по маркерам целевой версии, но саму requirements-строку
@@ -185,7 +191,12 @@ def main() -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--python-version", default=f"{sys.version_info.major}.{sys.version_info.minor}",
                     help="минор Python НА СТЕНДЕ (например 3.11). По умолчанию — текущий")
-    ap.add_argument("--platform", default="win_amd64", help="платформа колёс (по умолчанию win_amd64)")
+    ap.add_argument("--platform", default="win_amd64",
+                    help="теги платформы через запятую (по умолчанию win_amd64). "
+                         "Для Linux проще указать --linux")
+    ap.add_argument("--linux", action="store_true",
+                    help="ярлык для Linux x86_64: manylinux2014 + manylinux_2_28 "
+                         "(разные пакеты собраны под разные manylinux)")
     ap.add_argument("--model-dir", default="",
                     help="готовый каталог модели; если не задан — скачивается с HF")
     ap.add_argument("--vector-db", default="",
@@ -195,7 +206,9 @@ def main() -> int:
     args = ap.parse_args()
 
     print(f"\n  Сборка офлайн-комплекта в {BUNDLE}")
-    print(f"  Целевой интерпретатор: Python {args.python_version} / {args.platform}\n")
+    platforms = (["manylinux2014_x86_64", "manylinux_2_28_x86_64"] if args.linux
+                 else [p.strip() for p in args.platform.split(",") if p.strip()])
+    print(f"  Целевой интерпретатор: Python {args.python_version} / {', '.join(platforms)}\n")
     BUNDLE.mkdir(parents=True, exist_ok=True)
 
     sys.path.insert(0, str(ROOT / "src"))
@@ -209,7 +222,7 @@ def main() -> int:
     if args.skip_wheels:
         print("  колёса: пропущено по флагу")
     else:
-        steps.append(("колёса", download_wheels(args.python_version, args.platform,
+        steps.append(("колёса", download_wheels(args.python_version, platforms,
                                                 clean=not args.keep_wheels)))
     steps.append(("модель", copy_model(args.model_dir)))
     steps.append(("векторная база", copy_vector_db(vdb)))
