@@ -678,6 +678,20 @@ class ClassifierAgent:
             return {}
         return {"Authorization": f"Bearer {key}"}
 
+    @staticmethod
+    def _raise_with_body(response, where: str = "/chat/completions") -> None:
+        """`raise_for_status`, но с телом ответа в логе.
+
+        Без тела HTTP-ошибка не объясняет причину: vLLM на неизвестное имя
+        модели отвечает 404 с текстом «The model X does not exist», и по одному
+        коду 404 это не отличить от неверного пути. Ровно на этом застряла
+        диагностика на стенде.
+        """
+        if response.status_code >= 400:
+            body = (response.text or "")[:500]
+            print(f"  [LLM] HTTP {response.status_code} на {where}. Тело ответа: {body}")
+        response.raise_for_status()
+
     def _ario_call(
         self,
         *,
@@ -740,6 +754,7 @@ class ClassifierAgent:
                     f"Response body: {body_preview}"
                 )
             try:
+                # Тело и модель уже напечатаны выше — здесь только исключение.
                 r.raise_for_status()
             except httpx.HTTPStatusError as exc:
                 body = (exc.response.text or "")[:400]
@@ -1055,7 +1070,7 @@ class ClassifierAgent:
                         "max_tokens": 200,
                     },
                 )
-                r.raise_for_status()
+                self._raise_with_body(r)
                 raw = r.json()["choices"][0]["message"]["content"].strip()
             elif provider in ("ario", "custom"):
                 raw = self._ario_call(
@@ -1148,7 +1163,7 @@ class ClassifierAgent:
                         "max_tokens": 200,
                     },
                 )
-                r.raise_for_status()
+                self._raise_with_body(r)
                 raw = r.json()["choices"][0]["message"]["content"].strip()
             elif provider in ("ario", "custom"):
                 raw = self._ario_call(
@@ -1219,7 +1234,7 @@ class ClassifierAgent:
                         "max_tokens": max_tokens,
                     },
                 )
-                r.raise_for_status()
+                self._raise_with_body(r)
                 raw = r.json()["choices"][0]["message"]["content"].strip()
             elif provider in ("ario", "custom"):
                 raw = self._ario_call(
@@ -1292,7 +1307,7 @@ class ClassifierAgent:
                         "max_tokens": 120,
                     },
                 )
-                r.raise_for_status()
+                self._raise_with_body(r)
                 return r.json()["choices"][0]["message"]["content"].strip()
             elif provider in ("ario", "custom"):
                 return self._ario_call(
@@ -1629,7 +1644,7 @@ class ClassifierAgent:
                             "temperature": 0.1,
                         },
                     )
-                    response.raise_for_status()
+                    self._raise_with_body(response)
                     raw = response.json()["choices"][0]["message"]["content"].strip()
                 elif provider in ("ario", "custom"):
                     # Qwen3.6 generates verbose reasoning per question (~800-1500 tokens
@@ -1817,7 +1832,7 @@ class ClassifierAgent:
                     "temperature": 0.1,
                 },
             )
-            response.raise_for_status()
+            self._raise_with_body(response)
             raw = response.json()["choices"][0]["message"]["content"].strip()
         else:
             response = self._get_groq_client().chat.completions.create(
