@@ -2,10 +2,10 @@
 # НЕ продуктивный — служит только для верификации совместимости.
 #
 # Отличия от боевого Dockerfile:
-#   * torch ставится CPU-only (боевой тянет CUDA, образ ~8.8 ГБ вместо ~2 ГБ);
 #   * ставится pytest, а tests/ монтируется при запуске (в .dockerignore они
 #     исключены из контекста сборки — боевому образу тесты не нужны);
 #   * не копируются веса моделей (тесты их не грузят).
+# Torch CPU-only — как в боевом образе.
 #
 # Сборка и запуск:
 #   docker build -f Dockerfile.py313check -t og-py313check .
@@ -25,7 +25,7 @@ COPY src/ ./src/
 COPY scripts/ ./scripts/
 COPY data/classifier_flat.json data/classifier_hierarchy.json data/test_appeals.json ./data/
 COPY data/allowed_codes_top69.json ./data/
-COPY data/vector_db/ ./data/vector_db/
+COPY data/vector_db_adapted_v3/ ./data/vector_db_adapted_v3/
 COPY models/adapter_v1.npz models/adapter_v1.json models/ltr_v1.json ./models/
 COPY .env.example .env
 

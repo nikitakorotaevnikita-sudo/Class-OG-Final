@@ -9,7 +9,7 @@
 | | |
 |---|---|
 | Docker | Docker Desktop (Windows/macOS) или Docker Engine (Linux) |
-| Диск | **~10 ГБ** свободно: образ 8.8 ГБ (тянет CUDA-сборку torch) + слои |
+| Диск | **~3 ГБ** свободно: CPU-сборка torch (~2 ГБ слоёв) + модель эмбеддингов. CUDA-образ (~8.8 ГБ) только если собрать с `--build-arg TORCH_INDEX_URL=https://download.pytorch.org/whl/cu124` |
 | RAM | ~1.5 ГБ на контейнер. При Docker Desktop на WSL2 учитывать, что виртуальная машина забирает больше и не возвращает — см. «Известные грабли» |
 | Сеть | доступ к Ario **из корпоративной сети или через VPN**, доступ к OData RX, открытый входящий порт для RX |
 | Python на хосте | для установки в Docker **не нужен**; для установки без Docker — 3.11, 3.12 или 3.13 (см. шаг 5б) |
@@ -91,11 +91,20 @@ HOST_PORT=8010
 
 ## 5. Запуск
 
+Перед `up` на хосте должен быть файл `.env` (`cp .env.example .env` и заполнить ключи). Compose монтирует его в контейнер: без файла Docker создаст **каталог** `.env`, и сервис не прочитает настройки.
+
 ```bash
 docker compose build classifier
 docker compose up -d classifier
 curl http://localhost:8010/health
 # {"status":"ok","agent_ready":true,"classifier_entries":2108}
+```
+
+LLM или RX на той же машине, что и Docker: из контейнера `localhost` — это сам контейнер. На Linux в `.env` указывать `host.docker.internal` (compose прописывает его через `extra_hosts`):
+
+```
+OLLAMA_BASE_URL=http://host.docker.internal:11434/v1
+CUSTOM_LLM_BASE_URL=http://host.docker.internal:8000/v1
 ```
 
 Первый старт — до минуты: загружается модель эмбеддингов. `agent_ready: false` означает «ещё грузится».

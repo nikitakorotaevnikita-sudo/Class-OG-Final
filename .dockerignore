@@ -11,3 +11,11 @@ models/*
 !models/ltr_v1.json
 docs/
 tests/
+offline_bundle/
+.hf-cache/
+hf-cache/
+node_modules/
+Template/
+.claude/
+logs/
+data/eval_baselines/

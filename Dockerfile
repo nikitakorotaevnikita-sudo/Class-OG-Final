@@ -5,6 +5,16 @@ FROM python:${PYTHON_VERSION}-slim
 
 WORKDIR /app
 
+# OpenMP: на debian-slim без libgomp1 numpy/torch падают с «libgomp.so.1 not found».
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# CPU-torch по умолчанию. pip из requirements иначе тянет CUDA (~8 ГБ) —
+# бесполезно на Linux-сервере без GPU. Для CUDA:
+#   docker build --build-arg TORCH_INDEX_URL=https://download.pytorch.org/whl/cu124 .
+ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir torch --index-url ${TORCH_INDEX_URL}
+
 # Устанавливаем зависимости отдельно для кэширования
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

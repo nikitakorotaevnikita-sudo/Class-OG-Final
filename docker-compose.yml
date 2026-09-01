@@ -6,7 +6,16 @@ services:
       # host 8010 (адрес для разработчика/RX) → внутренний 8005 приложения.
       # При переносе на другую машину порт меняется через HOST_PORT в .env.
       - "${HOST_PORT:-8010}:8005"
+    extra_hosts:
+      # На Linux Docker нет host.docker.internal по умолчанию. Нужно, чтобы
+      # контейнер видел Ollama / vLLM / RX на той же машине.
+      # В .env: OLLAMA_BASE_URL=http://host.docker.internal:11434/v1
+      - "host.docker.internal:host-gateway"
     volumes:
+      # Хостовый .env. Без этого бэк-офис пишет настройки в слой образа,
+      # и они пропадают при recreate. Файл должен существовать до up
+      # (cp .env.example .env) — иначе Docker создаст каталог.
+      - ./.env:/app/.env
       # persistent storage for logs and fine-tuned models
       - ./data/appeals_log.jsonl:/app/data/appeals_log.jsonl
       - ./data/request_log.jsonl:/app/data/request_log.jsonl
