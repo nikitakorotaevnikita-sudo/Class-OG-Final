@@ -19,11 +19,12 @@ services:
       - ./data/vector_db_adapted_v3:/app/data/vector_db_adapted_v3:ro
       # Adapters and trained components
       - ./models:/app/models
-      # Кэш моделей Hugging Face (read-only): контейнер переиспользует веса,
-      # уже скачанные на хост. Путь машинно-зависимый — задаётся HF_CACHE_DIR
-      # в .env. Если переменная не задана и папки нет, Docker смонтирует пустой
-      # каталог и контейнер скачает multilingual-e5-base (~435 МБ) из интернета.
-      - ${HF_CACHE_DIR:-./.hf-cache}:/root/.cache/huggingface:ro
+      # Кэш моделей Hugging Face. Контейнер переиспользует веса, уже скачанные
+      # на хост; путь машинно-зависимый — задаётся HF_CACHE_DIR в .env.
+      # Монтируется на ЗАПИСЬ: при пустом кеше контейнер скачивает
+      # multilingual-e5-base (~435 МБ) и должен куда-то её положить. С :ro
+      # скачивание падало, даже когда интернет был.
+      - ${HF_CACHE_DIR:-./.hf-cache}:/root/.cache/huggingface
       # Allowed-codes whitelist (changes don't require image rebuild)
       - ./data/allowed_codes_top69.json:/app/data/allowed_codes_top69.json:ro
     env_file:

@@ -102,3 +102,17 @@ def test_env_bootstrap_imported_before_hf_libraries(module):
                     f"{module}.py:{i + 1} импортирует {hf} раньше env_bootstrap "
                     f"(строка {bootstrap_at + 1}) — офлайн-флаги из .env не подействуют"
                 )
+
+@pytest.mark.parametrize('raw,expected', [
+    ('https://huggingface.co/', 'https://huggingface.co'),
+    ('https://huggingface.co', 'https://huggingface.co'),
+    ('http://hf.local:8080///', 'http://hf.local:8080'),
+])
+def test_trailing_slash_in_endpoint_is_stripped(raw, expected):
+    """Слэш в конце ломает запросы: URL склеивается как f"{endpoint}/api/...",
+    и «https://huggingface.co//api/models/...» отдаёт 404 — библиотека переводит
+    это в «Distant resource does not seem to be on huggingface.co».
+    Значение приходит из .env руками, поэтому нормализуем сами."""
+    result = run_probe(ENDPOINT_PROBE, {'HF_ENDPOINT': raw})
+    assert result['endpoint'] == expected
+    assert result['library_endpoint'] == expected

@@ -45,6 +45,15 @@ if is_offline():
     # ошибках, только запутывает диагностику.
     os.environ.pop("HF_ENDPOINT", None)
 
+# Слэш в конце адреса ломает запросы: библиотека склеивает URL как
+# f"{HF_ENDPOINT}/api/...", и «https://huggingface.co/» превращается в
+# «https://huggingface.co//api/...» — на это HF отвечает 404, а библиотека
+# сообщает «Distant resource does not seem to be on huggingface.co».
+# Значение приходит из .env руками, поэтому слэш обрезаем сами.
+_endpoint = os.getenv("HF_ENDPOINT", "").strip()
+if _endpoint:
+    os.environ["HF_ENDPOINT"] = _endpoint.rstrip("/")
+
 # В онлайне адрес не навязывается: библиотека сама идёт на huggingface.co.
 # Раньше здесь подставлялось зеркало hf-mirror.com — оно помогало в одной
 # конкретной корпоративной сети, но на стенде с обычным интернетом ломало
