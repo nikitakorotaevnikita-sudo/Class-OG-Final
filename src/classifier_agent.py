@@ -526,12 +526,15 @@ def detect_withdrawal_markers(text: str) -> bool:
 
 # ── Класс агента ───────────────────────────────────────────────────────────────
 
+SUPPORTED_LLM_PROVIDERS = frozenset({"groq", "gemini", "ollama", "ario", "custom"})
+
+
 class ClassifierAgent:
     def __init__(self):
         print("Инициализация агента классификации...")
 
-        # LLM client (Groq, Gemini, Ollama или Ario)
-        self.llm = LLM_PROVIDER if LLM_PROVIDER in {"groq", "gemini", "ollama", "ario"} else "groq"
+        # LLM client (Groq, Gemini, Ollama, Ario или custom / vLLM)
+        self.llm = LLM_PROVIDER if LLM_PROVIDER in SUPPORTED_LLM_PROVIDERS else "groq"
         if self.llm == "gemini":
             self.gemini = genai_client.Client(api_key=GEMINI_API_KEY)
             print(f"  Model LLM: gemini-2.5-flash (Google Gemini)")
@@ -543,6 +546,8 @@ class ClassifierAgent:
             import httpx
             # Per-call httpx client (avoid sharing state with HF Hub)
             print(f"  Model LLM: {ARIO_MODEL} (Ario)")
+        elif self.llm == "custom":
+            print(f"  Model LLM: {CUSTOM_LLM_MODEL} (custom {CUSTOM_LLM_BASE_URL})")
         else:
             self.groq = Groq(api_key=GROQ_API_KEY)
             print(f"  Model LLM: {GROQ_MODEL} (Groq)")
@@ -661,6 +666,18 @@ class ClassifierAgent:
             return CUSTOM_LLM_BASE_URL, CUSTOM_LLM_API_KEY
         return ARIO_BASE_URL, ARIO_API_KEY
 
+    @staticmethod
+    def _openai_headers(api_key: str | None) -> dict[str, str]:
+        """Authorization только если ключ непустой.
+
+        Пустой «Bearer » httpx отвергает (Illegal header value). vLLM и gpt-oss
+        на стенде Заказчика ключ часто не требуют — как кнопка «Проверить связь».
+        """
+        key = (api_key or "").strip()
+        if not key:
+            return {}
+        return {"Authorization": f"Bearer {key}"}
+
     def _ario_call(
         self,
         *,
@@ -707,7 +724,7 @@ class ClassifierAgent:
 
         client = httpx.Client(
             base_url=_base_url,
-            headers={"Authorization": f"Bearer {_api_key}"},
+            headers=self._openai_headers(_api_key),
             timeout=timeout,
         )
         try:
@@ -717,11 +734,25 @@ class ClassifierAgent:
                 body_preview = (r.text or "")[:500]
                 msgs_len = sum(len(m.get("content", "")) for m in messages)
                 print(
-                    f"  [Ario] HTTP {r.status_code} on /chat/completions "
+                    f"  [LLM] HTTP {r.status_code} on {_base_url}/chat/completions "
+                    f"model={payload.get('model')!r} "
                     f"(payload: {len(messages)} msgs, ~{msgs_len} chars total). "
                     f"Response body: {body_preview}"
                 )
-            r.raise_for_status()
+            try:
+                r.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                body = (exc.response.text or "")[:400]
+                hint = ""
+                if exc.response.status_code == 404:
+                    hint = (
+                        " Проверьте порт (часто :8000), что base URL оканчивается на /v1 "
+                        "и что имя модели совпадает с GET {base}/models."
+                    )
+                raise RuntimeError(
+                    f"LLM HTTP {exc.response.status_code} "
+                    f"{exc.request.url}: {body}{hint}"
+                ) from exc
             raw = r.json()["choices"][0]["message"]["content"].strip()
         finally:
             client.close()
