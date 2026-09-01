@@ -14,7 +14,9 @@ COPY src/ ./src/
 COPY data/classifier_flat.json ./data/
 COPY data/classifier_hierarchy.json ./data/
 COPY data/test_appeals.json ./data/
-COPY data/vector_db/ ./data/vector_db/
+# Боевая база — adapted_v3 (VECTOR_DB_DIR в .env.example и монтирование в compose
+# указывают на неё). Каталог data/vector_db в .gitignore, на чистом клоне его нет,
+# и COPY по нему ронял сборку на стенде.
 COPY data/vector_db_adapted_v3/ ./data/vector_db_adapted_v3/
 COPY data/allowed_codes_top69.json ./data/allowed_codes_top69.json
 COPY models/adapter_v1.npz ./models/adapter_v1.npz
