@@ -53,17 +53,33 @@ def test_offline_flag_reaches_huggingface_hub():
     assert result["endpoint"] is None
 
 
-def test_online_mode_keeps_hf_mirror():
-    """Без флага поведение прежнее: зеркало HF для корпоративных сетей."""
-    result = run_probe(
-        'import json, os, sys; sys.path.insert(0, "src");'
-        ' import env_bootstrap;'
-        ' import huggingface_hub.constants as c;'
-        ' print("JSON " + json.dumps({"offline": bool(c.HF_HUB_OFFLINE),'
-        ' "endpoint": os.environ.get("HF_ENDPOINT")}))'
-    )
+ENDPOINT_PROBE = (
+    'import json, os, sys; sys.path.insert(0, "src");'
+    ' import env_bootstrap;'
+    ' import huggingface_hub.constants as c;'
+    ' print("JSON " + json.dumps({"offline": bool(c.HF_HUB_OFFLINE),'
+    ' "endpoint": os.environ.get("HF_ENDPOINT"), "library_endpoint": c.ENDPOINT}))'
+)
+
+
+def test_online_mode_does_not_force_a_mirror():
+    """Адрес HF не навязывается — библиотека идёт на huggingface.co.
+
+    Регресс, который здесь закрыт: раньше подставлялось зеркало hf-mirror.com.
+    На стенде с обычным интернетом это ломало запуск — до huggingface.co доступ
+    был, до зеркала нет, и сервис падал при загрузке модели эмбеддингов.
+    """
+    result = run_probe(ENDPOINT_PROBE)
     assert result["offline"] is False
+    assert result["endpoint"] is None
+    assert result["library_endpoint"] == "https://huggingface.co"
+
+
+def test_explicit_mirror_is_respected():
+    """Кому зеркало нужно — задаёт его в .env, и оно применяется."""
+    result = run_probe(ENDPOINT_PROBE, {"HF_ENDPOINT": "https://hf-mirror.com"})
     assert result["endpoint"] == "https://hf-mirror.com"
+    assert result["library_endpoint"] == "https://hf-mirror.com"
 
 
 @pytest.mark.parametrize("module", ["classifier_agent", "build_vectordb", "finetune_model", "reranker"])
