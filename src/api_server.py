@@ -475,10 +475,25 @@ class SettingsSaveRequest(BaseModel):
 
 
 class LlmTestRequest(BaseModel):
-    """Проверка LLM-endpoint. Пустые поля → берутся текущие значения конфига."""
+    """Проверка LLM-endpoint. Пустые поля → берутся текущие значения конфига.
+
+    Поля повторяют группу «Модель LLM» на форме настроек: проверять нужно тот
+    endpoint, куда пойдёт классификация. Раньше здесь были только
+    `CUSTOM_LLM_*`, и при провайдере `ario` кнопка отвечала «Не задан base
+    URL» — оператор читал это как отсутствие связи с моделью.
+    """
+    LLM_PROVIDER: Optional[str] = None
+    ARIO_BASE_URL: Optional[str] = None
+    ARIO_MODEL: Optional[str] = None
+    ARIO_API_KEY: Optional[str] = None
     CUSTOM_LLM_BASE_URL: Optional[str] = None
     CUSTOM_LLM_MODEL: Optional[str] = None
     CUSTOM_LLM_API_KEY: Optional[str] = None
+    OLLAMA_BASE_URL: Optional[str] = None
+    OLLAMA_MODEL: Optional[str] = None
+    GROQ_MODEL: Optional[str] = None
+    GROQ_API_KEY: Optional[str] = None
+    GEMINI_API_KEY: Optional[str] = None
 
 
 class RxTestRequest(BaseModel):
@@ -534,29 +549,29 @@ async def test_rx_connection(request: RxTestRequest):
 
 @app.post("/api/settings/test-llm", tags=["Настройки"])
 async def test_llm_connection(request: LlmTestRequest):
-    """Проверить связь с OpenAI-совместимым LLM-endpoint.
+    """Проверить связь с LLM того провайдера, который выбран в настройках.
 
-    Пустые поля берутся из текущего конфига; пустой ключ → сохранённый.
-    Возвращает {ok, detail, models} — список моделей помогает поймать
-    расхождение имени модели с тем, что реально отдаёт сервер.
+    Незаполненные поля берутся из текущего конфига, маска секрета — тоже.
+    Возвращает {ok, detail, models, provider, base_url}: список моделей ловит
+    расхождение имени модели с тем, что реально отдаёт сервер, а provider и
+    base_url показывают, какой адрес проверяли.
     """
     from starlette.concurrency import run_in_threadpool
-    import config
     import llm_check
     import settings_store
 
-    key = request.CUSTOM_LLM_API_KEY
-    if key is not None and key.strip() in ("", settings_store.MASK):
-        key = None
+    # Пустое поле и маска означают «значение не меняли» — пусть решает конфиг.
+    values = {
+        key: value
+        for key, value in request.model_dump().items()
+        if value is not None and value.strip() not in ("", settings_store.MASK)
+    }
+    provider = values.pop("LLM_PROVIDER", None)
 
     # Запрос синхронный и на недостижимом хосте висит до таймаута —
     # в event loop это заморозило бы весь сервис.
     return await run_in_threadpool(
-        llm_check.check_connection,
-        base_url=(request.CUSTOM_LLM_BASE_URL or config.CUSTOM_LLM_BASE_URL),
-        api_key=(key if key is not None else config.CUSTOM_LLM_API_KEY),
-        model=(request.CUSTOM_LLM_MODEL or config.CUSTOM_LLM_MODEL),
-    )
+        llm_check.check_active, provider=provider, values=values)
 
 
 @app.post("/api/upload-historical")

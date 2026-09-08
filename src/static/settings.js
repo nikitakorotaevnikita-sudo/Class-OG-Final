@@ -181,21 +181,31 @@
     }
   }
 
+  // Поля, от которых зависит endpoint. Отправляем всю группу: сервер сам
+  // возьмёт нужные по выбранному провайдеру. Креды RX сюда не попадают.
+  const LLM_KEYS = [
+    'LLM_PROVIDER',
+    'ARIO_BASE_URL', 'ARIO_MODEL', 'ARIO_API_KEY',
+    'CUSTOM_LLM_BASE_URL', 'CUSTOM_LLM_MODEL', 'CUSTOM_LLM_API_KEY',
+    'OLLAMA_BASE_URL', 'OLLAMA_MODEL',
+    'GROQ_MODEL', 'GROQ_API_KEY',
+    'GEMINI_API_KEY',
+  ];
+
   async function testLlm() {
     const btn = $('settings-test-llm');
     const form = readForm();
     btn.disabled = true;
     setStatus('Проверяем связь с LLM...', 'info');
     try {
+      // пустое поле → сервер возьмёт сохранённое значение
+      const payload = {};
+      LLM_KEYS.forEach((key) => { payload[key] = form[key] || null; });
+
       const res = await fetch('/api/settings/test-llm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          CUSTOM_LLM_BASE_URL: form.CUSTOM_LLM_BASE_URL || null,
-          CUSTOM_LLM_MODEL: form.CUSTOM_LLM_MODEL || null,
-          // пустой ключ → сервер возьмёт сохранённый
-          CUSTOM_LLM_API_KEY: form.CUSTOM_LLM_API_KEY || null,
-        }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
