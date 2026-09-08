@@ -1,16 +1,22 @@
-"""Поиск адреса электронной почты заявителя в тексте обращения.
+"""Поиск адреса электронной почты **заявителя** в тексте обращения.
 
-Детерминированно, регуляркой по тексту — не через LLM. Адрес имеет строгий
-формат, и любая опечатка модели делает его нерабочим; при этом ответ по почте
-уходит именно на извлечённый адрес, поэтому цена ошибки высокая.
+Две разные задачи, решаются по-разному:
 
-Основная точка входа — `extract_applicant_email`. Когда в тексте несколько
-адресов, выбирается тот, что стоит после явного указателя («e-mail:»,
-«электронная почта») — в обращениях, пришедших через портал, в подвале часто
-висит адрес самого органа власти.
+* **найти адреса** — регуляркой. Формат строгий, и опечатка сделала бы адрес
+  нерабочим, поэтому строку адреса никогда не «печатает» модель: она берётся
+  из текста дословно;
+* **понять, чей адрес** — по контексту вокруг него.
+
+Второе появилось после отладки на прикладной стороне: там по почте ищется
+заявитель, и если подставить чужой адрес, обращение прилипнет к чужой карточке.
+В обращениях регулярно встречаются адреса, заявителю не принадлежащие:
+депутата, которому написали, приёмной органа власти, управляющей компании.
+Поэтому адрес без признаков принадлежности заявителю **не возвращается вовсе** —
+пустое поле лучше неверного.
 """
 
 import re
+from typing import Optional
 
 # Локальная часть по практическому минимуму RFC 5322: точки, дефисы и +.
 # Домен обязательно с TLD из букв — иначе в адреса попадают «1@2».
@@ -29,11 +35,45 @@ _OBFUSCATED = re.compile(
     re.IGNORECASE,
 )
 
-# Указатели, после которых идёт адрес заявителя.
-_MARKER = re.compile(
-    r"(?:e-?mail|мейл|майл|мыло"
+# Признаки того, что адрес принадлежит заявителю: прямое указание на почту для
+# ответа, притяжательные формы, подпись в конце обращения.
+_OWNED_BY_APPLICANT = re.compile(
+    r"e-?mail"
+    r"|мейл|майл|мыло"
     r"|(?:адрес\s+)?(?:электронн\w*\s+почт\w*|эл\.?\s*почт\w*)"
-    r"|почт\w*\s+для\s+ответ\w*)",
+    r"|почт\w*\s+для\s+ответ\w*"
+    # Голое «Почта:» — типовая подпись поля в блоке реквизитов заявителя.
+    # Для чужих адресов оно безопасно: там в той же строке стоит организация
+    # или должность, а признак чужого перевешивает.
+    r"|почт\w*\s*[:\-]?\s*$|почт\w*\s*[:\-]"
+    r"|мо(?:й|я|ей|его|ю)\s+(?:\w+\s+){0,2}(?:почт\w*|адрес\w*)"
+    r"|обратн\w+\s+(?:адрес\w*|связ\w*)"
+    r"|(?:прошу|просьба)[^.\n]{0,60}(?:ответ\w*|направ\w*|сообщ\w*)"
+    r"|ответ\w*[^.\n]{0,30}(?:прошу|направ\w*|на\s)"
+    r"|связаться\s+со\s+мной"
+    r"|контактн\w+\s+(?:данн\w*|информац\w*)"
+    r"|для\s+связи"
+    r"|пишите\s+(?:мне|на)"
+    r"|с\s+уважением"
+    r"|подпись",
+    re.IGNORECASE,
+)
+
+# Признаки чужого адреса: орган власти, должностное лицо, организация.
+# Проверяются только в пределах СТРОКИ с адресом — иначе слово из соседнего
+# абзаца отбрасывало бы верный адрес.
+_OWNED_BY_OTHERS = re.compile(
+    r"депутат\w*"
+    r"|при[её]мн\w+"
+    r"|администрац\w+|мэри\w+|правительств\w+"
+    r"|министерств\w+|департамент\w*|ведомств\w+|комитет\w*"
+    r"|управляющ\w+\s+компани\w+|\bук\b|тсж|снт"
+    r"|банк\w*|застройщик\w*|подрядчик\w*|поставщик\w*"
+    r"|организац\w+|учрежден\w+|предприяти\w+"
+    r"|глав[аы]\s|руководител\w+|начальник\w*|директор\w*|секретар\w+"
+    r"|пресс-служб\w+|канцеляри\w+|официальн\w+\s+сайт"
+    r"|отправител\w+|исполнител\w+"
+    r"|поступило\s+через",
     re.IGNORECASE,
 )
 
@@ -41,65 +81,113 @@ _MARKER = re.compile(
 _SERVICE_LOCAL_PARTS = frozenset({
     "noreply", "no-reply", "no_reply", "donotreply", "do-not-reply",
     "do_not_reply", "postmaster", "mailer-daemon", "mailerdaemon",
-    "abuse", "webmaster",
+    "abuse", "webmaster", "info", "support", "help", "office", "priem",
 })
 
-# Сколько символов до адреса просматривается на наличие указателя.
-_MARKER_WINDOW = 60
+# Сколько символов перед адресом просматривается на признак принадлежности.
+# Захватывает и предыдущую строку: подпись «С уважением, Иванов И.И.» обычно
+# стоит строкой выше самого адреса.
+_LOOKBEHIND = 120
+
+# После адреса признак тоже встречается: «ivanov@mail.ru — моя почта».
+_LOOKAHEAD = 60
 
 
 def _is_service(address: str) -> bool:
     return address.split("@", 1)[0] in _SERVICE_LOCAL_PARTS
 
 
-def extract_emails(text: str | None) -> list[str]:
+def _candidates(text: str) -> list[tuple[str, int, int]]:
+    """Адреса из текста: (адрес в нижнем регистре, начало, конец) по порядку."""
+    found: list[tuple[str, int, int]] = []
+    for match in _EMAIL.finditer(text):
+        found.append((match.group(0).lower(), match.start(), match.end()))
+    for match in _OBFUSCATED.finditer(text):
+        address = f"{match.group('local')}@{match.group('domain')}".lower()
+        found.append((address, match.start(), match.end()))
+
+    found.sort(key=lambda item: item[1])
+
+    seen: set[str] = set()
+    unique: list[tuple[str, int, int]] = []
+    for address, start, end in found:
+        if _is_service(address) or address in seen:
+            continue
+        seen.add(address)
+        unique.append((address, start, end))
+    return unique
+
+
+def extract_emails(text: Optional[str]) -> list[str]:
     """Все адреса из текста — в нижнем регистре, без повторов, в порядке текста.
 
-    Служебные ящики (noreply и подобные) отбрасываются. Замаскированные записи
-    вида «ivanov(at)mail.ru» приводятся к обычному виду.
+    Без разбора принадлежности: служебные ящики отброшены, остальное как есть.
+    Нужна, когда оператору показывают все варианты.
     """
     if not text:
         return []
-
-    found: list[tuple[int, str]] = []
-    for match in _EMAIL.finditer(text):
-        found.append((match.start(), match.group(0).lower()))
-    for match in _OBFUSCATED.finditer(text):
-        address = f"{match.group('local')}@{match.group('domain')}".lower()
-        found.append((match.start(), address))
-
-    found.sort(key=lambda pair: pair[0])
-
-    result: list[str] = []
-    for _pos, address in found:
-        if _is_service(address) or address in result:
-            continue
-        result.append(address)
-    return result
+    return [address for address, _s, _e in _candidates(text)]
 
 
-def extract_applicant_email(text: str | None) -> str | None:
-    """Адрес заявителя или None.
+def _line_around(text: str, start: int, end: int) -> str:
+    """Строка, в которой стоит адрес."""
+    line_start = text.rfind("\n", 0, start) + 1
+    line_end = text.find("\n", end)
+    if line_end == -1:
+        line_end = len(text)
+    return text[line_start:line_end]
 
-    Приоритет у адреса, перед которым стоит указатель («e-mail: …»): в
-    пересланных обращениях в подвале обычно висит адрес органа власти, и без
-    приоритизации в поле заявителя попадал бы он.
+
+def belongs_to_applicant(text: str, start: int, end: int) -> bool:
+    """Есть ли рядом с адресом признак того, что он принадлежит заявителю.
+
+    Чужие признаки ищутся только в строке с адресом, свои — в более широком
+    окне: подпись «С уважением, …» обычно стоит строкой выше.
+    """
+    if _OWNED_BY_OTHERS.search(_line_around(text, start, end)):
+        return False
+
+    before = text[max(0, start - _LOOKBEHIND):start]
+    after = text[end:end + _LOOKAHEAD]
+    return bool(_OWNED_BY_APPLICANT.search(before) or _OWNED_BY_APPLICANT.search(after))
+
+
+def _normalize(raw: Optional[str]) -> str:
+    """Приводит ответ модели к виду, сравнимому с найденными адресами."""
+    value = (raw or "").strip().lower()
+    value = value.removeprefix("mailto:").strip("<>\"' .,;")
+    return value
+
+
+def extract_applicant_email(text: Optional[str], llm_hint: Optional[str] = None) -> Optional[str]:
+    """Адрес заявителя или `None`.
+
+    Порядок принятия решения:
+
+    1. подсказка модели — но только если такой адрес **дословно есть в тексте**.
+       Модель понимает контекст лучше правил («С уважением, Иванов, ivanov@…»),
+       но печатать адрес ей не доверяем: сверяем с найденным списком;
+    2. правила по контексту — первый адрес с признаком принадлежности заявителю
+       и без признаков чужого;
+    3. `None`. Слепой «первый адрес по тексту» убран намеренно: на прикладной
+       стороне по почте ищется заявитель, и чужой адрес привязал бы обращение к
+       чужой карточке.
     """
     if not text:
         return None
 
-    addresses = extract_emails(text)
-    if not addresses:
+    candidates = _candidates(text)
+    if not candidates:
         return None
 
-    lowered = text.lower()
-    for address in addresses:
-        start = lowered.find(address)
-        if start == -1:
-            # Адрес был записан замаскированно — указатель искать не по чему.
-            continue
-        window = lowered[max(0, start - _MARKER_WINDOW):start]
-        if _MARKER.search(window):
+    hint = _normalize(llm_hint)
+    if hint:
+        for address, _s, _e in candidates:
+            if address == hint:
+                return address
+
+    for address, start, end in candidates:
+        if belongs_to_applicant(text, start, end):
             return address
 
-    return addresses[0]
+    return None
