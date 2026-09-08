@@ -67,8 +67,10 @@ Appeal text
     - Returns top-10 candidates from 2108 classifier entries
     │
     ▼
-[Stage 2] LLM reasoning (Groq API)
-    - llama-3.3-70b-versatile receives appeal text + 10 candidates
+[Stage 2] LLM reasoning (OpenAI-compatible endpoint)
+    - Provider from LLM_PROVIDER: ario (Qwen, основной), custom (модель
+      Заказчика через vLLM), groq, gemini, ollama
+    - The model receives appeal text + candidates per question
     - Identifies: appeal type (59-FZ), all questions in appeal, best code per question
     - Returns strict JSON with confidence scores and reasoning
     │
@@ -123,13 +125,21 @@ FINETUNE_THRESHOLD=50    # verified entries needed to trigger fine-tuning
 - `numpy` major is chosen by environment marker: `<2.0` below Python 3.12 (the version prod
   is verified on), `>=2.1` from 3.12 up (numpy 1.26 has no cp313 wheels). Project code uses
   no aliases removed in numpy 2.0, so the bump needs no source changes.
-- `data/vector_db/` and `models/` are excluded from Git (see `.gitignore`); `data/appeals_log.jsonl` is tracked.
+- `data/vector_db/` and `models/` are excluded from Git (see `.gitignore`). The
+  production DB is `data/vector_db_adapted_v3` — it **is** in Git and needs no rebuild
+  (`VECTOR_DB_DIR` in `.env` points at it).
+- `data/appeals_log.jsonl` and `data/request_log.jsonl` stay local: they hold appeal
+  texts (personal data under 59-FZ). `data/jobs/` is excluded for the same reason.
 - `setup.ps1` is ASCII-only — Cyrillic strings cause PowerShell parse errors on Windows with CP1251 encoding.
 
 ## GitHub
 
-- Repository: https://github.com/nikitakorotaevnikita-sudo/OG
-- Branch: `master`
+- Repository: https://github.com/nikitakorotaevnikita-sudo/Class-OG-Final
+- Main branch: `main` — основной проект, наиболее готовый к пилотированию;
+  стенд тянет обновления отсюда
+- `research/quality-followups-68` — эксперименты; полезное переносится в `main`
+- `prod-pilot` — «на всякий случай», иногда принимает изменения со стенда
+- Branch model and merge rules: `README.md` on `main`
 
 ## Session Start Protocol
 
