@@ -87,8 +87,12 @@ echo ================================================
 echo   Current LLM: !CURRENT_LLM!    Vector DB: !VDB_DIR!
 echo.
 
-set /p CHOICE=Select (1-7):
+set "CHOICE="
+set /p CHOICE=Select (1-7) [1]:
 
+:: Empty input means [1], as in launch.sh. Without this the menu loops:
+:: at end of input "set /p" leaves CHOICE empty and we jump back here.
+if "%CHOICE%"=="" goto :server
 if "%CHOICE%"=="1" goto :server
 if "%CHOICE%"=="2" goto :ask_port
 if "%CHOICE%"=="3" goto :check

@@ -103,3 +103,8 @@ def test_provider_is_known_before_arguments_are_parsed():
     """В режиме `server` строка про провайдера печаталась пустой."""
     dispatch = BAT.index("Command-line mode")
     assert BAT.index('set "CURRENT_LLM=') < dispatch
+
+
+def test_empty_menu_input_does_not_loop():
+    """При конце ввода `set /p` оставляет выбор пустым — меню крутилось вечно."""
+    assert 'if "%CHOICE%"=="" goto :server' in BAT
