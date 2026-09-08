@@ -5,6 +5,8 @@
 
 import os
 from pathlib import Path
+from typing import Optional
+
 from dotenv import load_dotenv
 
 # Загружаем .env из корня проекта
@@ -190,8 +192,23 @@ RX_ODATA_URL: str = os.getenv("RX_ODATA_URL", "http://localhost/integration/odat
 RX_USER:      str = os.getenv("RX_USER", "Administrator")
 # Пароль только из .env — держать боевой креденшл в исходниках нельзя.
 RX_PASSWORD:  str = os.getenv("RX_PASSWORD", "")
-# RX стоит во внутренней сети, а прокси в переменных окружения настраивают для
-# интернета — через него внутренний адрес недоступен. Ответ прокси (503, а при
-# незапущенном клиенте отказ в соединении) выглядит как «стенд лежит», хотя
-# напрямую тот же адрес отвечает. Включать только если RX реально за прокси.
-RX_VIA_PROXY: bool = os.getenv("RX_VIA_PROXY", "false").lower() == "true"
+
+# ── Системный прокси ───────────────────────────────────────────────────────────
+# Прокси в переменных окружения (HTTP_PROXY/HTTPS_PROXY) настраивают для
+# интернета, а RX и модель Заказчика стоят во внутренней сети — через прокси
+# они недоступны: он отвечает 503, а при незапущенном клиенте прокси соединение
+# просто отвергается. Выглядит как «сервис лежит», хотя напрямую адрес отвечает.
+# По умолчанию (`auto`) решает сам адрес: внутренний — напрямую, внешний (Ario,
+# Groq) — через прокси, иначе там, где без прокси нет интернета, отвалится Ario.
+# `true`/`false` продавливают решение для всех адресов.
+
+
+def _via_proxy(name: str) -> Optional[bool]:
+    raw = os.getenv(name, "").strip().lower()
+    if raw in ("", "auto"):
+        return None
+    return raw == "true"
+
+
+RX_VIA_PROXY: Optional[bool] = _via_proxy("RX_VIA_PROXY")
+LLM_VIA_PROXY: Optional[bool] = _via_proxy("LLM_VIA_PROXY")

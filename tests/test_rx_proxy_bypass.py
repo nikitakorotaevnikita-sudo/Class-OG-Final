@@ -7,7 +7,9 @@
 Выглядело как «стенд лежит», хотя стенд отвечал: напрямую тот же адрес даёт
 `401` с `WWW-Authenticate: Basic realm=...`, то есть сервис жив и ждёт креды.
 
-Если RX действительно доступен только через прокси, есть `RX_VIA_PROXY=true`.
+Внутренний адрес отличается от внешнего по самому адресу (см.
+`tests/test_proxy_policy.py`); если адрес обманчив, решение продавливает
+`RX_VIA_PROXY`.
 """
 
 import sys
@@ -51,14 +53,21 @@ def fake_httpx(monkeypatch):
     yield
 
 
-def test_check_connection_ignores_env_proxy(monkeypatch):
-    monkeypatch.setattr(rx_client, "RX_VIA_PROXY", False)
+@pytest.fixture(autouse=True)
+def decide_by_address(monkeypatch):
+    """По умолчанию настройка ничего не продавливает — решает адрес."""
+    monkeypatch.setattr(rx_client, "RX_VIA_PROXY", None)
+    yield
+
+
+def test_check_connection_ignores_env_proxy():
     rx_client.check_connection(url="http://172.16.104.68/integration/odata")
     assert _FakeClient.created[0]["trust_env"] is False
 
 
 def test_document_client_ignores_env_proxy(monkeypatch):
-    monkeypatch.setattr(rx_client, "RX_VIA_PROXY", False)
+    """Клиент за документами адреса не получает — берёт его из конфига."""
+    monkeypatch.setattr(rx_client, "RX_ODATA_URL", "http://172.16.104.68/integration/odata")
     rx_client.build_client()
     assert _FakeClient.created[0]["trust_env"] is False
 
@@ -66,10 +75,16 @@ def test_document_client_ignores_env_proxy(monkeypatch):
 def test_proxy_can_be_turned_back_on(monkeypatch):
     """У кого RX за прокси — включает обратно настройкой, а не правкой кода."""
     monkeypatch.setattr(rx_client, "RX_VIA_PROXY", True)
-    rx_client.check_connection(url="http://rx.example/odata")
+    rx_client.check_connection(url="http://172.16.104.68/integration/odata")
     rx_client.build_client()
     assert [c["trust_env"] for c in _FakeClient.created] == [True, True]
 
 
-def test_setting_defaults_to_bypassing_the_proxy():
-    assert config.RX_VIA_PROXY is False
+def test_proxy_can_be_turned_off_for_an_external_rx(monkeypatch):
+    monkeypatch.setattr(rx_client, "RX_VIA_PROXY", False)
+    rx_client.check_connection(url="https://rx.example.com/odata")
+    assert _FakeClient.created[0]["trust_env"] is False
+
+
+def test_setting_defaults_to_deciding_by_address():
+    assert config.RX_VIA_PROXY is None

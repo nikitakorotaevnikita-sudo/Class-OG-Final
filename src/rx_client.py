@@ -6,6 +6,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import httpx
 from config import RX_ODATA_URL, RX_USER, RX_PASSWORD, RX_VIA_PROXY
+from proxy_policy import uses_env_proxy
 from text_extractor import extract_text
 
 
@@ -22,18 +23,19 @@ def build_client() -> httpx.Client:
     return _client((RX_USER, RX_PASSWORD), timeout=60.0)
 
 
-def _client(auth: tuple[str, str], timeout: float) -> httpx.Client:
-    """Клиент для RX — по умолчанию мимо системного прокси.
+def _client(auth: tuple[str, str], timeout: float,
+            url: str | None = None) -> httpx.Client:
+    """Клиент для RX. К внутреннему адресу — мимо системного прокси.
 
-    Прокси в переменных окружения настраивают для интернета, а RX стоит во
-    внутренней сети: запрос уходил в прокси, и тот отвечал `503`, а при
+    Прокси в переменных окружения настраивают для интернета, а RX обычно стоит
+    во внутренней сети: запрос уходил в прокси, и тот отвечал `503`, а при
     незапущенном клиенте прокси — отказом в соединении. Выглядело как «стенд
     лежит», хотя напрямую тот же адрес отвечал `401` и ждал креды.
-    `RX_VIA_PROXY=true` возвращает прежнее поведение, если RX и правда за
-    прокси.
+    `RX_VIA_PROXY` продавливает решение, если адрес обманчив.
     """
     return httpx.Client(auth=auth, timeout=timeout, verify=False,
-                        trust_env=RX_VIA_PROXY)
+                        trust_env=uses_env_proxy(url or RX_ODATA_URL,
+                                                 RX_VIA_PROXY))
 
 
 def check_connection(url: str | None = None,
@@ -50,7 +52,7 @@ def check_connection(url: str | None = None,
     password = password if password is not None else RX_PASSWORD
 
     try:
-        with _client((user, password), timeout=15.0) as client:
+        with _client((user, password), timeout=15.0, url=url) as client:
             r = client.get(url)
     except httpx.HTTPError as e:
         return {

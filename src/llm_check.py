@@ -9,6 +9,13 @@ from __future__ import annotations
 
 import httpx
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent))
+
+from config import LLM_VIA_PROXY
+from proxy_policy import uses_env_proxy
+
 TIMEOUT = 15.0
 
 
@@ -24,7 +31,10 @@ def check_connection(base_url: str, api_key: str = "", model: str = "") -> dict:
 
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     try:
-        r = httpx.get(f"{base}/models", headers=headers, timeout=TIMEOUT)
+        # Внутренний адрес запрашиваем мимо прокси из окружения — иначе проверка
+        # покажет ответ прокси (503), а не модели. См. proxy_policy.
+        r = httpx.get(f"{base}/models", headers=headers, timeout=TIMEOUT,
+                      trust_env=uses_env_proxy(base, LLM_VIA_PROXY))
     except Exception as exc:                                     # noqa: BLE001
         return {"ok": False,
                 "detail": f"{type(exc).__name__}: {str(exc)[:200]}",

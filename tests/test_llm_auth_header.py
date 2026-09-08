@@ -21,10 +21,11 @@ class _Capture:
     def __init__(self):
         self.headers = None
 
-    def __call__(self, *, base_url, headers, timeout):
+    def __call__(self, *, base_url, headers, timeout, **kwargs):
         self.headers = headers
         # httpx проверяет заголовки при создании клиента — пусть проверит.
-        return httpx.Client(base_url=base_url, headers=headers, timeout=timeout)
+        return httpx.Client(base_url=base_url, headers=headers, timeout=timeout,
+                            **kwargs)
 
 
 def call_with_key(monkeypatch, key):

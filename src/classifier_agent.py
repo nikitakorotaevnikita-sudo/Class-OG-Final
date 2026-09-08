@@ -47,6 +47,7 @@ from config import (
     OLLAMA_MODEL, OLLAMA_BASE_URL,
     ARIO_API_KEY, ARIO_BASE_URL, ARIO_MODEL,
     CUSTOM_LLM_API_KEY, CUSTOM_LLM_BASE_URL, CUSTOM_LLM_MODEL,
+    LLM_VIA_PROXY,
     ENABLE_CROSS_ENCODER_RERANKER, CROSS_ENCODER_MODEL,
     ENABLE_HEURISTIC_RERANKER,
     ENABLE_QUERY_EXPANSION,
@@ -62,6 +63,7 @@ from config import (
     ENABLE_MULTI_QUERY_EXPAND, MQE_N_VARIANTS,
     ENABLE_ALLOWED_CODES, ALLOWED_CODES_PATH,
 )
+from proxy_policy import uses_env_proxy
 from hierarchy import (
     branch_agreement_scores, parent_similarity_boost,
     dominant_l1_sections, prefix_at_level,
@@ -552,7 +554,9 @@ class ClassifierAgent:
             print(f"  Model LLM: gemini-2.5-flash (Google Gemini)")
         elif self.llm == "ollama":
             import httpx
-            self._ollama_client = httpx.Client(base_url=OLLAMA_BASE_URL, timeout=120)
+            self._ollama_client = httpx.Client(
+                base_url=OLLAMA_BASE_URL, timeout=120,
+                trust_env=uses_env_proxy(OLLAMA_BASE_URL, LLM_VIA_PROXY))
             print(f"  Model LLM: {OLLAMA_MODEL} (Ollama)")
         elif self.llm == "ario":
             import httpx
@@ -652,7 +656,9 @@ class ClassifierAgent:
     def _get_ollama_client(self):
         if not hasattr(self, "_ollama_client"):
             import httpx
-            self._ollama_client = httpx.Client(base_url=OLLAMA_BASE_URL, timeout=120)
+            self._ollama_client = httpx.Client(
+                base_url=OLLAMA_BASE_URL, timeout=120,
+                trust_env=uses_env_proxy(OLLAMA_BASE_URL, LLM_VIA_PROXY))
         return self._ollama_client
 
     def _embed_query(self, text: str) -> np.ndarray:
@@ -752,6 +758,11 @@ class ClassifierAgent:
             base_url=_base_url,
             headers=self._openai_headers(_api_key),
             timeout=timeout,
+            # Модель Заказчика стоит во внутренней сети, и прокси из окружения
+            # (он для интернета) её прячет: отвечает 503 либо отказом в
+            # соединении. Внешние Ario и Groq, наоборот, без прокси могут быть
+            # недоступны — поэтому решает адрес.
+            trust_env=uses_env_proxy(_base_url, LLM_VIA_PROXY),
         )
         try:
             r = client.post("/chat/completions", json=payload)
