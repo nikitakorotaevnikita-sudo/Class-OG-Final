@@ -22,8 +22,16 @@ VDB="$(vdb_dir)"
 [ -f "$VDB/embeddings.npy" ] \
     || die "векторная база не найдена в $VDB — запустить установщик или src/build_vectordb.py"
 
+# Порт: аргумент запуска, затем API_PORT из .env, затем 8010.
+default_port() {
+    local configured
+    configured="$(get_env_key API_PORT)"
+    printf '%s
+' "${configured:-8010}"
+}
+
 run_server() {
-    local port="${1:-8010}"
+    local port="${1:-$(default_port)}"
     say "провайдер LLM: $(get_env_key LLM_PROVIDER)"
     say "векторная база: $VDB"
     printf '   http://0.0.0.0:%s  (Ctrl+C — остановить)\n\n' "$port"
@@ -31,7 +39,7 @@ run_server() {
 }
 
 case "${1:-menu}" in
-    server)   run_server "${2:-8010}" ;;
+    server)   run_server "${2:-}" ;;
     check)    exec "$VENV_PY" scripts/check_offline.py --stage post --online ;;
     tests)    exec "$VENV_PY" -m pytest tests/ -q --ignore=tests/e2e ;;
     operator) exec "$VENV_PY" src/operator_cli.py ;;

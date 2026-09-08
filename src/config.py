@@ -172,7 +172,9 @@ CLASSIFIER_HIERARCHY_PATH: str = os.getenv(
 
 # ── API-сервер ─────────────────────────────────────────────────────────────────
 API_HOST: str = os.getenv("API_HOST", "0.0.0.0")
-API_PORT: int = int(os.getenv("API_PORT", "8000"))
+# 8010 — порт, который публикует docker-compose и на который нацелен RX;
+# launch.bat и launch.sh читают этот же ключ, чтобы порт задавался в одном месте.
+API_PORT: int = int(os.getenv("API_PORT", "8010"))
 
 # ── Параметры агента ───────────────────────────────────────────────────────────
 MAX_APPEAL_LENGTH: int = 5000   # символов
