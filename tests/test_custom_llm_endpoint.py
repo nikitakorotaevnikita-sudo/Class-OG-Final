@@ -126,3 +126,90 @@ def test_check_reports_network_failure(monkeypatch):
 def test_check_requires_base_url():
     res = llm_check.check_connection(base_url="", api_key="k")
     assert res["ok"] is False
+
+
+# ── Транспорт: пустой ключ и HTTP-ошибки ─────────────────────────────────────
+
+def test_empty_api_key_omits_authorization_header():
+    """vLLM/gpt-oss часто без ключа. «Bearer » — невалидный заголовок, httpx падает."""
+    assert ClassifierAgent._openai_headers("") == {}
+    assert ClassifierAgent._openai_headers("   ") == {}
+    assert ClassifierAgent._openai_headers(None) == {}
+
+
+def test_api_key_sends_bearer():
+    assert ClassifierAgent._openai_headers("stand-key") == {
+        "Authorization": "Bearer stand-key"
+    }
+
+
+def test_custom_is_supported_at_startup():
+    assert "custom" in ca.SUPPORTED_LLM_PROVIDERS
+
+
+class _FakeResp:
+    def __init__(self, status, text="", payload=None):
+        self.status_code = status
+        self.text = text
+        self._payload = payload or {}
+
+    def json(self):
+        return self._payload
+
+    def raise_for_status(self):
+        import httpx
+        if self.status_code >= 400:
+            request = httpx.Request("POST", "http://10.112.103.34/v1/chat/completions")
+            raise httpx.HTTPStatusError(
+                f"{self.status_code}",
+                request=request,
+                response=httpx.Response(self.status_code, text=self.text, request=request),
+            )
+
+
+def test_ario_call_omits_bearer_when_custom_key_empty(monkeypatch):
+    captured = {}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            captured["headers"] = kwargs.get("headers") or {}
+
+        def post(self, *args, **kwargs):
+            return _FakeResp(200, payload={"choices": [{"message": {"content": "{}"}}]})
+
+        def close(self):
+            pass
+
+    import httpx
+    monkeypatch.setattr(httpx, "Client", FakeClient)
+    monkeypatch.setattr(ca, "CUSTOM_LLM_BASE_URL", "http://10.112.103.34/v1")
+    monkeypatch.setattr(ca, "CUSTOM_LLM_API_KEY", "")
+    monkeypatch.setattr(ca, "CUSTOM_LLM_MODEL", "gpt-oss-20b")
+    _agent()._ario_call(provider="custom", messages=[{"role": "user", "content": "x"}])
+    assert "Authorization" not in captured["headers"]
+
+
+def test_ario_call_http_error_includes_status_and_body(monkeypatch):
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def post(self, *args, **kwargs):
+            return _FakeResp(404, text='{"error":"model not found"}')
+
+        def close(self):
+            pass
+
+    import httpx
+    monkeypatch.setattr(httpx, "Client", FakeClient)
+    monkeypatch.setattr(ca, "CUSTOM_LLM_BASE_URL", "http://10.112.103.34/v1")
+    monkeypatch.setattr(ca, "CUSTOM_LLM_API_KEY", "")
+    monkeypatch.setattr(ca, "CUSTOM_LLM_MODEL", "gpt-oss-20b")
+    try:
+        _agent()._ario_call(provider="custom", messages=[{"role": "user", "content": "x"}])
+    except RuntimeError as exc:
+        msg = str(exc)
+        assert "404" in msg
+        assert "model not found" in msg
+    else:
+        raise AssertionError("ожидался RuntimeError с телом ответа")

@@ -39,6 +39,14 @@ def test_compose_has_host_gateway():
     assert "host-gateway" in text
 
 
+def test_compose_vector_db_is_writable():
+    text = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    assert "vector_db_adapted_v3:/app/data/vector_db_adapted_v3" in text.replace(" ", "")
+    assert "vector_db_adapted_v3:/app/data/vector_db_adapted_v3:ro" not in text.replace(" ", ""), (
+        ":ro на боевой базе блокирует rebuild/adapter apply внутри контейнера"
+    )
+
+
 def test_dockerignore_excludes_heavy_paths():
     text = (ROOT / ".dockerignore").read_text(encoding="utf-8")
     for path in ("offline_bundle/", ".hf-cache/", "node_modules/", "Template/"):
