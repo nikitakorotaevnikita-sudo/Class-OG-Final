@@ -75,7 +75,7 @@ from section_router import (
 )
 from appeals_logger import get_logger
 from email_extractor import extract_applicant_email
-from fio_extractor import normalize_fio
+from fio_extractor import extract_applicant_fio, normalize_fio
 
 
 _WORD_RE = re.compile(r"[a-zа-яё0-9]{3,}", re.IGNORECASE)
@@ -261,9 +261,15 @@ class ClassificationResult:
     full_fallback_used: bool = field(default=False)     # сработал ли full-classifier fallback
 
 
-def extract_extra_fields(llm_result: dict) -> tuple[Optional[str], str]:
-    """Из ответа LLM достаёт (applicant_fio «Фамилия И.О.», summary ≤250)."""
-    fio = normalize_fio(llm_result.get("applicant_fio"))
+def extract_extra_fields(llm_result: dict, appeal_text: str = "") -> tuple[Optional[str], str]:
+    """Из ответа LLM достаёт (applicant_fio «Фамилия Имя Отчество», summary ≤250).
+
+    ФИО из ответа модели — подсказка: она видит структуру документа целиком.
+    Проверяется по тексту, потому что в приложениях (протоколы, списки подписей)
+    чужих фамилий больше, чем своих, а по ФИО на прикладной стороне заводится
+    заявитель.
+    """
+    fio = extract_applicant_fio(appeal_text, llm_hint=llm_result.get("applicant_fio"))
     summary = (llm_result.get("summary") or "").strip()[:250]
     return fio, summary
 
@@ -290,6 +296,22 @@ SYSTEM_PROMPT = """Ты — эксперт по классификации об�
 - "Предмет ведения Российской Федерации"
 - "Предмет ведения субъектов Российской Федерации"
 - "Предмет совместного ведения Российской Федерации и субъектов Российской Федерации"
+
+ФИО ЗАЯВИТЕЛЯ (applicant_fio):
+Обращение может идти пачкой: сопроводительное письмо, тело обращения и приложения —
+протоколы собраний, списки подписей, служебные записки. Фамилий в тексте много,
+заявитель — тот, ОТ КОГО обращение, а не любое упомянутое лицо.
+Где искать, в порядке приоритета: сначала сопроводительное письмо («направляем
+обращение ФИО», «обращение от ФИО»); затем шапка обращения — «от кого», «заявитель»,
+«прошу рассмотреть обращение от»; затем первое лицо («я, ФИО, обращаюсь»); затем
+контактное лицо для ответа. У коллективного обращения — ПЕРВОЕ ФИО из списка подписей.
+Заявителем НЕ являются: должностное лицо, которому обращение адресовано; подписант
+протокола собрания (председатель, секретарь); человек из списка подписей, кроме первого;
+руководитель организации; исполнитель сопроводительного письма; представитель, если
+обращение не от его имени. Такие ФИО брать нельзя, пока тот же человек не указан
+заявителем в шапке или основном тексте.
+Верни ФИО в именительном падеже: «от Иванова Ивана Ивановича» → «Иванов Иван Иванович».
+Если заявителя определить нельзя (обращение анонимное) — null.
 
 ПОЧТА ЗАЯВИТЕЛЯ (applicant_email):
 В тексте могут быть адреса, заявителю НЕ принадлежащие: депутата, которому написали;
@@ -2174,7 +2196,7 @@ class ClassifierAgent:
         overall_confidence = sum(confidences) / len(confidences) if confidences else 0.0
         needs_verification = overall_confidence < MIN_CONFIDENCE
 
-        applicant_fio, summary = extract_extra_fields(llm_result)
+        applicant_fio, summary = extract_extra_fields(llm_result, appeal_text)
         # Строка адреса берётся из текста регуляркой — опечатка модели сделала бы
         # адрес нерабочим. А вот КОМУ адрес принадлежит, модель понимает лучше
         # правил, поэтому её выбор используется как подсказка и сверяется с
