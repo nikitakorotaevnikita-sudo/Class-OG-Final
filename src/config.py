@@ -190,3 +190,8 @@ RX_ODATA_URL: str = os.getenv("RX_ODATA_URL", "http://localhost/integration/odat
 RX_USER:      str = os.getenv("RX_USER", "Administrator")
 # Пароль только из .env — держать боевой креденшл в исходниках нельзя.
 RX_PASSWORD:  str = os.getenv("RX_PASSWORD", "")
+# RX стоит во внутренней сети, а прокси в переменных окружения настраивают для
+# интернета — через него внутренний адрес недоступен. Ответ прокси (503, а при
+# незапущенном клиенте отказ в соединении) выглядит как «стенд лежит», хотя
+# напрямую тот же адрес отвечает. Включать только если RX реально за прокси.
+RX_VIA_PROXY: bool = os.getenv("RX_VIA_PROXY", "false").lower() == "true"

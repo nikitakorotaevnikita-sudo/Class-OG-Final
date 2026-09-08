@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 import httpx
-from config import RX_ODATA_URL, RX_USER, RX_PASSWORD
+from config import RX_ODATA_URL, RX_USER, RX_PASSWORD, RX_VIA_PROXY
 from text_extractor import extract_text
 
 
@@ -19,7 +19,21 @@ class BodyFetchError(Exception):
 
 def build_client() -> httpx.Client:
     """Фабрика HTTP-клиента (монкипатчится в тестах)."""
-    return httpx.Client(auth=(RX_USER, RX_PASSWORD), timeout=60.0, verify=False)
+    return _client((RX_USER, RX_PASSWORD), timeout=60.0)
+
+
+def _client(auth: tuple[str, str], timeout: float) -> httpx.Client:
+    """Клиент для RX — по умолчанию мимо системного прокси.
+
+    Прокси в переменных окружения настраивают для интернета, а RX стоит во
+    внутренней сети: запрос уходил в прокси, и тот отвечал `503`, а при
+    незапущенном клиенте прокси — отказом в соединении. Выглядело как «стенд
+    лежит», хотя напрямую тот же адрес отвечал `401` и ждал креды.
+    `RX_VIA_PROXY=true` возвращает прежнее поведение, если RX и правда за
+    прокси.
+    """
+    return httpx.Client(auth=auth, timeout=timeout, verify=False,
+                        trust_env=RX_VIA_PROXY)
 
 
 def check_connection(url: str | None = None,
@@ -36,7 +50,7 @@ def check_connection(url: str | None = None,
     password = password if password is not None else RX_PASSWORD
 
     try:
-        with httpx.Client(auth=(user, password), timeout=15.0, verify=False) as client:
+        with _client((user, password), timeout=15.0) as client:
             r = client.get(url)
     except httpx.HTTPError as e:
         return {
