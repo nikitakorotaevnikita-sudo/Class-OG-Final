@@ -16,6 +16,7 @@ from typing import Optional
 
 import config
 import rx_client
+import text_extractor
 from job_queue import JobQueue, QueueFull, STATUS_DONE, STATUS_ERROR
 
 router = APIRouter(prefix="/integration", tags=["Интеграция RX"])
@@ -88,6 +89,18 @@ def _resolve_text(body: ClassifyDocumentRequest) -> str:
         except rx_client.BodyFetchError as e:
             raise HTTPException(status_code=502,
                                 detail=f"Не удалось получить тело документа из RX: {e}")
+        except text_extractor.ScanNotSupportedError:
+            # Скан без текстового слоя. Не 500: повторять вызов бессмысленно,
+            # документ нужно отправлять на распознавание.
+            raise HTTPException(
+                status_code=400,
+                detail=(f"Документ {body.document_id} — скан без текстового слоя. "
+                        f"Распознавание (OCR) сервис не выполняет."))
+        except text_extractor.TextExtractionError as e:
+            # Битый файл, неподдерживаемый формат — тоже не повторяемо.
+            raise HTTPException(
+                status_code=400,
+                detail=f"Из документа {body.document_id} не удалось извлечь текст: {e}")
         if not text or not text.strip():
             raise HTTPException(status_code=400,
                                 detail="Документ не содержит извлекаемого текста")
