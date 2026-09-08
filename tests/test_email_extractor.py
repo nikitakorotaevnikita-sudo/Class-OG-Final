@@ -76,9 +76,10 @@ def test_nothing_to_extract(text):
 
 def test_llm_hint_wins_when_address_is_in_the_text():
     """Модель понимает контекст лучше правил — но адрес должен быть в тексте."""
-    text = "Иванов Иван Иванович, 8-999-000-00-00, ivanov@mail.ru, дом 5"
+    text = "Прошу разобраться. adm-info@tyumen-city.ru, дом 5"
     assert extract_applicant_email(text) is None, "без подсказки признака нет"
-    assert extract_applicant_email(text, llm_hint="ivanov@mail.ru") == "ivanov@mail.ru"
+    assert extract_applicant_email(text, llm_hint="adm-info@tyumen-city.ru") == \
+        "adm-info@tyumen-city.ru"
 
 
 @pytest.mark.parametrize("hint", [
@@ -135,3 +136,82 @@ def test_addresses_deduplicated_in_text_order():
 ])
 def test_trailing_punctuation_not_captured(text, expected):
     assert extract_applicant_email(text) == expected
+
+
+# ── ОС аналитика: реквизиты заявителя, шапки сопроводительных, приложения ────
+
+def test_address_next_to_the_applicants_name_is_taken():
+    """Блок реквизитов: ФИО, телефон, почта — указателя «e-mail:» может не быть."""
+    text = "Иванов Иван Иванович, 8-999-000-00-00, ivanov@mail.ru, дом 5"
+    assert extract_applicant_email(text) == "ivanov@mail.ru"
+
+
+def test_address_next_to_an_official_name_is_not_taken():
+    """ФИО рядом — ещё не признак: у должностного лица тоже есть имя."""
+    text = "Директор МУП «Тепло» Кузьмин Артём Сергеевич, kuzmin@teplo72.ru"
+    assert extract_applicant_email(text) is None
+
+
+@pytest.mark.parametrize("phrase", [
+    "Ответ написать на ivanov@mail.ru",
+    "Для обратной связи: ivanov@mail.ru",
+    "Обратная связь — ivanov@mail.ru",
+])
+def test_reply_formulations_from_the_analyst(phrase):
+    assert extract_applicant_email(phrase) == "ivanov@mail.ru"
+
+
+def test_cover_letter_letterhead_is_skipped():
+    """Адрес в шапке бланка сопроводительного письма принадлежит ведомству."""
+    text = (
+        "АДМИНИСТРАЦИЯ ГОРОДА N\n"
+        "625000, ул. Первомайская, 20, priemnaya@admin-n.ru\n\n"
+        "Направляем для рассмотрения обращение Иванова И.И.\n\n"
+        "Прошу отремонтировать дорогу. Мой e-mail: ivanov@mail.ru\n"
+    )
+    assert extract_applicant_email(text) == "ivanov@mail.ru"
+
+
+def test_only_a_letterhead_address_gives_none():
+    text = (
+        "АДМИНИСТРАЦИЯ ГОРОДА N\n"
+        "625000, ул. Первомайская, 20, info-otdel@admin-n.ru\n\n"
+        "Направляем для рассмотрения обращение Иванова И.И. по вопросу дороги.\n"
+    )
+    assert extract_applicant_email(text) is None
+
+
+def test_attachment_address_is_not_the_applicants():
+    """Приложения — протоколы, акты, служебные записки — чужая территория."""
+    text = (
+        "Прошу отремонтировать кровлю. Моя почта: ivanov@mail.ru\n\n"
+        "Приложение: протокол общего собрания собственников.\n"
+        "Управляющая организация ООО «Дом», почта для связи: uk-dom@mail.ru\n"
+    )
+    assert extract_applicant_email(text) == "ivanov@mail.ru"
+
+
+def test_address_only_in_an_attachment_gives_none():
+    text = (
+        "Прошу отремонтировать кровлю дома.\n\n"
+        "Приложение: протокол общего собрания собственников.\n"
+        "Почта для связи: sobranie-dom5@mail.ru\n"
+    )
+    assert extract_applicant_email(text) is None
+
+
+def test_several_own_addresses_return_the_first():
+    text = "Мои почты: pervaya@mail.ru и vtoraya@mail.ru — пишите на любую."
+    assert extract_applicant_email(text) == "pervaya@mail.ru"
+
+
+def test_extract_emails_still_returns_everything():
+    """Список всех адресов структуру документа не учитывает — он для оператора."""
+    text = (
+        "АДМИНИСТРАЦИЯ ГОРОДА N, priemnaya@admin-n.ru\n"
+        "Направляем обращение.\n"
+        "Моя почта ivanov@mail.ru\n"
+        "Приложение: протокол. Почта УК: uk-dom@mail.ru\n"
+    )
+    assert extract_emails(text) == [
+        "priemnaya@admin-n.ru", "ivanov@mail.ru", "uk-dom@mail.ru"]

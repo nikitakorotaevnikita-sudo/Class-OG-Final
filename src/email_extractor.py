@@ -77,6 +77,30 @@ _OWNED_BY_OTHERS = re.compile(
     re.IGNORECASE,
 )
 
+# Полное ФИО рядом с адресом — типовой блок реквизитов заявителя:
+# «Иванов Иван Иванович, 8-999-000-00-00, ivanov@mail.ru». Признак работает
+# только вместе с проверкой на чужого: у должностного лица имя тоже есть.
+_FULL_NAME = re.compile(
+    r"[А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?\s+"
+    r"(?:[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+|[А-ЯЁ]\.\s?[А-ЯЁ]\.)"
+)
+
+# Начало приложения к обращению. Всё, что ниже, — чужая территория: протоколы
+# собраний, акты, служебные записки, копии переписки с организациями.
+_ATTACHMENT_START = re.compile(
+    r"^\s*(?:приложени\w*|протокол\b|акт\b|служебн\w+\s+записк\w+"
+    r"|список\s+подпис\w+|копия\b)",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+# Сопроводительное письмо: всё до этой фразы — бланк отправившего ведомства,
+# и адрес оттуда принадлежит ему, а не заявителю.
+_COVER_SENTENCE = re.compile(
+    r"(?:направля\w+|препровожда\w+|пересыла\w+|поступи\w+)[^.\n]{0,80}обращени\w+",
+    re.IGNORECASE,
+)
+
+
 # Служебные ящики: заявителю такие адреса не принадлежат никогда.
 _SERVICE_LOCAL_PARTS = frozenset({
     "noreply", "no-reply", "no_reply", "donotreply", "do-not-reply",
@@ -129,6 +153,28 @@ def extract_emails(text: Optional[str]) -> list[str]:
     return [address for address, _s, _e in _candidates(text)]
 
 
+def applicant_span(text: str) -> tuple[int, int]:
+    """Часть текста, где вообще может стоять адрес заявителя.
+
+    Отсекается шапка сопроводительного письма (бланк ведомства) и всё, что
+    начинается с приложения. Требование аналитика: адрес из шапки
+    сопроводительных документов и приложений заявителю не принадлежит.
+    """
+    start = 0
+    cover = _COVER_SENTENCE.search(text)
+    if cover:
+        line_end = text.find("\n", cover.end())
+        start = line_end + 1 if line_end != -1 else cover.end()
+
+    end = len(text)
+    attachment = _ATTACHMENT_START.search(text, start)
+    if attachment:
+        end = attachment.start()
+
+    # Если отсечение съело весь текст, структуру не угадали — не режем.
+    return (start, end) if start < end else (0, len(text))
+
+
 def _line_around(text: str, start: int, end: int) -> str:
     """Строка, в которой стоит адрес."""
     line_start = text.rfind("\n", 0, start) + 1
@@ -149,7 +195,11 @@ def belongs_to_applicant(text: str, start: int, end: int) -> bool:
 
     before = text[max(0, start - _LOOKBEHIND):start]
     after = text[end:end + _LOOKAHEAD]
-    return bool(_OWNED_BY_APPLICANT.search(before) or _OWNED_BY_APPLICANT.search(after))
+    if _OWNED_BY_APPLICANT.search(before) or _OWNED_BY_APPLICANT.search(after):
+        return True
+
+    # Блок реквизитов: ФИО и адрес в одной строке, указателя может не быть.
+    return bool(_FULL_NAME.search(_line_around(text, start, end)))
 
 
 def _normalize(raw: Optional[str]) -> str:
@@ -186,7 +236,10 @@ def extract_applicant_email(text: Optional[str], llm_hint: Optional[str] = None)
             if address == hint:
                 return address
 
+    span_start, span_end = applicant_span(text)
     for address, start, end in candidates:
+        if not (span_start <= start < span_end):
+            continue                      # шапка сопроводительного или приложение
         if belongs_to_applicant(text, start, end):
             return address
 
