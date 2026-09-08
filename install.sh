@@ -73,7 +73,7 @@ fi
 
 if [ "$NONINTERACTIVE" != "1" ]; then
     printf '\n   Провайдер LLM:\n'
-    printf '     [1] ario   — Directum360, Qwen3.6-35B-A3B (нужен доступ в интернет)\n'
+    printf '     [1] ario   — Directum360 (нужен доступ в интернет)\n'
     printf '     [2] custom — свой OpenAI-совместимый endpoint (vLLM, LM Studio, gpt-oss)\n'
     printf '     [3] ollama — модель на этой же машине\n'
     printf '     [4] groq / [5] gemini\n\n'

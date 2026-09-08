@@ -108,21 +108,24 @@ if not exist ".env" (
 :: --- Select LLM Provider ---
 echo.
 echo    Select LLM provider:
-echo      [1] Groq         - llama-3.3-70b-versatile (recommended, free)
-echo      [2] Gemini       - gemini-2.5-flash (20 req/day free)
-echo      [3] Ollama/Qwen  - qwen2.5-14b (local, no limits)
-echo      [4] Ario         - Qwen3.6-35B-A3B (Directum360)
+echo      [1] Ario         - Directum360, the project default
+echo      [2] Custom       - the customer's OpenAI-compatible endpoint (vLLM)
+echo      [3] Ollama/Qwen  - a local model, no limits
+echo      [4] Groq         - cloud, free key
+echo      [5] Gemini       - cloud, 20 req/day free
 echo.
-set /p PROVIDER_CHOICE=   Enter (1/2/3/4):
+set /p PROVIDER_CHOICE=   Enter (1/2/3/4/5):
 
 if "%PROVIDER_CHOICE%"=="2" (
-    set LLM_PROVIDER=gemini
+    set LLM_PROVIDER=custom
 ) else if "%PROVIDER_CHOICE%"=="3" (
     set LLM_PROVIDER=ollama
 ) else if "%PROVIDER_CHOICE%"=="4" (
-    set LLM_PROVIDER=ario
-) else (
     set LLM_PROVIDER=groq
+) else if "%PROVIDER_CHOICE%"=="5" (
+    set LLM_PROVIDER=gemini
+) else (
+    set LLM_PROVIDER=ario
 )
 
 :: Update LLM_PROVIDER in .env
@@ -180,6 +183,7 @@ if "!LLM_PROVIDER!"=="ario" (
         echo    SKIPPED: No key entered. Edit .env manually later.
     )
     echo.
+    echo    Model name: see GET {base}/models -- the set on the endpoint changes.
     set /p ARIO_URL=   Enter ARIO_BASE_URL [https://llm.ario.directum360.ru/v1]:
     if not defined ARIO_URL set ARIO_URL=https://llm.ario.directum360.ru/v1
     findstr /C:"ARIO_BASE_URL" .env >nul 2>&1
@@ -189,6 +193,30 @@ if "!LLM_PROVIDER!"=="ario" (
         echo ARIO_BASE_URL=!ARIO_URL!>> .env
     )
     echo    OK: ARIO_BASE_URL = !ARIO_URL!
+)
+
+if "!LLM_PROVIDER!"=="custom" (
+    echo.
+    echo    OpenAI-compatible endpoint of the customer's model.
+    echo    The model name must match GET {base}/models exactly --
+    echo    vLLM usually reports a prefixed id, e.g. openai/gpt-oss-20b.
+    echo.
+    set /p C_URL=   Enter CUSTOM_LLM_BASE_URL (e.g. http://10.0.0.5:8000/v1):
+    if defined C_URL (
+        powershell -NoProfile -Command "(Get-Content '.env') -replace '^CUSTOM_LLM_BASE_URL=.*', 'CUSTOM_LLM_BASE_URL=!C_URL!' | Set-Content '.env' -Encoding UTF8"
+        echo    OK: CUSTOM_LLM_BASE_URL = !C_URL!
+    )
+    set /p C_MODEL=   Enter CUSTOM_LLM_MODEL:
+    if defined C_MODEL (
+        powershell -NoProfile -Command "(Get-Content '.env') -replace '^CUSTOM_LLM_MODEL=.*', 'CUSTOM_LLM_MODEL=!C_MODEL!' | Set-Content '.env' -Encoding UTF8"
+        echo    OK: CUSTOM_LLM_MODEL = !C_MODEL!
+    )
+    echo    Leave the key empty if the server does not check it.
+    set /p C_KEY=   Enter CUSTOM_LLM_API_KEY:
+    if defined C_KEY (
+        powershell -NoProfile -Command "(Get-Content '.env') -replace '^CUSTOM_LLM_API_KEY=.*', 'CUSTOM_LLM_API_KEY=!C_KEY!' | Set-Content '.env' -Encoding UTF8"
+        echo    OK: CUSTOM_LLM_API_KEY saved to .env
+    )
 )
 
 if "!LLM_PROVIDER!"=="ollama" (
