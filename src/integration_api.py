@@ -109,17 +109,37 @@ def _resolve_text(body: ClassifyDocumentRequest) -> str:
     raise HTTPException(status_code=400, detail="Нужен appeal_text либо document_id")
 
 
+def _unique_by_code(questions) -> list:
+    """Один код — один вопрос, в порядке первого появления.
+
+    Сегментатор делит обращение по смыслу, и несколько вопросов могут свестись
+    к одному коду: «свалка во дворе, мусор не вывозят, контейнер переполнен» —
+    три вопроса, один код. Для RX это один вопрос: иначе в карточке три
+    одинаковых строки, которые оператор вычищает руками.
+    """
+    seen: set[str] = set()
+    unique = []
+    for question in questions:
+        if question.code in seen:
+            continue
+        seen.add(question.code)
+        unique.append(question)
+    return unique
+
+
 def _build_response(agent, text: str, document_id: Optional[int]) -> ClassifyDocumentResponse:
     """Классификация и сборка ответа. Общая для синхронного и фонового путей."""
     result = agent.classify(text)
+    questions = _unique_by_code(result.questions)
     return ClassifyDocumentResponse(
         document_id=document_id,
         applicant_fio=result.applicant_fio,
         applicant_email=result.applicant_email,
         summary=result.summary,
-        reasoning=_build_reasoning(result.questions),
-        questions=[RxQuestion(code=q.code, question=q.name)
-                   for q in result.questions],
+        # Обоснование склеивается по тем же вопросам: при повторе кода оператор
+        # иначе читает один и тот же текст несколько раз.
+        reasoning=_build_reasoning(questions),
+        questions=[RxQuestion(code=q.code, question=q.name) for q in questions],
     )
 
 
