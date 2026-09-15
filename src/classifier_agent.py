@@ -2047,6 +2047,12 @@ class ClassifierAgent:
                 )
                 if fallback_candidate and fallback_candidate["candidates"]:
                     code = fallback_candidate["candidates"][0]["code"]
+                # Без этой строки на стенде не отличить подмену от ошибки самой
+                # модели: наружу уходит только итоговый код.
+                print(
+                    f"  [Strict] вопрос {ordinal}: код {original_code} вне кандидатов "
+                    f"этого вопроса — заменён на топ-1 {code}"
+                )
 
             entry = self.code_index.get(code)
 
@@ -2121,6 +2127,17 @@ class ClassifierAgent:
             tech_reasons = list(verification_reasons)
             if invalid_code:
                 tech_reasons.append("llm_code_replaced_with_top1")
+                # Обоснование написано моделью под её код, а отдан другой. Молчать
+                # об этом нельзя: у оператора карточка, где текст доказывает один
+                # код, а стоит другой — именно так выглядела ошибка на продуктиве.
+                note = (
+                    f"Внимание: код заменён проверкой. Модель предлагала "
+                    f"{original_code}, но этого кода не было среди кандидатов по "
+                    f"данному вопросу, поэтому выбран {code} — лучший кандидат "
+                    f"поиска. Обоснование ниже написано моделью для {original_code} "
+                    f"и требует проверки оператором."
+                )
+                reasoning = f"{note} {reasoning}".strip() if reasoning else note
 
             classified_questions.append(ClassifiedQuestion(
                 question_text=q.get("question_text", ""),

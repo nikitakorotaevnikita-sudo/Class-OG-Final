@@ -82,7 +82,16 @@ def test_strict_validation_replaces_code_outside_question_candidates(monkeypatch
     assert result.questions[0].code == "0004.0019.0178.1098"
     assert result.questions[0].confidence == 0.45
     assert result.needs_verification is True
-    assert "вне кандидатов" in result.questions[0].reasoning
+    assert "llm_code_replaced_with_top1" in result.questions[0].verification_reasons
+
+    # Обоснование писала модель под СВОЙ код, а отдан другой. Не сказать об этом —
+    # значит отдать в RX карточку, которая сама себе противоречит: именно так
+    # выглядела ошибка на продуктиве (текст про «Перебои в водоснабжении»,
+    # код «Управляющие организации»).
+    reasoning = result.questions[0].reasoning
+    assert "0001.0002.0027.0145" in reasoning, "нужен код, который предлагала модель"
+    assert "0004.0019.0178.1098" in reasoning, "нужен код, который ушёл в ответ"
+    assert "выбрано из-за обращения Президенту" in reasoning, "текст модели не теряем"
 
 
 def test_strict_validation_keeps_valid_candidate_code(monkeypatch):
@@ -133,4 +142,34 @@ def test_calibration_flags_non_top_candidate_for_verification(monkeypatch):
     assert result.questions[0].code == "0004.0019.0179.1112"
     assert result.questions[0].confidence <= 0.62
     assert result.needs_verification is True
-    assert "selected_candidate_rank_2" in result.questions[0].reasoning
+    assert "selected_candidate_rank_2" in result.questions[0].verification_reasons
+    assert "selected_candidate_rank_2" not in result.questions[0].reasoning, \
+        "служебный маркер оператору читать незачем"
+    assert result.questions[0].reasoning == "выбран второй кандидат", \
+        "код не подменяли — обоснование модели остаётся как есть"
+
+
+def test_replacement_is_printed_to_the_service_log(monkeypatch, capsys):
+    """Без строки в логе на стенде не понять, была подмена или модель ошиблась."""
+    candidates = [
+        _candidate("0004.0019.0178.1098", "Прокуратура", 0.9),
+        _candidate("0004.0019.0179.1112", "Нотариат", 0.7),
+    ]
+    agent = _agent(
+        monkeypatch,
+        llm_question={
+            "ordinal": 1,
+            "question_text": "жалоба на прокуратуру",
+            "selected_code": "0001.0002.0027.0145",
+            "confidence": 0.92,
+            "reasoning": "выбрано из-за обращения Президенту",
+            "alternative_codes": [],
+        },
+        candidates=candidates,
+    )
+
+    agent.classify("Уважаемый Президент, жалуюсь на прокуратуру")
+
+    out = capsys.readouterr().out
+    assert "0001.0002.0027.0145" in out, "нет кода, который предложила модель"
+    assert "0004.0019.0178.1098" in out, "нет кода, на который подменили"
