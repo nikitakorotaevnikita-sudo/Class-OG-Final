@@ -215,3 +215,43 @@ def test_extract_emails_still_returns_everything():
     )
     assert extract_emails(text) == [
         "priemnaya@admin-n.ru", "ivanov@mail.ru", "uk-dom@mail.ru"]
+
+
+# ── Подчёркивание в адресе ──────────────────────────────────────────────────
+# Подчёркивание допустимо в локальной части в любой позиции (RFC 5322), в том
+# числе первым и последним символом. Раньше крайние подчёркивания обрезались:
+# «_ivanov@mail.ru» превращался в «ivanov@mail.ru» — другой, существующий у
+# другого человека адрес, а «ivanov_@mail.ru» не находился вовсе.
+
+@pytest.mark.parametrize("address", [
+    "ivanov_ivan@mail.ru",
+    "i_i_ivanov@mail.ru",
+    "ivanov__ivan@mail.ru",
+    "ivan.ivanov_77@yandex.ru",
+    "_ivanov@mail.ru",
+    "ivanov_@mail.ru",
+    "_ivanov_@mail.ru",
+    "_@mail.ru",
+])
+def test_underscore_anywhere_in_the_local_part(address):
+    text = f"Мой e-mail: {address}"
+    assert extract_emails(text) == [address], "адрес должен извлекаться дословно"
+    assert extract_applicant_email(text) == address
+
+
+def test_underscore_address_is_not_silently_trimmed():
+    """Обрезка крайнего подчёркивания давала чужой рабочий адрес — худший исход."""
+    assert extract_emails("Почта: _ivanov@mail.ru") != ["ivanov@mail.ru"]
+
+
+def test_obfuscated_address_with_underscore():
+    text = "почта для ответа ivanov_ivan [собака] rambler.ru"
+    assert extract_applicant_email(text) == "ivanov_ivan@rambler.ru"
+
+
+def test_underscore_in_the_domain_is_not_an_address():
+    """В доменном имени подчёркивание недопустимо (RFC 1123): письмо не дойдёт.
+
+    Пустое поле здесь лучше, чем заведение заявителя с недоставляемым адресом.
+    """
+    assert extract_emails("Почта: ivanov_ivan@mail_server.ru") == []
