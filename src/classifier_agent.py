@@ -582,7 +582,7 @@ class ClassifierAgent:
         elif self.llm == "ollama":
             import httpx
             self._ollama_client = httpx.Client(
-                base_url=OLLAMA_BASE_URL, timeout=120,
+                base_url=OLLAMA_BASE_URL, timeout=LLM_TIMEOUT_SEC,
                 trust_env=uses_env_proxy(OLLAMA_BASE_URL, LLM_VIA_PROXY))
             print(f"  Model LLM: {OLLAMA_MODEL} (Ollama)")
         elif self.llm == "ario":
@@ -684,7 +684,7 @@ class ClassifierAgent:
         if not hasattr(self, "_ollama_client"):
             import httpx
             self._ollama_client = httpx.Client(
-                base_url=OLLAMA_BASE_URL, timeout=120,
+                base_url=OLLAMA_BASE_URL, timeout=LLM_TIMEOUT_SEC,
                 trust_env=uses_env_proxy(OLLAMA_BASE_URL, LLM_VIA_PROXY))
         return self._ollama_client
 
