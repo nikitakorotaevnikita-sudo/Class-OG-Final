@@ -98,6 +98,56 @@ async def backoffice_page():
     return FileResponse(_STATIC_DIR / "backoffice.html")
 
 
+@app.get("/vision", include_in_schema=False)
+async def vision_page():
+    return FileResponse(_STATIC_DIR / "vision.html")
+
+
+@app.post("/api/recognize-image", tags=["Распознавание"])
+async def recognize_image(file: UploadFile = File(...)):
+    """Распознать текст с изображения или скана PDF.
+
+    Инструмент оператора, не часть пайплайна: результат показывается человеку и
+    никуда не подставляется. Файл обрабатывается в памяти — в скане
+    персональные данные, на диске ему делать нечего.
+    """
+    from starlette.concurrency import run_in_threadpool
+    import llm_check
+    import vision_ocr
+
+    if not vision_ocr.is_supported(file.filename or ""):
+        raise HTTPException(
+            status_code=400,
+            detail=(f"Формат файла {Path(file.filename or '').suffix or 'без расширения'} "
+                    f"не поддерживается: нужен "
+                    f"{', '.join(vision_ocr.SUPPORTED_SUFFIXES)}"))
+
+    content = await file.read()
+    limit_mb = 20
+    if len(content) > limit_mb * 1024 * 1024:
+        raise HTTPException(status_code=400,
+                            detail=f"Файл больше {limit_mb} МБ — распознавание не запускалось")
+
+    started = time.time()
+    try:
+        pages = await run_in_threadpool(vision_ocr.recognize, content, file.filename)
+    except vision_ocr.VisionError as e:
+        # Несовместимость или битый файл — это не сбой сервиса.
+        raise HTTPException(status_code=400, detail=str(e))
+
+    endpoint = llm_check.resolve_endpoint()
+    return {
+        "filename": file.filename,
+        "pages": pages,
+        "provider": endpoint["provider"],
+        "model": endpoint["model"],
+        "elapsed_sec": round(time.time() - started, 1),
+        # Проверка на живой модели показала: на мелком изображении она уверенно
+        # выдумывает правдоподобные детали — в пробе подменила адрес почты.
+        "needs_verification": True,
+    }
+
+
 # ── IP-логирование запросов к /classify ───────────────────────────────────────
 
 def log_request(ip: str, endpoint: str, elapsed_seconds: float, log_id: str | None):

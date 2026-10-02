@@ -757,3 +757,24 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-wei
 @media (max-width: 900px) {
   .settings-grid { grid-template-columns: 1fr; }
 }
+
+/* ── Распознавание скана (vision.html) ─────────────────────────────────────── */
+.drop-zone-active { border-color: var(--accent); background: var(--accent-soft); }
+
+/* Распознанный текст показываем как есть: переносы строк в скане значимы —
+   по ним видно шапку, абзацы обращения и подпись. */
+.recognised-text {
+  margin: 8px 0 0;
+  padding: 12px 14px;
+  background: var(--surface-2, #f6f7f9);
+  border: 1px solid var(--border, #e3e6ea);
+  border-radius: 8px;
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 420px;
+  overflow-y: auto;
+}

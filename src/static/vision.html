@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Платформа.ОГВ — Распознавание скана</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/tokens.css?v=20260528">
+  <link rel="stylesheet" href="/static/styles.css?v=20260528">
+</head>
+<body data-theme="state-1">
+  <header class="app-header">
+    <a class="brand" href="/" aria-label="Directum">
+      <img class="brand-logo" src="/static/logo-directum.svg?v=20260528" alt="Directum">
+    </a>
+    <div class="app-title">
+      <h1>Распознавание скана</h1>
+    </div>
+    <a class="btn btn-ghost btn-sm" href="/backoffice">Бэк-офис</a>
+  </header>
+
+  <aside class="sidebar app-sidebar" aria-label="Разделы">
+    <nav class="nav-list" aria-label="Навигация">
+      <a href="/" class="nav-item">Классификация</a>
+      <a href="/static/historical.html" class="nav-item">Исторические данные</a>
+      <a href="/vision" class="nav-item active">Распознавание скана</a>
+    </nav>
+    <section class="result-section" aria-label="Сводка">
+      <h2>Как это работает</h2>
+      <div class="result-list">
+        <div class="result-card">Изображение или страницы PDF отправляются в модель, она возвращает текст.</div>
+        <div class="result-card">Файл обрабатывается в памяти и на диск не сохраняется.</div>
+        <div class="result-card">Распознанный текст никуда не подставляется — его забирает оператор.</div>
+      </div>
+    </section>
+  </aside>
+
+  <main class="appeal-shell">
+    <section class="prompt-panel" aria-label="Распознавание">
+      <div class="prompt-panel-heading">
+        <h2>Текст со скана</h2>
+        <div id="provider-line" class="llm-inline-status">PNG, JPG, WEBP или PDF · до 20 МБ · не более 10 страниц</div>
+      </div>
+    </section>
+
+    <section class="historical-workspace">
+      <section class="tool-section" aria-label="Загрузка файла">
+        <div class="section-heading">
+          <div>
+            <h2>Загрузка файла</h2>
+            <p>Подходит для документа без текстового слоя — скана или фотографии обращения.</p>
+          </div>
+        </div>
+
+        <div id="drop-zone" class="drop-zone">
+          <span class="drop-zone-title">Перетащите файл сюда</span>
+          <span class="drop-zone-hint">или нажмите для выбора</span>
+          <span class="drop-zone-hint">PNG, JPG, WEBP, PDF · макс. 20 МБ</span>
+        </div>
+        <input type="file" id="file-input" accept=".png,.jpg,.jpeg,.webp,.pdf" class="hidden">
+
+        <div id="file-line" class="hidden llm-inline-status"></div>
+
+        <div class="settings-actions">
+          <button id="btn-recognize" class="btn btn-blue" type="button" disabled>Распознать</button>
+          <button id="btn-copy" class="btn btn-ghost" type="button" disabled>Скопировать текст</button>
+          <button id="btn-reset" class="btn btn-ghost" type="button">Сбросить</button>
+        </div>
+
+        <div id="loading" class="hidden loading-line">
+          <span class="spinner"></span>
+          <span id="loading-text">Распознаём...</span>
+        </div>
+
+        <div id="error" class="hidden alert alert-red"></div>
+      </section>
+
+      <section id="result-section" class="tool-section hidden" aria-label="Результат">
+        <div class="section-heading">
+          <div>
+            <h2>Распознанный текст</h2>
+            <p id="result-meta"></p>
+          </div>
+        </div>
+
+        <div class="alert alert-blue">
+          Результат нужно проверить глазами. На мелком и нечётком изображении модель
+          не сообщает о сомнении, а дополняет текст правдоподобными деталями — в нашей
+          проверке она так подменила адрес электронной почты. Поэтому текст отсюда
+          никуда не переносится автоматически.
+        </div>
+
+        <div id="pages"></div>
+      </section>
+    </section>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/static/vision.js?v=20261002"></script>
+</body>
+</html>
