@@ -37,6 +37,12 @@ MAX_PAGES = 10
 # (серый, контраст, резкость) и нарезка на полосы там не дали ничего.
 PDF_DPI = 300
 
+# Мелкие фотографии (снимок резолюции, кусок страницы) увеличиваются перед
+# отправкой: на живом образце 653×132 это было единственное, что помогло —
+# фамилия распозналась верно, тогда как без увеличения выходила чужая.
+MIN_WIDTH = 1600
+MAX_WIDTH = 2600
+
 # Ширина уменьшенной копии страницы, которую отдаём оператору для сверки текста
 # с оригиналом. Полноразмерные страницы раздували бы ответ впустую.
 PREVIEW_WIDTH = 900
@@ -95,6 +101,31 @@ def pdf_to_images(pdf_bytes: bytes, max_pages: int = MAX_PAGES, dpi: int = PDF_D
     if not images:
         raise VisionError("В PDF нет страниц")
     return images
+
+
+def prepare(png: bytes) -> bytes:
+    """Мелкое изображение — увеличить и поднять контраст; крупное не трогать."""
+    try:
+        from PIL import Image, ImageFilter, ImageOps
+    except ImportError:
+        return png
+
+    try:
+        img = Image.open(io.BytesIO(png))
+        if img.width >= MIN_WIDTH:
+            return png
+
+        factor = min(MIN_WIDTH / img.width, MAX_WIDTH / img.width, 4)
+        img = img.convert("RGB").resize(
+            (int(img.width * factor), int(img.height * factor)), Image.LANCZOS)
+        img = ImageOps.autocontrast(ImageOps.grayscale(img), cutoff=1)
+        img = img.filter(ImageFilter.UnsharpMask(radius=3, percent=200, threshold=2))
+
+        buf = io.BytesIO()
+        img.convert("RGB").save(buf, format="PNG")
+        return buf.getvalue()
+    except Exception:                                            # noqa: BLE001
+        return png
 
 
 def _ask_model(png: bytes, base_url: str, api_key: str, model: str,
@@ -201,6 +232,26 @@ def _parse_fields(raw: str) -> dict:
     return fields
 
 
+def _confirmed_by_transcript(value: str, transcript: str) -> bool:
+    """Есть ли значение в расшифровке той же страницы.
+
+    Поле и расшифровка получены разными запросами, поэтому совпадение — это
+    два независимых прочтения одного места. На живом образце поле пришло как
+    «Иванова А.А», а в расшифровке стояло «Д. Иванова»: инициалы модель
+    домыслила, и такое расхождение оператору надо видеть.
+    """
+    needle = " ".join((value or "").split()).lower()
+    hay = " ".join((transcript or "").split()).lower()
+    if not needle or not hay:
+        return False
+    if needle in hay:
+        return True
+    # Многословное значение считаем подтверждённым, только если в расшифровке
+    # есть каждое его слово: фамилия без инициалов — ещё не подтверждение.
+    parts = [part for part in needle.split() if len(part) > 1]
+    return bool(parts) and all(part in hay for part in parts)
+
+
 def recognize_document(file_bytes: bytes, filename: str, max_pages: int = MAX_PAGES) -> dict:
     """Расшифровка по страницам, ключевые поля и уменьшенные копии страниц.
 
@@ -220,6 +271,7 @@ def recognize_document(file_bytes: bytes, filename: str, max_pages: int = MAX_PA
 
     base_url, api_key, model = endpoint["base_url"], endpoint["api_key"], endpoint["model"]
     images = pdf_to_images(file_bytes, max_pages) if suffix == ".pdf" else [file_bytes]
+    images = [prepare(image) for image in images]
 
     pages, fields = [], {name: None for name in FIELD_NAMES}
     for number, image in enumerate(images, 1):
@@ -237,4 +289,9 @@ def recognize_document(file_bytes: bytes, filename: str, max_pages: int = MAX_PA
                         value = normalize_fio(to_nominative(value)) or value
                     fields[name] = value
 
-    return {"pages": pages, "fields": fields}
+    transcript = "\n".join(page["text"] for page in pages)
+    confirmed = {
+        name: (None if not value else _confirmed_by_transcript(value, transcript))
+        for name, value in fields.items()
+    }
+    return {"pages": pages, "fields": fields, "confirmed": confirmed}

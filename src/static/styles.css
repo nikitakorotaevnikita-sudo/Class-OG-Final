@@ -784,3 +784,6 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-wei
 @media (max-width: 1100px) { .page-compare { grid-template-columns: 1fr; } }
 .page-scan { width: 100%; border: 1px solid var(--border, #e3e6ea); border-radius: 8px; background: #fff; }
 .field-empty { color: var(--muted); font-weight: 500; }
+
+.field-unconfirmed { border-left: 3px solid var(--amber, #d98324); background: var(--amber-soft, #fdf6ec); }
+.field-note { display: block; margin-top: 4px; font-size: 12px; color: var(--muted); }

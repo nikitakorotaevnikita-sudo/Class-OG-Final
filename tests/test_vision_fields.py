@@ -136,3 +136,66 @@ def test_fio_from_the_header_comes_back_in_nominative(monkeypatch):
         "текст", '{"applicant_fio": "Петровой Марии Ивановны", "email": null, "phone": null}'))
     fields = vision_ocr.recognize_document(make_png(), "скан.png")["fields"]
     assert fields["applicant_fio"] == "Петрова Мария Ивановна"
+
+
+# ── Предобработка мелких изображений ────────────────────────────────────────
+# На живом образце (фото резолюции 653×132) увеличение втрое с автоконтрастом
+# было единственным, что сдвинуло результат: фамилия «Иванова» распозналась
+# верно, тогда как без него выходило «Иванов А.».
+
+def _sent_image(monkeypatch, png: bytes):
+    import base64
+    captured = {}
+
+    def fake_post(url, **kwargs):
+        part = kwargs["json"]["messages"][0]["content"][1]["image_url"]["url"]
+        captured["raw"] = base64.b64decode(part.split(",", 1)[1])
+        return _Resp("текст")
+
+    monkeypatch.setattr(vision_ocr.httpx, "post", fake_post)
+    vision_ocr.recognize_document(png, "скан.png")
+    from PIL import Image
+    return Image.open(io.BytesIO(captured["raw"]))
+
+
+def test_small_image_is_enlarged_before_sending(monkeypatch):
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", (653, 132), "white").save(buf, format="PNG")
+    assert _sent_image(monkeypatch, buf.getvalue()).width > 653 * 2
+
+
+def test_large_image_is_left_alone(monkeypatch):
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", (2400, 1600), "white").save(buf, format="PNG")
+    assert _sent_image(monkeypatch, buf.getvalue()).width == 2400
+
+
+# ── Сверка полей с расшифровкой ─────────────────────────────────────────────
+# На живом образце поле ФИО пришло как «Иванова А.А», тогда как в расшифровке
+# той же страницы стояло «Д. Иванова», а в оригинале — «Иванова Н.А.».
+# Значение, которого нет в расшифровке, помечается неподтверждённым: оператор
+# должен видеть разницу между «модель прочитала» и «модель предположила».
+
+def test_field_present_in_the_transcript_is_confirmed(monkeypatch):
+    monkeypatch.setattr(vision_ocr.httpx, "post", answers(
+        "Ответ прошу на petrova.m@mail.ru",
+        '{"applicant_fio": null, "email": "petrova.m@mail.ru", "phone": null}'))
+    result = vision_ocr.recognize_document(make_png(), "скан.png")
+    assert result["confirmed"]["email"] is True
+
+
+def test_field_absent_from_the_transcript_is_flagged(monkeypatch):
+    monkeypatch.setattr(vision_ocr.httpx, "post", answers(
+        "Д. Иванова",
+        '{"applicant_fio": "Иванова А.А", "email": null, "phone": null}'))
+    result = vision_ocr.recognize_document(make_png(), "скан.png")
+    assert result["fields"]["applicant_fio"] == "Иванова А.А"
+    assert result["confirmed"]["applicant_fio"] is False, "инициалов в расшифровке не было"
+
+
+def test_empty_field_is_neither_confirmed_nor_flagged(monkeypatch):
+    monkeypatch.setattr(vision_ocr.httpx, "post", answers("текст", '{"email": null}'))
+    result = vision_ocr.recognize_document(make_png(), "скан.png")
+    assert result["confirmed"]["email"] is None

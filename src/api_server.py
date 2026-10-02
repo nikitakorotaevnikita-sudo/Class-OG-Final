@@ -142,6 +142,9 @@ async def recognize_image(file: UploadFile = File(...)):
         # Ключевые поля спрошены отдельно и с правом ответить «не читаю»: в
         # сплошной расшифровке модель достраивает пробелы правдоподобным.
         "fields": result["fields"],
+        # Подтверждено ли значение расшифровкой той же страницы: поле и текст
+        # получены разными запросами, совпадение — два независимых прочтения.
+        "confirmed": result.get("confirmed", {}),
         "provider": endpoint["provider"],
         "model": endpoint["model"],
         "elapsed_sec": round(time.time() - started, 1),

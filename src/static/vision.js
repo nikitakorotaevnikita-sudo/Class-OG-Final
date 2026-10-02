@@ -113,7 +113,7 @@
     $('result-meta').textContent =
       `${data.filename} · страниц: ${pages.length} · ${data.provider}/${data.model} · ${data.elapsed_sec} с`;
 
-    renderFields(data.fields);
+    renderFields(data.fields, data.confirmed);
 
     // Картинка рядом с текстом: сверять построчно иначе невозможно.
     $('pages').innerHTML = pages.map((page) => `
@@ -135,17 +135,28 @@
     phone: 'Телефон',
   };
 
-  function renderFields(fields) {
+  function renderFields(fields, confirmed) {
     const block = $('fields-block');
     if (!fields || !Object.keys(fields).length) {
       block.classList.add('hidden');
       return;
     }
+    const marks = confirmed || {};
     $('fields').innerHTML = Object.entries(FIELD_LABELS).map(([key, label]) => {
       const value = fields[key];
-      return `<div class="result-card">
+      if (!value) {
+        return `<div class="result-card">
+          <span class="meta-label">${label}</span>
+          <strong class="field-empty">не разобрано</strong>
+        </div>`;
+      }
+      // Значение, которого нет в расшифровке, модель домыслила — такое
+      // показываем отдельно, чтобы оператор не принял догадку за прочтение.
+      const ok = marks[key] === true;
+      return `<div class="result-card ${ok ? '' : 'field-unconfirmed'}">
         <span class="meta-label">${label}</span>
-        <strong class="${value ? '' : 'field-empty'}">${value ? esc(value) : 'не разобрано'}</strong>
+        <strong>${esc(value)}</strong>
+        <span class="field-note">${ok ? 'совпало с расшифровкой' : 'в расшифровке не найдено — проверьте'}</span>
       </div>`;
     }).join('');
     block.classList.remove('hidden');
