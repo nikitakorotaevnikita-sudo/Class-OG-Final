@@ -162,6 +162,11 @@ def _to_nominative(name: str) -> str:
 _INITIALS_ONLY = re.compile(rf"^{_INITIALS}$")
 
 
+def to_nominative(name: str) -> str:
+    """«Иванова Ивана Ивановича» → «Иванов Иван Иванович». Публичное имя."""
+    return _to_nominative(name)
+
+
 # ── Выбор заявителя ─────────────────────────────────────────────────────────
 
 def _rule_candidate(text: str) -> Optional[str]:

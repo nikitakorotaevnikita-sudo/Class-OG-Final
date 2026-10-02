@@ -113,14 +113,42 @@
     $('result-meta').textContent =
       `${data.filename} · страниц: ${pages.length} · ${data.provider}/${data.model} · ${data.elapsed_sec} с`;
 
+    renderFields(data.fields);
+
+    // Картинка рядом с текстом: сверять построчно иначе невозможно.
     $('pages').innerHTML = pages.map((page) => `
       <article class="result-card">
         <div class="meta-label">Страница ${page.page}</div>
-        <pre class="recognised-text">${esc(page.text) || '(пусто)'}</pre>
+        <div class="page-compare">
+          ${page.image ? `<img class="page-scan" src="${page.image}" alt="Страница ${page.page}">` : ''}
+          <pre class="recognised-text">${esc(page.text) || '(пусто)'}</pre>
+        </div>
       </article>`).join('');
 
     $('result-section').classList.remove('hidden');
     $('btn-copy').disabled = !recognisedText;
+  }
+
+  const FIELD_LABELS = {
+    applicant_fio: 'ФИО заявителя',
+    email: 'Электронная почта',
+    phone: 'Телефон',
+  };
+
+  function renderFields(fields) {
+    const block = $('fields-block');
+    if (!fields || !Object.keys(fields).length) {
+      block.classList.add('hidden');
+      return;
+    }
+    $('fields').innerHTML = Object.entries(FIELD_LABELS).map(([key, label]) => {
+      const value = fields[key];
+      return `<div class="result-card">
+        <span class="meta-label">${label}</span>
+        <strong class="${value ? '' : 'field-empty'}">${value ? esc(value) : 'не разобрано'}</strong>
+      </div>`;
+    }).join('');
+    block.classList.remove('hidden');
   }
 
   async function copyText() {

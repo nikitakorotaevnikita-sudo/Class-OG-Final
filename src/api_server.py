@@ -130,7 +130,7 @@ async def recognize_image(file: UploadFile = File(...)):
 
     started = time.time()
     try:
-        pages = await run_in_threadpool(vision_ocr.recognize, content, file.filename)
+        result = await run_in_threadpool(vision_ocr.recognize_document, content, file.filename)
     except vision_ocr.VisionError as e:
         # Несовместимость или битый файл — это не сбой сервиса.
         raise HTTPException(status_code=400, detail=str(e))
@@ -138,7 +138,10 @@ async def recognize_image(file: UploadFile = File(...)):
     endpoint = llm_check.resolve_endpoint()
     return {
         "filename": file.filename,
-        "pages": pages,
+        "pages": result["pages"],
+        # Ключевые поля спрошены отдельно и с правом ответить «не читаю»: в
+        # сплошной расшифровке модель достраивает пробелы правдоподобным.
+        "fields": result["fields"],
         "provider": endpoint["provider"],
         "model": endpoint["model"],
         "elapsed_sec": round(time.time() - started, 1),

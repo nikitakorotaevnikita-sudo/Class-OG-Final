@@ -778,3 +778,9 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-wei
   max-height: 420px;
   overflow-y: auto;
 }
+
+/* Страница скана и распознанный текст рядом — иначе сверить нечем. */
+.page-compare { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: start; }
+@media (max-width: 1100px) { .page-compare { grid-template-columns: 1fr; } }
+.page-scan { width: 100%; border: 1px solid var(--border, #e3e6ea); border-radius: 8px; background: #fff; }
+.field-empty { color: var(--muted); font-weight: 500; }

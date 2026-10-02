@@ -44,21 +44,26 @@ def test_page_warns_that_recognition_can_invent_text():
 # ── Эндпоинт ────────────────────────────────────────────────────────────────
 
 def test_recognises_an_image(monkeypatch):
-    monkeypatch.setattr(vision_ocr, "recognize",
-                        lambda data, name, **kw: [{"page": 1, "text": "текст со скана"}])
+    monkeypatch.setattr(vision_ocr, "recognize_document",
+                        lambda data, name, **kw: {
+                            "pages": [{"page": 1, "text": "текст со скана", "image": ""}],
+                            "fields": {"applicant_fio": None, "email": None, "phone": None}})
     response = client.post("/api/recognize-image",
                            files={"file": ("скан.png", png_bytes(), "image/png")})
 
     assert response.status_code == 200, response.text
     body = response.json()
-    assert body["pages"] == [{"page": 1, "text": "текст со скана"}]
+    assert body["pages"][0]["text"] == "текст со скана"
+    assert body["fields"] == {"applicant_fio": None, "email": None, "phone": None},         "поля спрашиваются отдельно и могут быть пустыми"
     assert body["needs_verification"] is True, "результат всегда требует проверки"
     assert body["provider"], "оператору важно видеть, какая модель распознавала"
 
 
 def test_multi_page_pdf_comes_back_page_by_page(monkeypatch):
-    monkeypatch.setattr(vision_ocr, "recognize",
-                        lambda data, name, **kw: [{"page": n, "text": f"стр {n}"} for n in (1, 2)])
+    monkeypatch.setattr(vision_ocr, "recognize_document",
+                        lambda data, name, **kw: {
+                            "pages": [{"page": n, "text": f"стр {n}", "image": ""} for n in (1, 2)],
+                            "fields": {"applicant_fio": None, "email": None, "phone": None}})
     response = client.post("/api/recognize-image",
                            files={"file": ("скан.pdf", b"%PDF-fake", "application/pdf")})
     assert [p["page"] for p in response.json()["pages"]] == [1, 2]
@@ -83,7 +88,7 @@ def test_model_without_vision_is_explained_not_crashed(monkeypatch):
     def boom(data, name, **kw):
         raise vision_ocr.VisionError("Модель не принимает изображения")
 
-    monkeypatch.setattr(vision_ocr, "recognize", boom)
+    monkeypatch.setattr(vision_ocr, "recognize_document", boom)
     response = client.post("/api/recognize-image",
                            files={"file": ("скан.png", png_bytes(), "image/png")})
     assert response.status_code == 400, "это не сбой сервиса, а несовместимость"
@@ -93,8 +98,9 @@ def test_model_without_vision_is_explained_not_crashed(monkeypatch):
 def test_file_is_not_written_to_disk(monkeypatch, tmp_path):
     """В скане персональные данные — на диске ему делать нечего."""
     seen = []
-    monkeypatch.setattr(vision_ocr, "recognize",
-                        lambda data, name, **kw: [{"page": 1, "text": "ок"}])
+    monkeypatch.setattr(vision_ocr, "recognize_document",
+                        lambda data, name, **kw: {"pages": [{"page": 1, "text": "ок", "image": ""}],
+                                                  "fields": {}})
     real_open = io.open
 
     def watched_open(file, mode="r", *args, **kwargs):
