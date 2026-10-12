@@ -21,6 +21,7 @@ import env_bootstrap  # noqa: F401  — .env до HF-библиотек
 
 from sentence_transformers import SentenceTransformer
 from config import EMBEDDING_MODEL, CLASSIFIER_FLAT_PATH, VECTOR_DB_DIR
+from embedding_format import format_passage, load_embedder
 from annotations_storage import build_search_text, list_annotated_codes
 
 BATCH_SIZE = 128
@@ -42,7 +43,7 @@ def build_database():
 
     # ── Загрузка модели эмбеддингов ───────────────────────────────────
     print(f"\n[2/4] Загрузка модели эмбеддингов: {EMBEDDING_MODEL}...")
-    model = SentenceTransformer(EMBEDDING_MODEL)
+    model = load_embedder(EMBEDDING_MODEL)
     print("      Модель загружена.")
 
     # ── Векторизация ──────────────────────────────────────────────────
@@ -51,11 +52,10 @@ def build_database():
     all_embeddings = []
     metadata = []
 
-    # Префикс "passage: " только для e5-семейства; BGE-M3 и др. современные
-    # модели префиксов не требуют (см. model card)
-    use_prefix = "e5" in EMBEDDING_MODEL.lower()
-    if not use_prefix:
-        print(f"      (без 'passage: ' префикса — модель {EMBEDDING_MODEL} префиксов не требует)")
+    # Соглашение о префиксах общее с кодированием запроса (embedding_format):
+    # если документы и запрос закодированы по-разному, поиск сравнивает
+    # несравнимое.
+    print(f"      формат документа: {format_passage('<текст>', EMBEDDING_MODEL)!r}")
 
     for start in range(0, total, BATCH_SIZE):
         batch = entries[start:start + BATCH_SIZE]
@@ -66,7 +66,7 @@ def build_database():
                 base_name=e["name"],
                 base_full_path=e.get("full_path", "")
             )
-            texts.append(f"passage: {search_txt}" if use_prefix else search_txt)
+            texts.append(format_passage(search_txt, EMBEDDING_MODEL))
         embeddings = model.encode(texts, normalize_embeddings=True)
         all_embeddings.append(embeddings)
 

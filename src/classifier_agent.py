@@ -64,6 +64,7 @@ from config import (
     ENABLE_ALLOWED_CODES, ALLOWED_CODES_PATH,
 )
 from proxy_policy import uses_env_proxy
+from embedding_format import format_query, load_embedder
 from hierarchy import (
     branch_agreement_scores, parent_similarity_boost,
     dominant_l1_sections, prefix_at_level,
@@ -597,7 +598,7 @@ class ClassifierAgent:
 
         # Модель эмбеддингов
         print(f"  Загрузка модели эмбеддингов: {EMBEDDING_MODEL}")
-        self.embedder = SentenceTransformer(EMBEDDING_MODEL)
+        self.embedder = load_embedder(EMBEDDING_MODEL)
 
         # Загрузка векторной базы (numpy)
         db_dir = Path(VECTOR_DB_DIR)
@@ -689,10 +690,10 @@ class ClassifierAgent:
         return self._ollama_client
 
     def _embed_query(self, text: str) -> np.ndarray:
-        """Векторизация запроса. Префикс "query: " только для e5-семейства
-        (BGE-M3 и др. современные модели префиксов не требуют — см. модель-карту).
+        """Векторизация запроса в соглашении своей модели (см. embedding_format):
+        e5 — «query: », Qwen3-Embedding — инструкция задачи, прочие — как есть.
         Если включён embedding adapter — применяется его проекция."""
-        formatted = f"query: {text}" if "e5" in EMBEDDING_MODEL.lower() else text
+        formatted = format_query(text, EMBEDDING_MODEL)
         emb = self.embedder.encode(formatted, normalize_embeddings=True)
         if self.adapter_W is not None:
             emb = emb @ self.adapter_W.T + self.adapter_b
