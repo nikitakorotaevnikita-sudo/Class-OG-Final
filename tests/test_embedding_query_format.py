@@ -88,3 +88,35 @@ def test_embedder_on_gpu_keeps_the_native_dtype(monkeypatch):
 
     embedding_format.load_embedder("Qwen/Qwen3-Embedding-0.6B")
     assert "model_kwargs" not in captured
+
+
+# ── Предел длины входа ──────────────────────────────────────────────────────
+# У e5 предел 512 токенов, у Qwen3-Embedding — 32 тысячи. Обращение на 5000
+# символов кодировалось целиком: поиск на реальных обращениях ii25 занимал
+# 5.9 с на запрос против 1.05 у e5. Суть обращения почти всегда в начале.
+
+class _ModelWithLimit:
+    def __init__(self, name, **kwargs):
+        self.max_seq_length = 32768
+
+
+def test_long_context_model_is_capped(monkeypatch):
+    import embedding_format
+    import torch
+    monkeypatch.setattr(embedding_format, "SentenceTransformer", _ModelWithLimit)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    model = embedding_format.load_embedder("Qwen/Qwen3-Embedding-0.6B")
+    assert model.max_seq_length == embedding_format.MAX_SEQ_LENGTH == 512
+
+
+def test_short_context_model_is_left_alone(monkeypatch):
+    import embedding_format
+    import torch
+
+    class _Short:
+        def __init__(self, name, **kwargs):
+            self.max_seq_length = 256
+
+    monkeypatch.setattr(embedding_format, "SentenceTransformer", _Short)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    assert embedding_format.load_embedder("some/model").max_seq_length == 256
