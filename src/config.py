@@ -38,9 +38,10 @@ ARIO_MODEL: str = os.getenv("ARIO_MODEL", "Qwen/Qwen3-32B-AWQ")
 # Транспорт тот же, что у Ario: POST {base}/chat/completions с Bearer-токеном.
 # Выбирается значением LLM_PROVIDER=custom.
 # Сколько ждать ответа LLM на основном вызове. Новые сборки модели отвечают
-# дольше двух минут, поэтому по умолчанию 300 с: срабатывать должен таймаут
-# вызывающей стороны, а не наш.
-LLM_TIMEOUT_SEC: int = int(os.getenv("LLM_TIMEOUT_SEC", "300"))
+# дольше двух минут, а модели Заказчика на стенде (провайдер ollama) не хватало
+# и 300 с, поэтому по умолчанию 360 с: срабатывать должен таймаут вызывающей
+# стороны, а не наш.
+LLM_TIMEOUT_SEC: int = int(os.getenv("LLM_TIMEOUT_SEC", "360"))
 
 # Фоновая обработка: RX получает идентификатор задачи сразу и опрашивает статус.
 JOBS_DIR: str = os.getenv("JOBS_DIR", str(Path(__file__).parent.parent / "data" / "jobs"))

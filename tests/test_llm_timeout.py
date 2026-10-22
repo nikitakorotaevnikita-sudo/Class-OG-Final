@@ -52,3 +52,12 @@ def test_no_hardcoded_timeout_left_for_ollama():
     source = (Path(__file__).parent.parent / "src" / "classifier_agent.py").read_text(
         encoding="utf-8")
     assert "timeout=120" not in source, "остался зашитый таймаут"
+
+
+def test_default_timeout_is_360_seconds():
+    """300 с не хватало модели Заказчика на стенде (ollama): по умолчанию 360."""
+    root = Path(__file__).parent.parent
+    config = (root / "src" / "config.py").read_text(encoding="utf-8")
+    assert 'os.getenv("LLM_TIMEOUT_SEC", "360")' in config
+    example = (root / ".env.example").read_text(encoding="utf-8")
+    assert "LLM_TIMEOUT_SEC=360" in example
