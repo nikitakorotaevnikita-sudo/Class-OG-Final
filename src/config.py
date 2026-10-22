@@ -89,6 +89,12 @@ CE_BLEND_WEIGHT: float = float(os.getenv("CE_BLEND_WEIGHT", "0.7"))
 # в стиле классификаторных терминов. Embedding ищется по [original + expansion].
 ENABLE_QUERY_EXPANSION: bool = os.getenv("ENABLE_QUERY_EXPANSION", "false").lower() == "true"
 
+# ── Обогащение запроса (опц., эксперимент) — развитие query expansion ──────────
+# LLM даёт по вопросу суть, ключевые фразы и синонимы (src/query_enrichment.py).
+# off — выключено; append — ищем по вопросу + обогащению; replace — только по
+# обогащению. Модели на классификацию в любом режиме уходит исходный вопрос.
+QUERY_ENRICHMENT: str = os.getenv("QUERY_ENRICHMENT", "off").strip().lower()
+
 # ── Hierarchy-aware reranking ───────────────────────────────────────────────────
 # Branch agreement: буст кандидата если другие кандидаты из той же L2-ветки.
 HIERARCHY_BRANCH_WEIGHT: float = float(os.getenv("HIERARCHY_BRANCH_WEIGHT", "0.05"))

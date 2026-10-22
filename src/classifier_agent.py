@@ -50,7 +50,7 @@ from config import (
     LLM_VIA_PROXY,
     ENABLE_CROSS_ENCODER_RERANKER, CROSS_ENCODER_MODEL,
     ENABLE_HEURISTIC_RERANKER,
-    ENABLE_QUERY_EXPANSION,
+    ENABLE_QUERY_EXPANSION, QUERY_ENRICHMENT,
     HIERARCHY_BRANCH_WEIGHT, HIERARCHY_PARENT_WEIGHT,
     ENABLE_HIERARCHY_PRUNING, HIERARCHY_PRUNE_THRESHOLD,
     ENABLE_SECTION_ROUTING, SECTION_ROUTING_MAX_TOPICS,
@@ -64,6 +64,10 @@ from config import (
     ENABLE_ALLOWED_CODES, ALLOWED_CODES_PATH,
 )
 from proxy_policy import uses_env_proxy
+from query_enrichment import (
+    ENRICH_SYSTEM, ENRICH_USER_TEMPLATE,
+    normalize_mode, parse_enrichment, retrieval_inputs,
+)
 from embedding_format import format_query, load_embedder
 from hierarchy import (
     branch_agreement_scores, parent_similarity_boost,
@@ -260,6 +264,10 @@ class ClassificationResult:
     applicant_email: Optional[str] = field(default=None)  # адрес заявителя или None
     summary: str = field(default="")                    # краткая суть, ≤250 символов
     full_fallback_used: bool = field(default=False)     # сработал ли full-classifier fallback
+    fallback_trigger: str = field(default="")           # что вызвало fallback (пусто — не вызывался)
+    # Отладка поиска: обогащение запроса и коды кандидатов по номеру вопроса
+    query_enrichments: dict = field(default_factory=dict)
+    retrieval_candidates: dict = field(default_factory=dict)
 
 
 def extract_extra_fields(llm_result: dict, appeal_text: str = "") -> tuple[Optional[str], str]:
@@ -1385,6 +1393,39 @@ class ClassifierAgent:
             print(f"  [QE] expansion failed: {e}")
             return ""
 
+    def _enrich_query(self, question_text: str, provider: str, model: str) -> dict | None:
+        """LLM пересказывает вопрос языком классификатора (src/query_enrichment.py).
+
+        Возвращает {summary, key_phrases, synonyms} или None при сбое — тогда
+        поиск идёт по самому вопросу.
+        """
+        messages = [
+            {"role": "system", "content": ENRICH_SYSTEM},
+            {"role": "user", "content": ENRICH_USER_TEMPLATE.format(question=question_text[:1500])},
+        ]
+        try:
+            if provider == "ollama":
+                r = self._get_ollama_client().post(
+                    "/chat/completions",
+                    json={"model": model, "messages": messages,
+                          "temperature": 0.0, "max_tokens": 400},
+                )
+                self._raise_with_body(r)
+                raw = r.json()["choices"][0]["message"]["content"]
+            elif provider in ("ario", "custom"):
+                raw = self._ario_call(provider=provider, messages=messages, model=model,
+                                      max_tokens=400, temperature=0.0)
+            elif provider == "groq":
+                r = self._get_groq_client().chat.completions.create(
+                    model=model, messages=messages, temperature=0.0, max_tokens=400)
+                raw = r.choices[0].message.content
+            else:
+                return None
+        except Exception as e:
+            print(f"  [Enrich] обогащение не удалось: {e}")
+            return None
+        return parse_enrichment(raw)
+
     def _retrieve_for_segment(
         self,
         segment_text: str,
@@ -1923,6 +1964,20 @@ class ClassifierAgent:
                 f"  [QE] Query expansion для {len(segments)} сегментов за {time.time() - qe_start:.2f}с"
             )
 
+        # Шаг 1b'': Опциональное обогащение запроса — суть, ключевые фразы, синонимы
+        enrich_mode = normalize_mode(QUERY_ENRICHMENT)
+        enrichments: dict[int, dict] = {}
+        if enrich_mode != "off":
+            enr_start = time.time()
+            for seg in segments:
+                enr = self._enrich_query(seg.text, provider, model)
+                if enr:
+                    enrichments[seg.ordinal] = enr
+            print(
+                f"  [Enrich] {enrich_mode}: обогащено {len(enrichments)}/{len(segments)} "
+                f"вопросов за {time.time() - enr_start:.2f}с"
+            )
+
         # Шаг 1b': Опциональное Multi-Query expansion — 1 LLM-вызов даёт N формулировок,
         # для каждой делается отдельный retrieval, потом union пулов.
         multi_queries_by_ord: dict[int, list[str]] = {}
@@ -1954,9 +2009,13 @@ class ClassifierAgent:
         questions_with_candidates: list[dict] = []
         valid_code_sets: dict[int, set[str]] = {}
         for seg in segments:
+            search_text, enrich_extra = retrieval_inputs(
+                seg.text, enrichments.get(seg.ordinal), enrich_mode)
+            expanded = ". ".join(
+                p for p in (expansions.get(seg.ordinal, ""), enrich_extra) if p)
             seg_candidates = self._retrieve_for_segment(
-                seg.text,
-                expanded=expansions.get(seg.ordinal, ""),
+                search_text,
+                expanded=expanded,
                 allowed_l2=allowed_l2 or None,
                 allowed_l3=allowed_l3 or None,
                 multi_queries=multi_queries_by_ord.get(seg.ordinal) or None,
@@ -1989,12 +2048,14 @@ class ClassifierAgent:
         # Шаг 3b: Full-classifier fallback — если ретривер промахнулся (в пуле нет
         # близких по смыслу кодов), переклассифицируем, показав LLM весь классификатор.
         full_fallback_used = False
+        fallback_trigger = ""
         if ENABLE_FULL_CLASSIFIER_FALLBACK:
             max_sim = self._max_candidate_similarity(questions_with_candidates)
             llm_flagged = bool(llm_result.get("candidates_insufficient"))
             low_sim = max_sim < FULL_FALLBACK_SIM_THRESHOLD
             if llm_flagged or low_sim:
                 trigger = "LLM: нет подходящей ветки" if llm_flagged else f"max sim {max_sim:.3f} < {FULL_FALLBACK_SIM_THRESHOLD}"
+                fallback_trigger = trigger
                 print(
                     f"  [Fallback] промах ретривера ({trigger}) "
                     f"→ повторная классификация по ПОЛНОМУ классификатору"
@@ -2241,6 +2302,12 @@ class ClassifierAgent:
             applicant_email=applicant_email,
             summary=summary,
             full_fallback_used=full_fallback_used,
+            fallback_trigger=fallback_trigger,
+            query_enrichments=enrichments,
+            retrieval_candidates={
+                q["ordinal"]: [c["code"] for c in q["candidates"]]
+                for q in questions_with_candidates
+            },
         )
 
         # Логируем для накопления данных дообучения
