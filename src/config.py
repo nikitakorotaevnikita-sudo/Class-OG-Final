@@ -43,6 +43,12 @@ ARIO_MODEL: str = os.getenv("ARIO_MODEL", "Qwen/Qwen3-32B-AWQ")
 # стороны, а не наш.
 LLM_TIMEOUT_SEC: int = int(os.getenv("LLM_TIMEOUT_SEC", "360"))
 
+# Сколько раз обращаться к LLM, прежде чем признать её недоступной: основной
+# вызов классификации и фолбэк по полному классификатору. Повторяются таймаут,
+# rate limit, ошибки 5xx и битый JSON; ошибка вроде 404 «нет такой модели» —
+# нет. Меньше 1 не бывает.
+LLM_MAX_RETRIES: int = max(1, int(os.getenv("LLM_MAX_RETRIES", "5")))
+
 # Фоновая обработка: RX получает идентификатор задачи сразу и опрашивает статус.
 JOBS_DIR: str = os.getenv("JOBS_DIR", str(Path(__file__).parent.parent / "data" / "jobs"))
 JOB_TTL_HOURS: float = float(os.getenv("JOB_TTL_HOURS", "24"))

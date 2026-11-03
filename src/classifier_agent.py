@@ -32,6 +32,7 @@ import torch
 torch.set_num_threads(2)
 import time
 from pathlib import Path
+import httpx
 from groq import Groq, RateLimitError, APIError
 from google.genai import client as genai_client
 from google.genai.types import GenerateContentConfig
@@ -39,7 +40,7 @@ from sentence_transformers import SentenceTransformer
 from dataclasses import dataclass, field
 from typing import Optional
 from config import (
-    LLM_TIMEOUT_SEC,
+    LLM_TIMEOUT_SEC, LLM_MAX_RETRIES,
     GROQ_API_KEY, GROQ_MODEL,
     VECTOR_DB_DIR, EMBEDDING_MODEL,
     TOP_K_CANDIDATES, TOP_K_RESULT, MIN_CONFIDENCE, RETRIEVAL_POOL_SIZE, LEXICAL_POOL_SIZE,
@@ -563,6 +564,22 @@ def detect_withdrawal_markers(text: str) -> bool:
     """True, если гражданин просит прекратить рассмотрение или отозвать обращение
     («прошу прекратить рассмотрение», «отзываю заявление», «снять с рассмотрения»)."""
     return bool(text and _WITHDRAWAL_MARKERS.search(text))
+
+
+_TRANSIENT_HTTP = re.compile(r"\b(429|5\d\d)\b")
+
+
+def _is_transient_llm_error(exc: Exception) -> bool:
+    """Сбой, который может пройти при повторе: таймаут, rate limit, 5xx, битый JSON.
+
+    Ошибки Ario и custom приходят как RuntimeError с кодом в тексте
+    («LLM HTTP 503 …»), поэтому код ищется и в сообщении.
+    """
+    if isinstance(exc, (httpx.TimeoutException, RateLimitError, APIError, json.JSONDecodeError)):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code == 429 or exc.response.status_code >= 500
+    return bool(_TRANSIENT_HTTP.search(str(exc)))
 
 
 # ── Класс агента ───────────────────────────────────────────────────────────────
@@ -1665,7 +1682,7 @@ class ClassifierAgent:
             questions_json=questions_json,
         )
 
-        max_retries = 5
+        max_retries = LLM_MAX_RETRIES
         last_error = None
 
         for attempt in range(1, max_retries + 1):
@@ -1762,6 +1779,15 @@ class ClassifierAgent:
                 if attempt < max_retries:
                     time.sleep(1)
 
+            except httpx.TimeoutException as e:
+                # Модель не успела за LLM_TIMEOUT_SEC: долгий ответ — не повод
+                # сразу отдавать «LLM недоступен».
+                last_error = f"Timeout: {e}"
+                if attempt < max_retries:
+                    wait_time = min(2 ** attempt, 60)
+                    print(f"  [{provider}] Таймаут, попытка {attempt}/{max_retries}. Ждём {wait_time}с...")
+                    time.sleep(wait_time)
+
             except Exception as e:
                 last_error = f"Unexpected error: {e}"
                 err_str = str(e)
@@ -1844,8 +1870,26 @@ class ClassifierAgent:
     ) -> dict:
         """Фоллбэк-классификация: показываем LLM весь классификатор (листья) и
         просим выбрать коды напрямую. Возвращает dict в том же формате, что
-        _classify_with_llm (questions[] + vid/tip/is_ustnoe + fio/summary)."""
+        _classify_with_llm (questions[] + vid/tip/is_ustnoe + fio/summary).
+
+        Временные сбои (таймаут, rate limit, 5xx, битый JSON) повторяются до
+        LLM_MAX_RETRIES раз; остальные ошибки уходят наверх сразу."""
         provider, model = self._resolve_llm(llm_provider, llm_model)
+        for attempt in range(1, LLM_MAX_RETRIES + 1):
+            try:
+                return self._full_classifier_call(appeal_text, provider, model)
+            except Exception as e:
+                if attempt >= LLM_MAX_RETRIES or not _is_transient_llm_error(e):
+                    raise
+                wait_time = min(2 ** attempt, 60)
+                print(
+                    f"  [Fallback] {type(e).__name__}, попытка {attempt}/{LLM_MAX_RETRIES}. "
+                    f"Ждём {wait_time}с..."
+                )
+                time.sleep(wait_time)
+
+    def _full_classifier_call(self, appeal_text: str, provider: str, model: str) -> dict:
+        """Один вызов LLM с полным перечнем листьев классификатора."""
         user_message = FULL_CLASSIFIER_FALLBACK_TEMPLATE.format(
             appeal_text=appeal_text[:4000],
             full_classifier=self._full_leaf_listing(),
