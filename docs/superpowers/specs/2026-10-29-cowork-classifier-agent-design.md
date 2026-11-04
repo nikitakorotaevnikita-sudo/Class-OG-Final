@@ -400,6 +400,13 @@ flowchart LR
 Новые тулы — только чтение; адрес сервиса классификатора — настройка mcpOGV.
 Запись (`MCP_WRITE_ENABLED`) не включаем.
 
+Контракт принят сессией MCP 04.11.2026 без изменений (запрос и ответ —
+`docs/superpowers/specs/2026-11-04-request-mcp-classifier-search-tool.md`).
+В mcpOGV: `MCP_CLASSIFIER_URL` (без него тулы не регистрируются),
+`MCP_CLASSIFIER_TIMEOUT_SECONDS=15`; 400/503 → `ToolError` с `detail`, таймаут →
+«Классификатор недоступен»; текст запроса в журнал не пишется. Порт на стенде:
+mcpOGV — 8010, классификатор — 8020. Реализацию в mcpOGV подтверждает оператор.
+
 **Развёртывание и контракт** (ответ сессии MCP-Directum-RX, 01.11.2026):
 - По документации mcpOGV (`docs/mcp-ogv-overview.md`, §6) запускается
   `C:\Users\vm-operator\mcp-ogv-run\start-mcp.bat`, настройки — `run.ps1` рядом;
