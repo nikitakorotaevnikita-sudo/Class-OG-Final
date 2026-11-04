@@ -12,7 +12,7 @@ import pytest
 
 ROOT = Path(__file__).parent.parent
 COWORK = ROOT / "cowork"
-SKILLS = ["appeal-questions", "applicant-contacts", "classifier-code"]
+SKILLS = ["appeal-questions", "applicant-contacts", "classifier-code", "classifier-full"]
 
 
 def _frontmatter(text: str) -> tuple[dict, str]:

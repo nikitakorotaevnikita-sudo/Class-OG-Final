@@ -89,3 +89,6 @@ logs/
 # Фоновые задачи классификации: в результатах ФИО, почта и суть обращения — ПДн
 data/jobs/*
 !data/jobs/.gitkeep
+
+# Собранные zip-навыки агента ArioCowork (scripts/build_cowork_skills.py)
+cowork/dist/
