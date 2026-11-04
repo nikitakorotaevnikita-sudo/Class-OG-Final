@@ -276,3 +276,10 @@ async def list_jobs(limit: int = 20):
             for j in jobs.list(limit=limit)
         ],
     }
+
+
+# Поиск кандидатов и проверка кода для агента ArioCowork (тулы mcpOGV
+# classifier_search / classifier_get) — те же префикс и тег.
+from candidates_api import router as _candidates_router  # noqa: E402
+
+router.include_router(_candidates_router)

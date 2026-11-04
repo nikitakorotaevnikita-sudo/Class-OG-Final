@@ -346,6 +346,12 @@ curl -s -X POST http://localhost:8010/integration/classify-document \
 
 Порт снаружи меняется через `HOST_PORT` в `.env` — правка `docker-compose.yml` для этого не нужна.
 
+**Соседство с mcpOGV.** MCP-сервер mcpOGV по умолчанию тоже слушает 8010. Если он стоит
+на той же машине, классификатор переносится на `HOST_PORT=8020`, mcpOGV остаётся на 8010
+(к нему уже подключены агенты ArioCowork). Тогда в настройке mcpOGV
+`MCP_CLASSIFIER_URL=http://<машина>:8020` — через неё агент получает кандидатов
+(`/integration/candidates`, см. `docs/INTEGRATION.md`), и RX тоже ходит на 8020.
+
 ## 7. Что передать разработчику RX
 
 1. **Новый базовый URL** — `http://<хост>:8010`.
