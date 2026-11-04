@@ -130,3 +130,17 @@ def test_router_is_registered():
     paths = {route.path for route in integration_api.router.routes}
     assert "/integration/candidates" in paths
     assert "/integration/classifier/{code}" in paths
+
+
+def test_warns_when_pipeline_pool_is_smaller_than_fifty(monkeypatch, capsys):
+    """Поиск отдаёт не больше TOP_K_CANDIDATES: при 10 агент молча получил бы 10, а не 50."""
+    import candidates_api
+    monkeypatch.setattr(candidates_api, "TOP_K_CANDIDATES", 10)
+    r = _client(_agent()).post("/integration/candidates", json={"query": "вопрос"})
+    assert r.status_code == 200
+    assert "TOP_K_CANDIDATES=10" in capsys.readouterr().out
+
+
+def test_503_detail_reaches_the_agent():
+    r = _client(None).post("/integration/candidates", json={"query": "в"})
+    assert r.json()["detail"] == "Агент не инициализирован"

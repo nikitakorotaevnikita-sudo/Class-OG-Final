@@ -67,3 +67,30 @@ def test_example_emails_are_placeholders():
     for path in COWORK.rglob("*.md"):
         for address in re.findall(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+", path.read_text(encoding="utf-8")):
             assert address.endswith("@example.ru"), f"{path.name}: {address}"
+
+
+DISAMBIGUATION = ["0096", "0097", "0007", "0014", "0004", "0013", "0005.0005.0056",
+                  "0003.0009.0099", "0001.0002.0027.0126"]
+
+
+def test_variant_b_has_its_own_instruction():
+    """Вариант B — без поиска: инструкция A требует коды только из classifier_search."""
+    text = (COWORK / "agent-instruction-b.md").read_text(encoding="utf-8")
+    assert "classifier-full" in text
+    assert "classifier_full.txt" in text
+    assert "classifier-code" not in text
+    assert "classifier_search" not in text
+    for key in ["document_id", "applicant_fio", "applicant_email", "summary", "reasoning",
+                "questions", "check"]:
+        assert f'"{key}"' in text, key
+
+
+def test_variant_b_skill_carries_the_disambiguations():
+    """В варианте B навык classifier-code не грузится — правила должны быть в classifier-full."""
+    text = (COWORK / "skills" / "classifier-full" / "SKILL.md").read_text(encoding="utf-8")
+    for marker in DISAMBIGUATION:
+        assert marker in text, marker
+
+
+def test_readme_names_the_instruction_for_variant_b():
+    assert "agent-instruction-b.md" in (COWORK / "README.md").read_text(encoding="utf-8")

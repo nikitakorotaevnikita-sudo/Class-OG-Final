@@ -13,6 +13,8 @@ import time
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from config import TOP_K_CANDIDATES
+
 # Без своего префикса: роутер подключается к /integration в integration_api.
 router = APIRouter()
 
@@ -47,6 +49,11 @@ def search_candidates(body: CandidatesRequest, request: Request) -> dict:
     if not query:
         raise HTTPException(status_code=400, detail="Запрос пуст: передайте фразу для поиска")
     top_k = max(1, min(MAX_TOP_K, body.top_k))
+    if TOP_K_CANDIDATES < top_k:
+        # Поиск пайплайна сам режет выдачу до TOP_K_CANDIDATES (по умолчанию 10):
+        # без этой строки агент молча получил бы меньше, чем просил.
+        print(f"  [candidates] поиск ограничен TOP_K_CANDIDATES={TOP_K_CANDIDATES}: "
+              f"агент получит не больше {TOP_K_CANDIDATES} из {top_k}")
     started = time.time()
     candidates = agent._retrieve_for_segment(query)[:top_k]
     items = [
