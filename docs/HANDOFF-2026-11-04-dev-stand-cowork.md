@@ -24,7 +24,7 @@
 | `POST /integration/candidates` — топ-50 рубрик классификатора по фразе (первая стадия пайплайна, без LLM) | `src/candidates_api.py`, подключён в `src/integration_api.py` |
 | `GET /integration/classifier/{code}` — проверка кода | там же |
 | Тексты агента Cowork: системные инструкции A и B, навыки `appeal-questions`, `applicant-contacts`, `classifier-code`, `classifier-full` | `cowork/` |
-| Сборка zip-навыков | `scripts/build_cowork_skills.py` → `cowork/dist/` |
+| Собранные навыки (`.zip` и `.skill`, как в mcpOGV) | `docs/skills/`, сборка — `scripts/build_cowork_skills.py` |
 | xlsx-шаблон ручной проверки оператора | `scripts/make_cowork_check_template.py` |
 | Спецификация, план | `docs/superpowers/specs/2026-10-29-cowork-classifier-agent-design.md`, `docs/superpowers/plans/2026-11-04-cowork-classifier-agent.md` |
 
@@ -114,9 +114,10 @@ docker compose up -d classifier
 - Сообщить сессии MCP (или оператору): адрес `http://172.16.104.68:8020`. В mcpOGV
   задать `MCP_CLASSIFIER_URL` на него (`MCP_CLASSIFIER_TIMEOUT_SECONDS=15`), перезапустить
   mcpOGV — тулы `classifier_search` и `classifier_get` появятся у агента.
-- Собрать zip-навыки: `python scripts/build_cowork_skills.py` → `cowork/dist/` (4
-  архива). Передать оператору вместе с `cowork/agent-instruction.md` и
-  `cowork/agent-instruction-b.md`; порядок сборки агента — `cowork/README.md`.
+- Навыки уже собраны и лежат в `docs/skills/` (по `.zip` и `.skill` на навык, как в
+  mcpOGV) — пересобирать не нужно. Передать оператору вместе с
+  `cowork/agent-instruction.md` и `cowork/agent-instruction-b.md`; порядок сборки
+  агента — `cowork/README.md`.
 - Ручную проверку агента в Cowork делает оператор сам (§9 спецификации).
 
 ## 6. Правила
