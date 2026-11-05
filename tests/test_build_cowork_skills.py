@@ -20,7 +20,8 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 import build_cowork_skills as pkg
 
-SKILLS = {"appeal-questions", "applicant-contacts", "classifier-code", "classifier-full"}
+SKILLS = {"appeal-questions", "applicant-contacts", "classifier-code", "classifier-full",
+          "answer-practice", "answer-legal-basis"}
 
 
 @pytest.fixture(scope="module")

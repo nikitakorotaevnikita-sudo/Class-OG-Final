@@ -37,3 +37,18 @@ mcpOGV. Пересобирает их `scripts/build_cowork_skills.py`.
 с ней вариант B проверял бы снова поиск. Перед сравнением спросить агента о трёх последних кодах файла и о числе рубрик
 (1876) — если не знает, файл до модели целиком не доходит и сравнение не имеет
 смысла.
+
+## Агент «Ответы на обращения граждан»
+
+Проект — `docs/superpowers/specs/2026-11-05-cowork-answer-agent-design.md`.
+
+1. Создать агента «Ответы на обращения граждан», модель Qwen3.8-27B (Ario).
+2. Вставить `answer-agent/agent-instruction.md` в поле системной инструкции.
+3. Загрузить из `docs/skills/`: `answer-practice.zip`, `answer-legal-basis.zip`,
+   `appeal-questions.zip`, `classifier-code.zip`, `applicant-contacts.zip`.
+4. Загрузить готовые навыки mcpOGV (`MCP-Directum-RX`, ветка `feature/mcp-ogv`,
+   `docs/skills/`): `og-repeat.zip`, `og-letters.zip`, `og-answer-review.zip`.
+5. Подключить MCP-серверы: mcpOGV (с тулами `classifier_search` / `classifier_get` —
+   нужны, только если в карточке нет вопросов) и mcp-pravo (КонсультантПлюс).
+6. Включить среду выполнения кода — на ней работает скрипт проверки черновика навыка
+   `og-letters`. Файлы ответа агент не создаёт: черновик — текстом в `answer_text`.

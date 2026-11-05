@@ -1,6 +1,6 @@
 # Агент подготовки ответов на обращения — проект
 
-Дата: 2026-11-05 · Ветка: `int-og` · Статус: черновик на согласование
+Дата: 2026-11-05 · Ветка: `int-og` · Статус: согласовано оператором 05.11.2026 («собирай навыки»)
 Соседний проект: агент-классификатор — `2026-10-29-cowork-classifier-agent-design.md`.
 
 ## 1. Зачем
@@ -235,9 +235,15 @@
 
 ## 7. Где лежит
 
-`int-og`, `cowork/answer-agent/`: `agent-instruction.md`,
-`skills/answer-practice/SKILL.md`, `skills/answer-legal-basis/SKILL.md`; сборка zip —
-тем же `scripts/build_cowork_skills.py` (расширить на второй каталог навыков).
+`int-og`:
+- инструкция — `cowork/answer-agent/agent-instruction.md` (источник правды; §5 выше —
+  исходный черновик, файл оформлен в стиле инструкции классификатора: «бетонное
+  правило», таблица шагов, отладка);
+- навыки — `cowork/skills/answer-practice/`, `cowork/skills/answer-legal-basis/` (общий
+  каталог навыков: одна сборка и одни архивы в `docs/skills/`);
+- архивы `.zip` и `.skill` — `docs/skills/`, собирает `scripts/build_cowork_skills.py`;
+- сборка агента в Cowork — `cowork/README.md`.
+
 Навыки `og-*` — в mcpOGV, их правки — через сессию MCP.
 
 ## 8. Что решено и кем
