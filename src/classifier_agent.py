@@ -8,9 +8,11 @@
 
 import sys
 import io
-# Fix UTF-8 output on Windows cp1251 console
-sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+# Fix UTF-8 output on Windows cp1251 console. В Celery-воркере потоки подменены
+# на LoggingProxy без reconfigure() — там перенастраивать нечего.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding='utf-8', errors='replace')
 
 import json
 import math
