@@ -1,138 +1,123 @@
 """
 finetune_model.py — Дообучение эмбеддинговой модели на верифицированных обращениях
 
-Запуск:
-    python src/finetune_model.py
+Запуск (вручную; обычно дообучение выполняет воркер очереди training):
+    python src/finetune_model.py --source combined
+    python src/finetune_model.py --source verified --force
 
-Что делает:
-    1. Читает верифицированные записи из data/appeals_log.jsonl
-    2. Строит обучающие пары (текст обращения, правильная запись классификатора)
-    3. Дообучает multilingual-e5-base через MultipleNegativesRankingLoss
-    4. Сохраняет модель в models/e5-finetuned-vN/
-    5. Выводит метрику recall@5 (до и после)
+Что делает run_training(storage, ...):
+    1. Читает из БД верифицированные карточки (confirmed/corrected) и исторические
+       размеченные обращения
+    2. Строит обучающие пары (текст обращения, запись классификатора)
+    3. Дообучает модель АКТИВНОЙ версии через MultipleNegativesRankingLoss,
+       считает recall@5 до и после
+    4. Сохраняет модель в models/e5-finetuned-vN/ (+ training_report.json),
+       N = следующая версия реестра ml_model_registry
+    5. Строит векторы классификатора версии N (build_vectordb.build_database)
+    6. Регистрирует версию N; активирует её, только если recall@5 вырос
 
 Требования:
-    - Минимум 50 верифицированных записей (см. FINETUNE_THRESHOLD в config.py)
+    - Минимум FINETUNE_THRESHOLD верифицированных записей (или force)
     - PyTorch (входит в sentence-transformers)
     - CPU: ~1-4 часа | GPU: ~10-20 минут
 """
 
-import sys
-import json
-import random
 import argparse
+import random
+import sys
+import traceback
+import json
+from datetime import datetime, timezone
 from pathlib import Path
-from datetime import datetime
+from typing import Callable, Optional
 
 sys.path.insert(0, str(Path(__file__).parent))
 
 import env_bootstrap  # noqa: F401  — .env до HF-библиотек
 
-from sentence_transformers import SentenceTransformer, InputExample, evaluation
-from sentence_transformers.losses import MultipleNegativesRankingLoss
-from torch.utils.data import DataLoader
+import build_vectordb
+import config
+from annotations_storage import build_search_text
+from storage.models import ModelVersion
 
-from appeals_logger import get_logger
-from annotations_storage import build_search_text, list_annotated_codes
-from config import EMBEDDING_MODEL, MODELS_DIR, VECTOR_DB_DIR, FINETUNE_THRESHOLD
-
-
-def load_metadata() -> dict:
-    """Загружает metadata.json — нужен для получения имён по коду."""
-    meta_path = Path(VECTOR_DB_DIR) / "metadata.json"
-    with open(meta_path, encoding="utf-8") as f:
-        metadata = json.load(f)
-    return {m["code"]: m for m in metadata}
+SOURCES = ("verified", "historical", "combined")
+HISTORICAL_WEIGHT = 3   # исторические пары размечены экспертами — вес 3x в "combined"
+MIN_TRAINING_PAIRS = 10
+LOG_TAIL_CHARS = 4000
 
 
-def build_training_examples(verified_entries: list, code_index: dict) -> list[InputExample]:
+class TrainingPair:
+    """Обучающая пара (anchor, positive); совместима с InputExample по полю texts."""
+
+    __slots__ = ("texts",)
+
+    def __init__(self, anchor: str, positive: str):
+        self.texts = [anchor, positive]
+
+    def __repr__(self) -> str:
+        return f"TrainingPair({self.texts[0][:40]!r}, {self.texts[1][:40]!r})"
+
+
+class _ClassifierTexts:
+    """Тексты записей классификатора для positive-стороны пар.
+
+    Записи — из БД (classifier.load_entries), аннотации загружаются один раз
+    и передаются в build_search_text (без запроса к БД на каждую пару).
     """
-    Строит обучающие пары для MultipleNegativesRankingLoss.
-    Формат: InputExample(texts=[anchor, positive])
-      anchor   = "query: <текст обращения>"
-      positive = "passage: <название записи классификатора>"
 
-    Сигналы из лога:
+    def __init__(self, storage):
+        self.entries = {e.code: e for e in storage.classifier.load_entries()}
+        self.annotations = {
+            code: list(dict.fromkeys(storage.classifier.annotations_for(code)))
+            for code in storage.classifier.annotated_codes()
+        }
+
+    def passage(self, code: str) -> Optional[str]:
+        entry = self.entries.get(code)
+        if entry is None:
+            return None
+        text = build_search_text(code, entry.name, entry.full_path,
+                                 self.annotations.get(code, []))
+        return f"passage: {text}"
+
+
+def build_training_examples(verified_entries: list, texts: _ClassifierTexts) -> list[TrainingPair]:
+    """
+    Пары из карточек в формате старого лога (appeals.as_log_entries):
       confirmed → (appeal, agent_code)     — агент был прав
       corrected → (appeal, operator_code)  — берём код оператора
+    anchor = "query: <текст обращения>", positive = "passage: <запись классификатора>".
     """
     examples = []
-
     for entry in verified_entries:
-        appeal_text = entry["appeal_text"][:800]  # ограничение для модели
-        status = entry["verification"]["status"]
-
+        appeal_text = (entry.get("appeal_text") or "")[:800]  # ограничение для модели
+        verification = entry.get("verification") or {}
+        status = verification.get("status")
         if status == "confirmed":
-            for q in entry["agent_questions"]:
-                code = q["selected_code"]
-                meta = code_index.get(code)
-                if meta:
-                    anchor   = f"query: {appeal_text}"
-                    positive = f"passage: {build_search_text(code, meta['name'], meta.get('full_path', ''))}"
-                    examples.append(InputExample(texts=[anchor, positive]))
-
+            codes = [q.get("selected_code") for q in entry.get("agent_questions") or []]
         elif status == "corrected":
-            operator_codes = entry["verification"].get("operator_codes") or []
-            for code in operator_codes:
-                meta = code_index.get(code)
-                if meta:
-                    anchor   = f"query: {appeal_text}"
-                    positive = f"passage: {build_search_text(code, meta['name'], meta.get('full_path', ''))}"
-                    examples.append(InputExample(texts=[anchor, positive]))
-
+            codes = verification.get("operator_codes") or []
+        else:
+            continue
+        for code in codes:
+            positive = texts.passage(code)
+            if positive:
+                examples.append(TrainingPair(f"query: {appeal_text}", positive))
     return examples
 
 
-def load_historical_examples(path: str = "data/historical_verified.jsonl") -> list[InputExample]:
-    """
-    Load historical data: each line has {appeal_text, assigned_code}
-    Build pairs: (query: appeal_text, passage: classifier_entry_name)
-
-    Historical data is expert-labeled by specialists — weight is 3x per pair
-    when combined with verified data.
-    """
+def build_historical_examples(records: list[dict], texts: _ClassifierTexts) -> list[TrainingPair]:
+    """Пары из исторических обращений {appeal_text, assigned_code} (historical.all())."""
     examples = []
-
-    p = Path(path)
-    if not p.exists():
-        print(f"  ⚠️ Файл исторических данных не найден: {path}")
-        return []
-
-    code_index = load_metadata()
-
-    with open(p, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            record = json.loads(line)
-            appeal_text = record.get("appeal_text", "")[:800]
-            assigned_code = record.get("assigned_code", "")
-
-            meta = code_index.get(assigned_code)
-            if not meta:
-                continue
-
-            anchor   = f"query: {appeal_text}"
-            positive = f"passage: {build_search_text(assigned_code, meta['name'], meta.get('full_path', ''))}"
-            examples.append(InputExample(texts=[anchor, positive]))
-
+    for record in records:
+        appeal_text = (record.get("appeal_text") or "")[:800]
+        positive = texts.passage(record.get("assigned_code") or "")
+        if positive:
+            examples.append(TrainingPair(f"query: {appeal_text}", positive))
     return examples
 
 
-def get_next_version(models_dir: Path) -> int:
-    """Определяет следующий номер версии модели."""
-    existing = sorted(models_dir.glob("e5-finetuned-v*"))
-    if not existing:
-        return 1
-    last = existing[-1].name  # e5-finetuned-v3
-    try:
-        return int(last.split("-v")[-1]) + 1
-    except ValueError:
-        return len(existing) + 1
-
-
-def evaluate_recall(model: SentenceTransformer, examples: list[InputExample], k: int = 5) -> float:
+def evaluate_recall(model, examples: list, k: int = 5) -> float:
     """
     Простая оценка recall@k: для каждого anchor проверяем,
     входит ли его positive в топ-k по cosine similarity.
@@ -146,7 +131,6 @@ def evaluate_recall(model: SentenceTransformer, examples: list[InputExample], k:
     anchor_emb   = model.encode(anchors,   normalize_embeddings=True, show_progress_bar=False)
     positive_emb = model.encode(positives, normalize_embeddings=True, show_progress_bar=False)
 
-    import numpy as np
     scores = anchor_emb @ positive_emb.T  # (N, N) матрица сходства
 
     hits = 0
@@ -158,158 +142,235 @@ def evaluate_recall(model: SentenceTransformer, examples: list[InputExample], k:
     return hits / len(anchors)
 
 
-def main():
-    # ── Argparse ─────────────────────────────────────────────────────────────────
-    parser = argparse.ArgumentParser(description="Fine-tune embedding model")
-    parser.add_argument(
-        "--source",
-        choices=["verified", "historical", "combined"],
-        default="verified",
-        help="Data source: verified (operator-log), historical (expert-labeled), combined (3x weight for historical)",
-    )
-    parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Skip FINETUNE_THRESHOLD check. Useful for historical-only imports and demos.",
-    )
-    args = parser.parse_args()
+def sentence_transformers_train(base_model_path: str, train_examples: list,
+                                val_examples: list, output_path: Path) -> tuple[float, float]:
+    """Дообучение SentenceTransformers (MultipleNegativesRankingLoss, 3 эпохи).
 
-    print()
-    print("═" * 52)
-    print("  Fine-tuning эмбеддинговой модели")
-    print(f"  Базовая модель: {EMBEDDING_MODEL}")
-    print(f"  Источник данных: {args.source}")
-    print("═" * 52)
+    Возвращает (recall@5 до, recall@5 после); модель сохраняется в output_path.
+    """
+    from sentence_transformers import InputExample, SentenceTransformer
+    from sentence_transformers.losses import MultipleNegativesRankingLoss
+    from torch.utils.data import DataLoader
 
-    # ── Шаг 1: Загрузка данных ────────────────────────────────────────────────
-    logger = get_logger()
-    verified = logger.read_verified()
-    stats = logger.stats()
+    print(f"\n  Загрузка модели {base_model_path}...")
+    model = SentenceTransformer(base_model_path)
 
-    print(f"\n  Верифицированных записей: {stats['verified']}")
-    print(f"    подтверждено: {stats['confirmed']}")
-    print(f"    исправлено:   {stats['corrected']}")
-
-    if not args.force and args.source == "verified" and len(verified) < FINETUNE_THRESHOLD:
-        print(f"\n  Недостаточно данных.")
-        print(f"  Нужно минимум {FINETUNE_THRESHOLD} записей, есть {len(verified)}.")
-        print(f"  Продолжите верификацию обращений в operator_cli.py")
-        sys.exit(1)
-
-    # ── Шаг 2: Загрузка метаданных классификатора ─────────────────────────────
-    print("\n  Загрузка метаданных классификатора...")
-    code_index = load_metadata()
-
-    # ── Шаг 3: Построение обучающих пар ──────────────────────────────────────
-    verified_examples = build_training_examples(verified, code_index)
-    historical_examples = load_historical_examples() if args.source != "verified" else []
-
-    if args.source == "verified":
-        all_examples = verified_examples
-    elif args.source == "historical":
-        all_examples = historical_examples
-    else:  # combined
-        # Historical pairs weighted 3x
-        all_examples = historical_examples * 3 + verified_examples
-
-    print(f"\n  Обучающих пар (verified): {len(verified_examples)}")
-    print(f"  Обучающих пар (historical): {len(historical_examples)}")
-    print(f"  Итого: {len(all_examples)}")
-
-    annotated_codes = list_annotated_codes()
-    print(f"  Записей с аннотациями: {len(annotated_codes)}")
-
-    if len(all_examples) < 10:
-        print("  Слишком мало обучающих пар (< 10). Проверьте качество данных.")
-        sys.exit(1)
-
-    # Train / val split (80/20)
-    random.shuffle(all_examples)
-    split = int(len(all_examples) * 0.8)
-    train_examples = all_examples[:split]
-    val_examples   = all_examples[split:]
-    print(f"  Train: {len(train_examples)}  |  Val: {len(val_examples)}")
-
-    # ── Шаг 4: Загрузка базовой модели ───────────────────────────────────────
-    print(f"\n  Загрузка модели {EMBEDDING_MODEL}...")
-    model = SentenceTransformer(EMBEDDING_MODEL)
-
-    # ── Шаг 5: Оценка ДО дообучения ──────────────────────────────────────────
     print("  Оценка базовой модели (recall@5)...")
     recall_before = evaluate_recall(model, val_examples, k=5)
     print(f"  recall@5 до дообучения: {recall_before:.3f}")
 
-    # ── Шаг 6: Дообучение ─────────────────────────────────────────────────────
-    models_dir = Path(MODELS_DIR)
-    models_dir.mkdir(parents=True, exist_ok=True)
-    version = get_next_version(models_dir)
-    output_path = models_dir / f"e5-finetuned-v{version}"
-
     print(f"\n  Дообучение... (выходная папка: {output_path})")
     print("  На CPU это займёт от 15 минут до нескольких часов.")
-    print("  Прогресс:")
-
-    train_dataloader = DataLoader(train_examples, shuffle=True, batch_size=16)
+    train = [InputExample(texts=list(e.texts)) for e in train_examples]
+    train_dataloader = DataLoader(train, shuffle=True, batch_size=16)
     train_loss = MultipleNegativesRankingLoss(model)
-
     model.fit(
         train_objectives=[(train_dataloader, train_loss)],
         epochs=3,
-        warmup_steps=max(10, len(train_examples) // 10),
+        warmup_steps=max(10, len(train) // 10),
         output_path=str(output_path),
         show_progress_bar=True,
         checkpoint_path=str(output_path / "checkpoints"),
         checkpoint_save_steps=100,
     )
 
-    # ── Шаг 7: Оценка ПОСЛЕ дообучения ───────────────────────────────────────
     print("\n  Оценка дообученной модели (recall@5)...")
     recall_after = evaluate_recall(model, val_examples, k=5)
     print(f"  recall@5 после дообучения: {recall_after:.3f}")
+    return recall_before, recall_after
 
+
+TrainFn = Callable[[str, list, list, Path], tuple[float, float]]
+
+
+def run_training(storage, source: str = "combined", force: bool = False,
+                 train_fn: Optional[TrainFn] = None) -> dict:
+    """Дообучение с регистрацией версии в ml_model_registry.
+
+    Возвращает {status: completed|failed|skipped, message, model_path, version,
+    recall5_before, recall5_after, activated, log_tail}. Исключения не
+    пробрасываются (status "failed"); версия регистрируется только после того,
+    как построены её векторы.
+    """
+    log: list[str] = []
+
+    def say(line: str = "") -> None:
+        print(line)
+        log.append(line)
+
+    result = {
+        "status": "failed", "message": "", "model_path": None, "version": None,
+        "recall5_before": None, "recall5_after": None, "activated": False, "log_tail": "",
+    }
+    try:
+        _train(storage, source, force, train_fn or sentence_transformers_train, result, say)
+    except Exception as exc:  # noqa: BLE001 — любой сбой → status failed
+        tb = traceback.format_exc()
+        say(f"  Ошибка дообучения: {type(exc).__name__}: {exc}")
+        result.update(status="failed", activated=False,
+                      message=str(exc) or type(exc).__name__)
+        result["log_tail"] = ("\n".join(log) + "\n" + tb)[-LOG_TAIL_CHARS:]
+        return result
+    result["log_tail"] = "\n".join(log)[-LOG_TAIL_CHARS:]
+    return result
+
+
+def _train(storage, source: str, force: bool, train_fn: TrainFn, result: dict, say) -> None:
+    if source not in SOURCES:
+        raise ValueError(f"Неизвестный источник данных: {source!r} (ожидается {', '.join(SOURCES)})")
+
+    active = storage.models.active()
+    if active is None:
+        raise RuntimeError("В реестре моделей нет активной версии")
+
+    stats = storage.appeals.stats()
+    say("═" * 52)
+    say("  Fine-tuning эмбеддинговой модели")
+    say(f"  Базовая модель: v{active.version} {active.model_path}")
+    say(f"  Источник данных: {source}")
+    say("═" * 52)
+    say(f"  Верифицированных записей: {stats['verified']} "
+        f"(подтверждено {stats['confirmed']}, исправлено {stats['corrected']})")
+
+    threshold = config.FINETUNE_THRESHOLD
+    if not force and stats["verified"] < threshold:
+        result["status"] = "skipped"
+        result["message"] = (f"Недостаточно верифицированных записей: {stats['verified']} "
+                             f"из {threshold}. Дообучение не запускалось.")
+        say(f"  {result['message']}")
+        return
+
+    # ── Обучающие пары (из БД) ────────────────────────────────────────────────
+    texts = _ClassifierTexts(storage)
+    verified_examples: list[TrainingPair] = []
+    historical_examples: list[TrainingPair] = []
+    if source in ("verified", "combined"):
+        verified_examples = build_training_examples(
+            storage.appeals.as_log_entries(("confirmed", "corrected")), texts)
+    if source in ("historical", "combined"):
+        historical_examples = build_historical_examples(storage.historical.all(), texts)
+
+    if source == "verified":
+        all_examples = verified_examples
+    elif source == "historical":
+        all_examples = historical_examples
+    else:  # combined
+        all_examples = historical_examples * HISTORICAL_WEIGHT + verified_examples
+
+    say(f"  Обучающих пар (verified): {len(verified_examples)}")
+    say(f"  Обучающих пар (historical): {len(historical_examples)}")
+    say(f"  Итого: {len(all_examples)}; записей с аннотациями: {len(texts.annotations)}")
+    if len(all_examples) < MIN_TRAINING_PAIRS:
+        raise ValueError(f"Слишком мало обучающих пар ({len(all_examples)} < "
+                         f"{MIN_TRAINING_PAIRS}). Проверьте качество данных.")
+
+    # Train / val split (80/20)
+    random.shuffle(all_examples)
+    split = int(len(all_examples) * 0.8)
+    train_examples = all_examples[:split]
+    val_examples = all_examples[split:]
+    say(f"  Train: {len(train_examples)}  |  Val: {len(val_examples)}")
+
+    # ── Дообучение ────────────────────────────────────────────────────────────
+    version = storage.models.next_version()
+    output_path = Path(config.MODELS_DIR) / f"e5-finetuned-v{version}"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    result.update(version=version, model_path=str(output_path))
+
+    recall_before, recall_after = train_fn(active.model_path, train_examples,
+                                           val_examples, output_path)
+    recall_before, recall_after = float(recall_before), float(recall_after)
+    improved = recall_after > recall_before
+    result.update(recall5_before=recall_before, recall5_after=recall_after)
     delta = recall_after - recall_before
-    improved = delta > 0
+    say("─" * 52)
+    say(f"  recall@5:  {recall_before:.3f} → {recall_after:.3f}  "
+        f"({'↑ +' if delta >= 0 else '↓ '}{delta:.3f})")
+    say("─" * 52)
 
-    print()
-    print("─" * 52)
-    print(f"  recall@5:  {recall_before:.3f} → {recall_after:.3f}  "
-          f"({'↑ +' if delta >= 0 else '↓ '}{delta:.3f})")
-    print("─" * 52)
-
-    # ── Шаг 8: Результат ──────────────────────────────────────────────────────
-    if improved:
-        print(f"\n  Модель улучшилась. Сохранена в: {output_path}")
-        print()
-        print("  Чтобы применить новую модель, добавьте в .env:")
-        print(f"    EMBEDDING_MODEL={output_path}")
-        print()
-        print("  Затем пересоберите векторную базу:")
-        print("    python src/build_vectordb.py")
-    else:
-        print(f"\n  Модель не улучшилась (recall не вырос).")
-        print(f"  Модель сохранена в {output_path} — можете проверить вручную.")
-        print("  Рекомендация: соберите больше верифицированных данных.")
-
-    # Сохраняем отчёт об обучении
+    trained_at = datetime.now(timezone.utc)
     report = {
-        "timestamp":      datetime.now().isoformat(timespec="seconds"),
-        "base_model":     EMBEDDING_MODEL,
+        "timestamp":      trained_at.astimezone().isoformat(timespec="seconds"),
+        "version":        version,
+        "base_model":     active.model_path,
         "output_path":    str(output_path),
+        "source":         source,
         "train_size":     len(train_examples),
         "val_size":       len(val_examples),
         "recall5_before": round(recall_before, 4),
         "recall5_after":  round(recall_after, 4),
         "improved":       improved,
-        "annotated_codes_count": len(annotated_codes),
+        "annotated_codes_count": len(texts.annotations),
         "historical_pairs": len(historical_examples),
         "verified_records": len(verified_examples),
         "total_training_pairs": len(all_examples),
     }
-    report_path = output_path / "training_report.json"
-    with open(report_path, "w", encoding="utf-8") as f:
+    output_path.mkdir(parents=True, exist_ok=True)
+    with open(output_path / "training_report.json", "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
-    print(f"\n  Отчёт сохранён: {report_path}")
+
+    # ── Векторы версии N и регистрация ────────────────────────────────────────
+    # Векторы считаются заранее (долго, вне транзакции); строка реестра и векторы
+    # пишутся одной транзакцией (векторы ссылаются на реестр внешним ключом):
+    # версия без векторов не появляется, при сбое не остаётся ничего.
+    say(f"  Построение векторов классификатора для v{version}...")
+    rows = build_vectordb.compute_vectors(storage, str(output_path))
+    mv = ModelVersion(
+        version=version,
+        base_model_name=active.model_path,
+        model_path=str(output_path),
+        is_active=False,
+        recall5_before=recall_before,
+        recall5_after=recall_after,
+        training_samples_count=len(train_examples),
+        trained_at=trained_at,
+        report=report,
+        adapter=None,
+    )
+    with storage.transaction() as conn:
+        kw = {} if conn is None else {"conn": conn}
+        storage.models.register(mv, **kw)
+        n_vectors = storage.classifier.add_vectors(version, rows, **kw)
+    say(f"  Версия v{version} зарегистрирована, векторов: {n_vectors}")
+    if improved:
+        storage.models.activate(version)
+        result["activated"] = True
+        result["message"] = (f"Модель v{version} дообучена и активирована "
+                             f"(recall@5 {recall_before:.3f} → {recall_after:.3f})")
+    else:
+        result["message"] = (f"Модель v{version} дообучена, но recall@5 не вырос "
+                             f"({recall_before:.3f} → {recall_after:.3f}); версия "
+                             f"зарегистрирована неактивной — активировать можно в бэк-офисе")
+    result["status"] = "completed"
+    say(f"  {result['message']}")
+
+
+def main(argv: Optional[list[str]] = None) -> int:
+    parser = argparse.ArgumentParser(description="Fine-tune embedding model")
+    parser.add_argument(
+        "--source",
+        choices=list(SOURCES),
+        default="verified",
+        help="Data source: verified (operator-verified appeals), historical (expert-labeled), "
+             "combined (3x weight for historical)",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Skip FINETUNE_THRESHOLD check. Useful for historical-only imports and demos.",
+    )
+    args = parser.parse_args(argv)
+
+    from storage import get_storage
+
+    result = run_training(get_storage(), source=args.source, force=args.force)
+    print()
+    print(f"  Статус: {result['status']}")
+    print(f"  {result['message']}")
+    if result["status"] == "failed" and result["log_tail"]:
+        print(result["log_tail"])
+    return 1 if result["status"] == "failed" else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

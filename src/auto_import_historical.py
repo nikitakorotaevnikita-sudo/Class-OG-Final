@@ -113,16 +113,15 @@ def process_file(file_path: Path) -> dict:
     validation_result = validate_codes(records)
     result["stats"] = validation_result.stats
 
-    if validation_result.valid_records > 0:
+    # valid_records / errors — списки (не числа)
+    if validation_result.valid_records:
         save_to_historical_db(validation_result.valid_records, file_path.name)
         result["saved_to"] = "database"
         result["success"] = True
 
-    if validation_result.errors > 0:
+    if validation_result.errors:
         report_path = create_error_report(file_path, validation_result)
         result["report_path"] = str(report_path)
-
-    if validation_result.errors > 0:
         move_to_errors(file_path)
     else:
         move_to_processed(file_path)

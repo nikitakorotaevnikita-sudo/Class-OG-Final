@@ -756,10 +756,13 @@ class ClassifierAgent:
     def _embed_query(self, text: str) -> np.ndarray:
         """Векторизация запроса. Префикс "query: " только для e5-семейства
         (BGE-M3 и др. современные модели префиксов не требуют — см. модель-карту).
-        Если включён embedding adapter — применяется его проекция."""
-        formatted = f"query: {text}" if "e5" in EMBEDDING_MODEL.lower() else text
+        Префикс решается по модели активной версии (self.model_path), а не по .env.
+        Embedding adapter обучен для базовой модели (версия 0): у дообученных
+        версий векторы построены без адаптера — к их запросам он не применяется."""
+        formatted = f"query: {text}" if "e5" in str(self.model_path).lower() else text
         emb = self.embedder.encode(formatted, normalize_embeddings=True)
-        if self.adapter_W is not None:
+        if (ENABLE_EMBEDDING_ADAPTER and self.adapter_W is not None
+                and self.model_version == 0):
             emb = emb @ self.adapter_W.T + self.adapter_b
             n = float(np.linalg.norm(emb))
             if n > 1e-12:

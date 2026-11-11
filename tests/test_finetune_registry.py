@@ -1,0 +1,303 @@
+"""Дообучение с реестром моделей: данные из БД, регистрация версии, активация по recall@5."""
+
+import builtins
+import io
+from contextlib import contextmanager
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+import build_vectordb
+import config
+import finetune_model
+from finetune_helpers import (ANNOTATION, BASE_MODEL, CODES, FakeSentenceTransformer,
+                              FakeTrain, seed)
+
+
+@pytest.fixture(autouse=True)
+def _env(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "MODELS_DIR", str(tmp_path / "models"))
+    monkeypatch.setattr(config, "FINETUNE_THRESHOLD", 5)
+    monkeypatch.setattr(build_vectordb, "SentenceTransformer", FakeSentenceTransformer)
+    FakeSentenceTransformer.loaded = []
+
+
+@pytest.fixture(params=["memory", "pg"])
+def store(request):
+    """Пустое хранилище: MemoryStorage и PgStorage (пропуск, если PostgreSQL нет)."""
+    from storage.memory import MemoryStorage
+    from storage.pg import PgStorage
+
+    if request.param == "memory":
+        return MemoryStorage()
+    from pgvector.psycopg import register_vector
+
+    pg_conn = request.getfixturevalue("pg_conn")
+    register_vector(pg_conn)
+
+    @contextmanager
+    def connect():
+        with pg_conn.transaction():
+            yield pg_conn
+
+    return PgStorage(connect)
+
+
+def test_improved_model_is_activated(store, tmp_path):
+    storage = seed(store)
+    train = FakeTrain(before=0.4, after=0.6)
+
+    result = finetune_model.run_training(storage, source="combined", train_fn=train)
+
+    assert result["status"] == "completed", result
+    assert result["version"] == 1 and result["activated"] is True
+    assert result["recall5_before"] == 0.4 and result["recall5_after"] == 0.6
+    expected_path = str(Path(config.MODELS_DIR) / "e5-finetuned-v1")
+    assert result["model_path"] == expected_path
+    assert set(result) >= {"status", "message", "model_path", "version", "recall5_before",
+                           "recall5_after", "activated", "log_tail"}
+    # обучение стартует с модели активной версии
+    assert train.calls[0]["base"] == BASE_MODEL
+    assert train.calls[0]["output"] == Path(expected_path)
+
+    active = storage.models.active()
+    assert active.version == 1 and active.model_path == expected_path
+    mv = storage.models.get(1)
+    assert mv.base_model_name == BASE_MODEL and mv.adapter is None
+    assert mv.recall5_before == pytest.approx(0.4) and mv.recall5_after == pytest.approx(0.6)
+    assert mv.training_samples_count == len(train.calls[0]["train"])
+    assert mv.trained_at is not None and mv.trained_at.tzinfo is not None
+    assert mv.report["recall5_after"] == 0.6 and mv.report["output_path"] == expected_path
+    assert (Path(expected_path) / "training_report.json").exists()
+    assert FakeSentenceTransformer.loaded == [expected_path]
+
+
+def test_not_improved_model_registered_inactive(store):
+    storage = seed(store)
+
+    result = finetune_model.run_training(storage, train_fn=FakeTrain(before=0.6, after=0.6))
+
+    assert result["status"] == "completed" and result["activated"] is False
+    assert storage.models.active().version == 0
+    mv = storage.models.get(1)
+    assert mv is not None and mv.is_active is False and mv.recall5_after == pytest.approx(0.6)
+
+
+def test_new_version_has_vectors_for_all_entries(store):
+    storage = seed(store)
+
+    finetune_model.run_training(storage, train_fn=FakeTrain())
+
+    rows = storage.classifier.vectors_for_version(1)
+    assert sorted(c for c, st, _ in rows if st == "base") == sorted(CODES)
+    assert [(c, t) for c, st, t in rows if st == "annotation"] == [(CODES[0], ANNOTATION)]
+    # векторы версии 1 ищутся (у всех строк есть embedding)
+    hits = storage.classifier.search(np.ones(768, dtype=np.float32), 1, 10, True)
+    assert {c for c, _ in hits} == set(CODES)
+
+
+def test_training_reads_db_not_files(monkeypatch, tmp_path):
+    storage = seed(confirmed=8, corrected=4, historical=3)
+    monkeypatch.setattr(config, "VECTOR_DB_DIR", str(tmp_path / "no_vector_db"))
+    forbidden = ("appeals_log.jsonl", "historical_verified.jsonl", "metadata.json")
+    real_open = builtins.open
+
+    def guarded_open(file, *args, **kwargs):
+        if any(name in str(file) for name in forbidden):
+            raise AssertionError(f"чтение файла вместо БД: {file}")
+        return real_open(file, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", guarded_open)
+    monkeypatch.setattr(io, "open", guarded_open)
+    train = FakeTrain()
+
+    result = finetune_model.run_training(storage, source="combined", train_fn=train)
+
+    assert result["status"] == "completed", result
+    pairs = train.calls[0]["train"] + train.calls[0]["val"]
+    anchors = [p.texts[0] for p in pairs]
+    # 8 confirmed + 4 corrected + 3 historical × 3 (вес исторических)
+    assert len(pairs) == 8 + 4 + 3 * 3
+    assert anchors.count("query: историческое обращение 0") == 3
+    assert "query: подтверждённое обращение 0" in anchors
+    corrected = [p for p in pairs if p.texts[0] == "query: исправленное обращение 0"]
+    assert corrected and all("Вопрос 2" in p.texts[1] for p in corrected)
+    # аннотации учтены в тексте записи классификатора
+    first = [p for p in pairs if p.texts[0] == "query: подтверждённое обращение 0"][0]
+    assert first.texts[1].startswith("passage: Вопрос 1. ")
+
+
+def test_skipped_below_threshold(monkeypatch):
+    monkeypatch.setattr(config, "FINETUNE_THRESHOLD", 100)
+    storage = seed()
+    train = FakeTrain()
+
+    result = finetune_model.run_training(storage, source="verified", force=False, train_fn=train)
+
+    assert result["status"] == "skipped"
+    assert "100" in result["message"]
+    assert train.calls == [] and [mv.version for mv in storage.models.list()] == [0]
+
+
+def test_force_ignores_threshold(monkeypatch):
+    monkeypatch.setattr(config, "FINETUNE_THRESHOLD", 100)
+    result = finetune_model.run_training(seed(), force=True, train_fn=FakeTrain())
+    assert result["status"] == "completed"
+
+
+def test_failed_train_registers_nothing(store):
+    storage = seed(store)
+
+    result = finetune_model.run_training(storage, train_fn=FakeTrain(error=RuntimeError("CUDA OOM")))
+
+    assert result["status"] == "failed"
+    assert "CUDA OOM" in result["message"]
+    assert "RuntimeError" in result["log_tail"]
+    assert result["activated"] is False
+    assert [mv.version for mv in storage.models.list()] == [0]
+    assert storage.models.active().version == 0
+    assert storage.classifier.vectors_for_version(1) == []
+
+
+def test_failed_vector_build_registers_nothing(store, monkeypatch):
+    storage = seed(store)
+
+    class BrokenST(FakeSentenceTransformer):
+        def encode(self, texts, **kw):
+            raise OSError("диск переполнен")
+
+    monkeypatch.setattr(build_vectordb, "SentenceTransformer", BrokenST)
+
+    result = finetune_model.run_training(storage, train_fn=FakeTrain())
+
+    assert result["status"] == "failed" and "диск переполнен" in result["message"]
+    assert [mv.version for mv in storage.models.list()] == [0]
+    assert storage.classifier.vectors_for_version(1) == []
+
+
+def test_cli_main_exit_codes(monkeypatch, capsys):
+    from storage import get_storage
+
+    seed(get_storage())
+    monkeypatch.setattr(finetune_model, "sentence_transformers_train", FakeTrain())
+    assert finetune_model.main(["--source", "combined"]) == 0
+    monkeypatch.setattr(finetune_model, "sentence_transformers_train",
+                        FakeTrain(error=RuntimeError("boom")))
+    assert finetune_model.main(["--source", "verified"]) == 1
+
+
+# ── auto_finetune / auto_import_historical ───────────────────────────────────
+
+def test_auto_finetune_enqueues_training_job(monkeypatch):
+    import auto_finetune
+    from queueing import dispatcher
+    from storage import get_storage
+
+    storage = seed(get_storage())
+    sent = []
+    monkeypatch.setattr(dispatcher.CeleryDispatcher, "send",
+                        lambda self, name, msg, queue: sent.append((name, msg, queue)))
+
+    job_id = auto_finetune.main(force=False)
+
+    assert job_id is not None
+    assert sent == [("finetune", {"job_id": job_id, "appeal_id": None, "document_id": None},
+                     "training")]
+    job = storage.jobs.get(job_id)
+    assert job.job_type == "finetune" and job.status == "queued"
+    assert job.payload["source"] == "combined" and job.payload["force"] is False
+    assert job.payload["queue"] == "training"
+
+
+def test_auto_finetune_below_threshold_enqueues_nothing(monkeypatch):
+    import auto_finetune
+    from queueing import dispatcher
+    from storage import get_storage
+
+    monkeypatch.setattr(config, "FINETUNE_THRESHOLD", 100)
+    storage = seed(get_storage())
+    sent = []
+    monkeypatch.setattr(dispatcher.CeleryDispatcher, "send",
+                        lambda self, name, msg, queue: sent.append(name))
+
+    assert auto_finetune.main(force=False) is None
+    assert sent == [] and storage.jobs.latest("finetune") is None
+
+
+def test_auto_import_saves_valid_records_to_db(monkeypatch, tmp_path):
+    import auto_import_historical as aih
+    from historical_loader import ValidationResult
+    from storage import get_storage
+
+    hist = tmp_path / "historical"
+    monkeypatch.setattr(aih, "HISTORICAL_DIR", hist)
+    monkeypatch.setattr(aih, "PROCESSED_DIR", hist / "processed")
+    monkeypatch.setattr(aih, "ERRORS_DIR", hist / "errors")
+    aih.ensure_dirs()
+    src = hist / "batch.csv"
+    src.write_text("x", encoding="utf-8")
+    records = [{"appeal_text": "текст", "assigned_code": CODES[0]}]
+    monkeypatch.setattr(aih, "parse_file", lambda path: records)
+    monkeypatch.setattr(aih, "validate_codes", lambda recs: ValidationResult(
+        recs, [], [], {"total": 1, "valid": 1, "invalid": 0}))
+
+    result = aih.process_file(src)
+
+    assert result["success"] is True and result["saved_to"] == "database"
+    assert result["report_path"] is None
+    assert get_storage().historical.count() == 1
+    assert not src.exists() and len(list((hist / "processed").iterdir())) == 1
+
+
+# ── classifier_agent: запрос в пространстве активной версии ─────────────────
+
+class _RecordingEmbedder:
+    def __init__(self):
+        self.texts = []
+
+    def encode(self, text, normalize_embeddings=True):
+        self.texts.append(text)
+        v = np.zeros(768, dtype=np.float32)
+        v[0] = 1.0
+        return v
+
+
+def _agent(model_path, version):
+    import classifier_agent
+
+    agent = classifier_agent.ClassifierAgent.__new__(classifier_agent.ClassifierAgent)
+    agent.embedder = _RecordingEmbedder()
+    agent.model_path = model_path
+    agent.model_version = version
+    perm = np.roll(np.eye(768, dtype=np.float32), 1, axis=0)  # e0 -> e1
+    agent.adapter_W = perm
+    agent.adapter_b = np.zeros(768, dtype=np.float32)
+    return agent
+
+
+def test_query_prefix_follows_active_model_path(monkeypatch):
+    import classifier_agent
+
+    monkeypatch.setattr(classifier_agent, "EMBEDDING_MODEL", "BAAI/bge-m3")
+    agent = _agent("models/e5-finetuned-v2", 2)
+    agent._embed_query("текст")
+    assert agent.embedder.texts == ["query: текст"]
+
+    monkeypatch.setattr(classifier_agent, "EMBEDDING_MODEL", BASE_MODEL)
+    agent = _agent("BAAI/bge-m3", 2)
+    agent._embed_query("текст")
+    assert agent.embedder.texts == ["текст"]
+
+
+def test_adapter_applies_only_to_version_zero(monkeypatch):
+    import classifier_agent
+
+    monkeypatch.setattr(classifier_agent, "ENABLE_EMBEDDING_ADAPTER", True)
+    v0 = _agent(BASE_MODEL, 0)._embed_query("т")
+    v1 = _agent("models/e5-finetuned-v1", 1)._embed_query("т")
+    assert v0[1] == pytest.approx(1.0) and v0[0] == pytest.approx(0.0)  # адаптер применён
+    assert v1[0] == pytest.approx(1.0)  # новая версия — без адаптера
+
+    monkeypatch.setattr(classifier_agent, "ENABLE_EMBEDDING_ADAPTER", False)
+    assert _agent(BASE_MODEL, 0)._embed_query("т")[0] == pytest.approx(1.0)

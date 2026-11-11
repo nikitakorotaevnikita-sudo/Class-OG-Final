@@ -1,133 +1,85 @@
 """
-auto_finetune.py — Автоматическое дообучение эмбеддинговой модели
+auto_finetune.py — Постановка дообучения эмбеддинговой модели в очередь
 
-Запускается после накопления порога верификаций (FINETUNE_THRESHOLD).
-Автоматически:
-1. Проверяет количество верифицированных записей
-2. Запускает дообучение модели
-3. Обновляет EMBEDDING_MODEL в .env
-4. Перестраивает векторную базу
+Проверяет порог верифицированных записей (FINETUNE_THRESHOLD) по БД и, если он
+достигнут (или указан --force), создаёт задачу finetune и отправляет её в очередь
+training. Дообучение, построение векторов новой версии и её активацию (только при
+росте recall@5) выполняет воркер дообучения — .env не меняется.
 
 Запуск:
     python src/auto_finetune.py
-    python src/auto_finetune.py --force  # без проверки порога
+    python src/auto_finetune.py --force              # без проверки порога
+    python src/auto_finetune.py --source verified    # источник данных (по умолчанию combined)
 """
 
+import argparse
 import sys
-import os
-import re
-import subprocess
 from pathlib import Path
+from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).parent))
-from config import FINETUNE_THRESHOLD, MODELS_DIR
-from appeals_logger import AppealsLogger, LOG_FILE
+
+import config
+from storage import get_storage
+
+FINETUNE_QUEUE = "training"
 
 
-def check_verified_count() -> tuple[int, int, int]:
-    """Возвращает (verified, confirmed, corrected)."""
-    logger = AppealsLogger()
-    if not LOG_FILE.exists():
-        return 0, 0, 0
-    stats = logger.stats()
-    return stats["verified"], stats["confirmed"], stats["corrected"]
+def main(force: bool = False, source: str = "combined") -> Optional[str]:
+    """Ставит задачу finetune в очередь; возвращает её id (None — не поставлена)."""
+    from queueing.dispatcher import CeleryDispatcher, DispatchError
 
-
-def get_current_embedding_model() -> str:
-    """Читает текущую модель из .env."""
-    env_path = Path(__file__).parent.parent / ".env"
-    if not env_path.exists():
-        return "intfloat/multilingual-e5-base"
-    content = env_path.read_text(encoding="utf-8")
-    match = re.search(r'^EMBEDDING_MODEL=(.+)$', content, re.MULTILINE)
-    return match.group(1).strip() if match else "intfloat/multilingual-e5-base"
-
-
-def update_env_embedding_model(new_model: str):
-    """Обновляет EMBEDDING_MODEL в .env."""
-    env_path = Path(__file__).parent.parent / ".env"
-    content = env_path.read_text(encoding="utf-8")
-    new_content = re.sub(
-        r'^EMBEDDING_MODEL=.+$',
-        f'EMBEDDING_MODEL={new_model}',
-        content,
-        flags=re.MULTILINE
-    )
-    env_path.write_text(new_content, encoding="utf-8")
-    print(f"  Обновлено: EMBEDDING_MODEL={new_model}")
-
-
-def run_finetune():
-    """Запускает дообучение."""
-    print("\n" + "=" * 52)
-    print("  ЗАПУСК ДООБУЧЕНИЯ ЭМБЕДДИНГОВОЙ МОДЕЛИ")
-    print("=" * 52)
-
-    result = subprocess.run(
-        [sys.executable, "src/finetune_model.py"],
-        cwd=Path(__file__).parent.parent,
-        capture_output=False
-    )
-    return result.returncode == 0
-
-
-def run_build_vectordb():
-    """Перестраивает векторную базу."""
-    print("\n" + "=" * 52)
-    print("  ПЕРЕСТРОЙКА ВЕКТОРНОЙ БАЗЫ")
-    print("=" * 52)
-
-    result = subprocess.run(
-        [sys.executable, "src/build_vectordb.py"],
-        cwd=Path(__file__).parent.parent,
-        capture_output=False
-    )
-    return result.returncode == 0
-
-
-def main(force: bool = False):
     print()
     print("=" * 52)
     print("  АВТОМАТИЧЕСКОЕ ДООБУЧЕНИЕ")
     print("=" * 52)
 
-    verified, confirmed, corrected = check_verified_count()
-    current_model = get_current_embedding_model()
+    storage = get_storage()
+    stats = storage.appeals.stats()
+    active = storage.models.active()
+    verified = stats["verified"]
+    threshold = config.FINETUNE_THRESHOLD
 
-    print(f"\n  Текущая модель: {current_model}")
-    print(f"  Верификаций: {verified} (порог: {FINETUNE_THRESHOLD})")
-    print(f"    подтверждено: {confirmed}")
-    print(f"    исправлено:   {corrected}")
+    print(f"\n  Текущая модель: "
+          f"{f'v{active.version} {active.model_path}' if active else 'нет активной версии'}")
+    print(f"  Верификаций: {verified} (порог: {threshold})")
+    print(f"    подтверждено: {stats['confirmed']}")
+    print(f"    исправлено:   {stats['corrected']}")
 
-    if not force and verified < FINETUNE_THRESHOLD:
+    if not force and verified < threshold:
         print(f"\n  Недостаточно данных.")
-        print(f"  Нужно {FINETUNE_THRESHOLD - verified} верификаций.")
+        print(f"  Нужно ещё {threshold - verified} верификаций.")
         print(f"  Запустите с --force для принудительного дообучения.")
-        return
+        return None
 
-    if not force:
-        print(f"\n  Порог достигнут! Запускаю дообучение...")
+    if storage.jobs.has_active("finetune"):
+        print("\n  Дообучение уже в очереди или выполняется — новая задача не создана.")
+        return None
 
-    if not run_finetune():
-        print("  Ошибка дообучения.")
-        return
+    job = storage.jobs.create("finetune", {"source": source, "force": force},
+                              queue_class=FINETUNE_QUEUE)
+    msg = {"job_id": job.id, "appeal_id": None, "document_id": None}
+    try:
+        CeleryDispatcher().send("finetune", msg, FINETUNE_QUEUE)
+    except DispatchError as exc:
+        storage.jobs.finish(job.id, None, f"Брокер недоступен: {exc}")
+        print(f"\n  Не удалось поставить задачу в очередь: {exc}")
+        return None
 
-    latest_model = None
-    for d in sorted(MODELS_DIR.glob("e5-finetuned-v*"), key=lambda x: x.name):
-        latest_model = str(d)
+    print(f"\n  Задача дообучения поставлена в очередь {FINETUNE_QUEUE}: {job.id}")
+    print("  Статус: GET /api/finetune/status")
+    return job.id
 
-    if latest_model:
-        update_env_embedding_model(latest_model)
 
-    if not run_build_vectordb():
-        print("  Ошибка перестройки базы.")
-        return
-
-    print("\n" + "=" * 52)
-    print("  ГОТОВО! Модель дообучена и векторная база обновлена.")
-    print("=" * 52)
+def _cli(argv=None) -> int:
+    parser = argparse.ArgumentParser(description="Поставить дообучение в очередь training")
+    parser.add_argument("--force", action="store_true", help="не проверять FINETUNE_THRESHOLD")
+    parser.add_argument("--source", choices=["verified", "historical", "combined"],
+                        default="combined", help="источник обучающих данных")
+    args = parser.parse_args(argv)
+    main(force=args.force, source=args.source)
+    return 0
 
 
 if __name__ == "__main__":
-    force = "--force" in sys.argv
-    main(force=force)
+    sys.exit(_cli())

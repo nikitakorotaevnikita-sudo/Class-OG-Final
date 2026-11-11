@@ -470,3 +470,59 @@ def test_agent_build_infra_failure_retries(storage, monkeypatch):
     with pytest.raises(Retry):
         tasks.classify_appeal.run(msg)
     assert storage.jobs.get(msg["job_id"]).status == "queued"
+
+
+# ── finetune: run_training целиком (MemoryStorage, фейковые обучение и модель) ──
+
+@pytest.fixture
+def fake_training(monkeypatch, tmp_path):
+    import build_vectordb
+    import finetune_model
+    from finetune_helpers import FakeSentenceTransformer, FakeTrain
+
+    monkeypatch.setattr(config, "MODELS_DIR", str(tmp_path / "models"))
+    monkeypatch.setattr(config, "FINETUNE_THRESHOLD", 5)
+    monkeypatch.setattr(build_vectordb, "SentenceTransformer", FakeSentenceTransformer)
+
+    def use(train):
+        monkeypatch.setattr(finetune_model, "sentence_transformers_train", train)
+
+    return use, FakeTrain
+
+
+def _finetune_job(storage):
+    job = storage.jobs.create("finetune", {"source": "combined", "force": False},
+                              queue_class="training")
+    return {"job_id": job.id, "appeal_id": None, "document_id": None}
+
+
+def test_run_finetune_completed_job_done(fake_training, no_webhook):
+    from finetune_helpers import seed
+
+    use, FakeTrain = fake_training
+    use(FakeTrain(before=0.3, after=0.5))
+    storage = seed(MemoryStorage())
+    msg = _finetune_job(storage)
+
+    tasks.run_finetune(msg, storage)
+
+    job = storage.jobs.get(msg["job_id"])
+    assert job.status == "done" and job.error is None
+    assert job.result["status"] == "completed" and job.result["activated"] is True
+    assert storage.models.active().version == 1
+
+
+def test_run_finetune_failed_job_error(fake_training, no_webhook):
+    from finetune_helpers import seed
+
+    use, FakeTrain = fake_training
+    use(FakeTrain(error=RuntimeError("нет памяти")))
+    storage = seed(MemoryStorage())
+    msg = _finetune_job(storage)
+
+    tasks.run_finetune(msg, storage)
+
+    job = storage.jobs.get(msg["job_id"])
+    assert job.status == "error" and "нет памяти" in job.error
+    assert job.result["status"] == "failed"
+    assert [mv.version for mv in storage.models.list()] == [0]

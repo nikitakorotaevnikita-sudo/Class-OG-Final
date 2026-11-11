@@ -36,16 +36,27 @@ def passage_text(text: str, model_path: str) -> str:
     return f"passage: {text}" if uses_passage_prefix(model_path) else text
 
 
-def build_database(storage, model_path: str, version: int) -> int:
-    """Пишет базовые и аннотационные векторы версии version. Возвращает число строк."""
+def _conn_kw(conn) -> dict:
+    """conn= передаётся только PostgreSQL-хранилищу (Memory его не принимает)."""
+    return {} if conn is None else {"conn": conn}
+
+
+def compute_vectors(storage, model_path: str) -> list[tuple[str, str, str, np.ndarray]]:
+    """Строки (code, source_type, search_text, embedding) всех записей классификатора.
+
+    Базовая строка — build_search_text с аннотациями; плюс строка на каждый
+    (уникальный) текст аннотации. Ничего не пишет в хранилище.
+    """
     entries = storage.classifier.load_entries()
     annotated = set(storage.classifier.annotated_codes())
-    print(f"Построение векторов v{version}: {len(entries)} записей, "
+    print(f"Построение векторов: {len(entries)} записей, "
           f"кодов с аннотациями: {len(annotated)}; модель {model_path}")
 
     rows: list[tuple[str, str, str]] = []
     for e in entries:
-        anns = storage.classifier.annotations_for(e.code) if e.code in annotated else []
+        # annotations_for отдаёт строки всех версий — один текст берём один раз
+        anns = (list(dict.fromkeys(storage.classifier.annotations_for(e.code)))
+                if e.code in annotated else [])
         rows.append((e.code, "base", build_search_text(e.code, e.name, e.full_path, anns)))
         rows.extend((e.code, "annotation", text) for text in anns)
 
@@ -60,21 +71,46 @@ def build_database(storage, model_path: str, version: int) -> int:
         ))
         done = min(start + BATCH_SIZE, len(rows))
         print(f"  [{done / len(rows) * 100:5.1f}%] {done}/{len(rows)}", end="\r")
+    print()
     matrix = np.vstack(vectors) if vectors else np.zeros((0, 768), dtype=np.float32)
+    return [(code, st, text, matrix[i]) for i, (code, st, text) in enumerate(rows)]
 
-    n = storage.classifier.add_vectors(
-        version, [(code, st, text, matrix[i]) for i, (code, st, text) in enumerate(rows)]
-    )
-    print(f"\nГотово: {n} векторов для версии {version}")
+
+def build_database(storage, model_path: str, version: int, conn=None) -> int:
+    """Пишет базовые и аннотационные векторы версии version. Возвращает число строк.
+
+    Версия version уже должна быть в ml_model_registry (внешний ключ в БД).
+    """
+    rows = compute_vectors(storage, model_path)
+    n = storage.classifier.add_vectors(version, rows, **_conn_kw(conn))
+    print(f"Готово: {n} векторов для версии {version}")
     return n
 
 
+def main(argv=None) -> int:
+    """Ручная пересборка векторов зарегистрированной версии модели."""
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Построить векторы классификатора для версии модели (PostgreSQL)")
+    parser.add_argument("--version", type=int, help="номер версии в ml_model_registry")
+    parser.add_argument("--model-path", help="путь или имя модели эмбеддингов")
+    args = parser.parse_args(argv)
+    if args.version is None or not args.model_path:
+        parser.print_usage()
+        print(
+            "Векторы классификатора хранятся в PostgreSQL (classifier_vectors).\n"
+            "  Перенос текущей базы:        python scripts/db/migrate_from_files.py\n"
+            "  Векторы новой версии модели строит дообучение (finetune).\n"
+            "  Ручная пересборка:           python src/build_vectordb.py --version N --model-path P"
+        )
+        return 2
+
+    from storage import get_storage
+
+    build_database(get_storage(), args.model_path, args.version)
+    return 0
+
+
 if __name__ == "__main__":
-    print(
-        "Векторы классификатора теперь хранятся в PostgreSQL (classifier_vectors).\n"
-        "  Перенос текущей базы:        python scripts/db/migrate_from_files.py\n"
-        "  Векторы новой версии модели строит дообучение (finetune) через build_database()."
-    )
-    # Ненулевой код: старые вызовы (дообучение через subprocess) не должны считать,
-    # что база перестроена.
-    sys.exit(2)
+    sys.exit(main())
