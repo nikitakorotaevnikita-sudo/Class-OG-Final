@@ -138,6 +138,16 @@ class PgClassifierStore(_PgBase):
             ).fetchall()
         return [r[0] for r in rows]
 
+    def delete_annotations(self, code, text_prefix=None, conn=None):
+        with self._tx(conn) as c:
+            cur = c.execute(
+                """DELETE FROM classifier_vectors
+                   WHERE code = %s AND source_type = 'annotation'
+                     AND (%s::text IS NULL OR starts_with(search_text, %s::text))""",
+                (code, text_prefix, text_prefix),
+            )
+            return cur.rowcount
+
     def annotated_codes(self, conn=None):
         with self._tx(conn) as c:
             rows = c.execute(

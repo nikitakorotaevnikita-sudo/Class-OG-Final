@@ -5,11 +5,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import classifier_agent as classifier_mod
 from classifier_agent import ClassifierAgent
+from storage.memory import MemoryStorage
 
-
-class _FakeLogger:
-    def log(self, **_kwargs):
-        return "fake-log-id"
 
 
 def _candidate(code: str, name: str = "candidate", similarity: float = 0.9) -> dict:
@@ -45,7 +42,7 @@ def _agent(monkeypatch, llm_question: dict, candidates: list[dict]) -> Classifie
     monkeypatch.setattr(agent, "_route_to_sections", lambda *_args, **_kwargs: ["0004.0019"])
     monkeypatch.setattr(agent, "_retrieve_for_segment", lambda *_args, **_kwargs: candidates)
     monkeypatch.setattr(agent, "_log_request", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(classifier_mod, "get_logger", lambda: _FakeLogger())
+    agent.storage = MemoryStorage()  # карточка результата пишется в хранилище
 
     def fake_classify_with_llm(*_args, **_kwargs):
         return {

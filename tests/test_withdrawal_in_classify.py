@@ -6,13 +6,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import classifier_agent as classifier_mod
 from classifier_agent import ClassifierAgent
+from storage.memory import MemoryStorage
 
 WITHDRAWAL_CODE = "0001.0002.0027.0131"
 
-
-class _FakeLogger:
-    def log(self, **_kwargs):
-        return "fake-log-id"
 
 
 def _candidate(code, name="кандидат", similarity=0.9):
@@ -36,7 +33,7 @@ def _agent(monkeypatch, llm_questions, candidates, llm_extra=None):
     monkeypatch.setattr(agent, "_route_to_sections", lambda *a, **k: ["0005.0005"])
     monkeypatch.setattr(agent, "_retrieve_for_segment", lambda *a, **k: candidates)
     monkeypatch.setattr(agent, "_log_request", lambda *a, **k: None)
-    monkeypatch.setattr(classifier_mod, "get_logger", lambda: _FakeLogger())
+    agent.storage = MemoryStorage()  # карточка результата пишется в хранилище
     monkeypatch.setattr(agent, "_classify_with_llm", lambda *a, **k: {
         "vid_obrascheniya": "Заявление", "tip_obrascheniya": "Индивидуальное",
         "is_ustnoe": False, "questions": llm_questions, **(llm_extra or {}),

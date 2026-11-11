@@ -26,6 +26,8 @@ import env_bootstrap  # noqa: F401,E402
 os.environ["NO_PROXY"] = "api.groq.com,*.groq.com"
 os.environ["no_proxy"] = "api.groq.com,*.groq.com"
 
+import threading
+
 import numpy as np
 import torch
 # Limit memory to prevent OSError 1455 (page file exhaustion)
@@ -63,6 +65,7 @@ from config import (
     ENABLE_L3_ROUTING, L3_ROUTING_MAX_THEMES,
     ENABLE_MULTI_QUERY_EXPAND, MQE_N_VARIANTS,
     ENABLE_ALLOWED_CODES, ALLOWED_CODES_PATH,
+    ENABLE_ANNOTATION_VECTORS,
 )
 from proxy_policy import uses_env_proxy
 from hierarchy import (
@@ -74,7 +77,10 @@ from section_router import (
     filter_candidates_by_l2, filter_candidates_by_l3,
     build_l3_routing_prompt, parse_l3_routing_response,
 )
-from appeals_logger import get_logger
+from appeals_logger import AppealsLogger
+from build_vectordb import passage_text
+from storage import get_storage
+from storage.models import AppealQuestionRow, AppealResult
 from email_extractor import extract_applicant_email
 from fio_extractor import extract_applicant_fio, normalize_fio
 
@@ -253,13 +259,14 @@ class ClassificationResult:
     overall_confidence: float
     needs_verification: bool
     raw_appeal: str
-    log_id: Optional[str] = field(default=None)  # ID записи в appeals_log.jsonl
+    log_id: Optional[str] = field(default=None)  # id карточки обращения в хранилище
     llm_provider: str = field(default="")
     llm_model: str = field(default="")
     applicant_fio: Optional[str] = field(default=None)  # «Фамилия И.О.» или None
     applicant_email: Optional[str] = field(default=None)  # адрес заявителя или None
     summary: str = field(default="")                    # краткая суть, ≤250 символов
     full_fallback_used: bool = field(default=False)     # сработал ли full-classifier fallback
+    elapsed_seconds: float = field(default=0.0)         # время всего classify(), с
 
 
 def extract_extra_fields(llm_result: dict, appeal_text: str = "") -> tuple[Optional[str], str]:
@@ -587,9 +594,19 @@ def _is_transient_llm_error(exc: Exception) -> bool:
 SUPPORTED_LLM_PROVIDERS = frozenset({"groq", "gemini", "ollama", "ario", "custom"})
 
 
+# id обращения, которое сейчас классифицирует поток (для журнала запросов к LLM)
+_REQUEST_CTX = threading.local()
+
+
 class ClassifierAgent:
-    def __init__(self):
+    def __init__(self, storage=None):
         print("Инициализация агента классификации...")
+        self.storage = storage or get_storage()
+        active = self.storage.models.active()
+        if active is None:
+            raise RuntimeError(
+                "Нет активной модели в ml_model_registry — запустите scripts/db/migrate_from_files.py"
+            )
 
         # LLM client (Groq, Gemini, Ollama, Ario или custom / vLLM)
         self.llm = LLM_PROVIDER if LLM_PROVIDER in SUPPORTED_LLM_PROVIDERS else "groq"
@@ -612,19 +629,8 @@ class ClassifierAgent:
             self.groq = Groq(api_key=GROQ_API_KEY)
             print(f"  Model LLM: {GROQ_MODEL} (Groq)")
 
-        # Модель эмбеддингов
-        print(f"  Загрузка модели эмбеддингов: {EMBEDDING_MODEL}")
-        self.embedder = SentenceTransformer(EMBEDDING_MODEL)
-
-        # Загрузка векторной базы (numpy)
-        db_dir = Path(VECTOR_DB_DIR)
-        print(f"  Загрузка векторной базы: {db_dir}")
-        self.embeddings = np.load(db_dir / "embeddings.npy")
-        with open(db_dir / "metadata.json", encoding="utf-8") as f:
-            self.metadata = json.load(f)
-
-        self.code_index = {m["code"]: m for m in self.metadata}
-        print(f"  Готово. База содержит {len(self.metadata)} записей.")
+        # Модель эмбеддингов и записи классификатора — из реестра моделей в БД
+        self._load_model(active)
 
         # CrossEncoder reranker — lazy-load, только если флаг включён
         self.ce_reranker = None
@@ -671,6 +677,48 @@ class ClassifierAgent:
                 print(f"  Embedding adapter enabled: {adapter_path.name} (W={self.adapter_W.shape})")
             else:
                 print(f"  Adapter enabled but file not found at {adapter_path} — disabled")
+
+    def _load_model(self, active) -> None:
+        """Модель эмбеддингов версии active + записи классификатора из хранилища.
+
+        self.metadata — те же ключи, что были в metadata.json (parent_code "" у корней):
+        по ним работают лексический поиск, маршрутизация L2/L3 и code_index.
+        """
+        print(f"  Загрузка модели эмбеддингов v{active.version}: {active.model_path}")
+        embedder = SentenceTransformer(active.model_path)
+        metadata = [
+            {
+                "code":           e.code,
+                "name":           e.name,
+                "level":          e.level,
+                "parent_code":    e.parent_code or "",
+                "full_path":      e.full_path,
+                "children_count": e.children_count,
+                "search_text":    e.search_text,
+            }
+            for e in self.storage.classifier.load_entries()
+        ]
+        self.embedder = embedder
+        self.model_path = active.model_path
+        self.metadata = metadata
+        self.code_index = {m["code"]: m for m in metadata}
+        self.model_version = active.version
+        self.__dict__.pop("_full_leaf_cache", None)
+        print(f"  Готово. Классификатор содержит {len(metadata)} записей.")
+
+    def reload_model_if_changed(self) -> bool:
+        """Перезагружает модель и записи, если в реестре активна другая версия."""
+        active = self.storage.models.active()
+        if active is None or active.version == self.model_version:
+            return False
+        print(f"  Активная модель сменилась: v{self.model_version} -> v{active.version}")
+        self._load_model(active)
+        return True
+
+    def embed_passage(self, text: str) -> np.ndarray:
+        """Вектор текста записи/аннотации (префикс "passage: " — как в build_vectordb)."""
+        emb = self.embedder.encode(passage_text(text, self.model_path), normalize_embeddings=True)
+        return np.asarray(emb, dtype=np.float32)
 
     def _resolve_llm(self, llm_provider: str | None = None, llm_model: str | None = None) -> tuple[str, str]:
         """Return provider/model for a request, falling back to .env defaults."""
@@ -1093,16 +1141,19 @@ class ClassifierAgent:
         return confidence, reasons
 
     def _search_candidates(self, query_text: str, top_k: int | None = None) -> list:
-        """Семантический поиск кандидатов через cosine similarity (numpy)"""
+        """Семантический поиск кандидатов: cosine similarity в хранилище (pgvector)."""
         query_vec = self._embed_query(query_text)
-        similarities = self.embeddings @ query_vec
-        limit = top_k or TOP_K_CANDIDATES
-        top_indices = np.argsort(similarities)[::-1][:limit]
-
+        hits = self.storage.classifier.search(
+            query_vec,
+            version=self.model_version,
+            top_k=top_k or TOP_K_CANDIDATES,
+            include_annotations=ENABLE_ANNOTATION_VECTORS,
+        )
         candidates = []
-        for idx in top_indices:
-            meta = self.metadata[idx]
-            candidates.append(self._candidate_from_metadata(meta, similarities[idx]))
+        for code, sim in hits:
+            meta = self.code_index.get(code)
+            if meta is not None:
+                candidates.append(self._candidate_from_metadata(meta, sim))
         return candidates
 
     def _route_to_sections(self, appeal_text: str, provider: str, model: str) -> list[str]:
@@ -1811,26 +1862,19 @@ class ClassifierAgent:
 
     def _log_request(self, success: bool, attempt: int, elapsed: float | None,
                      confidence: float | None, error: str | None, candidates_count: int):
-        """Логирование каждого запроса к Groq API"""
-        import datetime
-        import json
-
-        log_entry = {
-            "timestamp": datetime.datetime.now().isoformat(),
-            "event": "groq_request",
-            "success": success,
-            "attempt": attempt,
-            "elapsed_seconds": round(elapsed, 3) if elapsed else None,
-            "confidence": confidence,
-            "candidates_count": candidates_count,
-            "error": error,
-        }
-
-        log_path = Path("data/request_log.jsonl")
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
+        """Журнал запросов к LLM / поиску (llm_request_log). Никогда не бросает."""
+        try:
+            self.storage.appeals.log_llm_request(
+                appeal_id=getattr(_REQUEST_CTX, "appeal_id", None),
+                success=success,
+                attempt=attempt,
+                elapsed=round(elapsed, 3) if elapsed else None,
+                confidence=confidence,
+                error=error,
+                candidates_count=candidates_count,
+            )
+        except Exception as e:
+            print(f"  [request_log] Ошибка записи журнала запросов: {e}")
 
     def _full_leaf_listing(self) -> str:
         """Полный перечень листьев классификатора (L4+L5) как текст 'код — название'.
@@ -1946,8 +1990,25 @@ class ClassifierAgent:
         appeal_text: str,
         llm_provider: str | None = None,
         llm_model: str | None = None,
+        appeal_id: str | None = None,
+        log_conn=None,
     ) -> ClassificationResult:
-        """Основной метод классификации обращения с per-question retrieval."""
+        """Основной метод классификации обращения с per-question retrieval.
+
+        appeal_id — карточка обращения уже создана (воркер): результат пишется в неё;
+        log_conn  — соединение транзакции воркера: ошибка записи результата тогда
+                    пробрасывается, чтобы задача не завершилась без карточки.
+        """
+        classify_start = time.time()
+        _REQUEST_CTX.appeal_id = appeal_id
+        try:
+            return self._classify(appeal_text, llm_provider, llm_model, appeal_id,
+                                  log_conn, classify_start)
+        finally:
+            _REQUEST_CTX.appeal_id = None
+
+    def _classify(self, appeal_text, llm_provider, llm_model, appeal_id, log_conn,
+                  classify_start) -> ClassificationResult:
         provider, model = self._resolve_llm(llm_provider, llm_model)
 
         # Шаг 1: Сегментация обращения на отдельные вопросы
@@ -2285,6 +2346,7 @@ class ClassifierAgent:
             summary=summary,
             full_fallback_used=full_fallback_used,
         )
+        result.elapsed_seconds = round(time.time() - classify_start, 3)
 
         # Логируем для накопления данных дообучения
         try:
@@ -2309,13 +2371,46 @@ class ClassifierAgent:
                             "name": c["name"],
                             "similarity": c.get("similarity", 0.0),
                         })
-            result.log_id = get_logger().log(
+            appeal_result = AppealResult(
+                summary=result.summary,
+                applicant_fio=result.applicant_fio,
+                applicant_email=result.applicant_email,
+                vid_obrascheniya=result.vid_obrascheniya,
+                tip_obrascheniya=result.tip_obrascheniya,
+                is_ustnoe=bool(llm_result.get("is_ustnoe", False)),
+                overall_confidence=result.overall_confidence,
+                needs_verification=result.needs_verification,
+                full_fallback_used=result.full_fallback_used,
+                candidates=log_candidates,
+                llm_provider=result.llm_provider,
+                llm_model=result.llm_model,
+                elapsed_seconds=result.elapsed_seconds,
+                questions=[
+                    AppealQuestionRow(
+                        ordinal=i,
+                        question_text=q.question_text,
+                        selected_code=q.code,
+                        confidence=q.confidence,
+                        alternative_codes=[a["code"] for a in q.alternatives],
+                        predmet_vedeniya=q.predmet_vedeniya or "",
+                        reasoning=q.reasoning or "",
+                        verification_reasons=list(getattr(q, "verification_reasons", None) or []),
+                    )
+                    for i, q in enumerate(classified_questions, 1)
+                ],
+            )
+            result.log_id = AppealsLogger(self.storage).log(
                 appeal_text=appeal_text,
                 candidates=log_candidates,
                 agent_questions=agent_questions,
                 overall_confidence=result.overall_confidence,
+                appeal_id=appeal_id,
+                result=appeal_result,
+                conn=log_conn,
             )
         except Exception as e:
+            if log_conn is not None:
+                raise
             print(f"  [logger] Ошибка записи в лог: {e}")
 
         return result

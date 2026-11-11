@@ -15,6 +15,20 @@ def pytest_configure(config):
     pass
 
 
+@pytest.fixture(autouse=True)
+def _memory_storage_backend(monkeypatch):
+    """get_storage() в тестах — свежий MemoryStorage (никогда не прод-БД)."""
+    import config
+    import appeals_logger
+    from storage import reset_storage
+
+    monkeypatch.setattr(config, "STORAGE_BACKEND", "memory")
+    monkeypatch.setattr(appeals_logger, "_logger", None)
+    reset_storage()
+    yield
+    reset_storage()
+
+
 @pytest.fixture
 def pg_conn():
     import config

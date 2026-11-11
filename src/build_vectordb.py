@@ -1,109 +1,80 @@
 """
-Скрипт построения векторной базы данных классификатора.
-Запускать один раз перед началом работы агента.
+Построение векторов классификатора для версии модели в БД (classifier_vectors).
 
-Сохраняет:
-  data/vector_db/embeddings.npy   — матрица эмбеддингов (2108 × 768)
-  data/vector_db/metadata.json    — список записей классификатора
+Для каждой записи классификатора:
+  - базовая строка: search_text = build_search_text(...) (аннотации старого
+    формата вшиты: correct_name подменяет название, category/note дописываются);
+  - по строке на каждый текст аннотации (source_type='annotation').
+Всё векторизуется моделью model_path (префикс "passage: " для e5-семейства).
 
-Использование:
-    python src/build_vectordb.py
+Вызывается из дообучения (finetune) для новой версии модели. Версию 0 (текущие
+прод-векторы) переносит scripts/db/migrate_from_files.py без пересчёта.
 """
 
 import sys
-import json
-import numpy as np
 from pathlib import Path
+
+import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
 
 import env_bootstrap  # noqa: F401  — .env до HF-библиотек
 
 from sentence_transformers import SentenceTransformer
-from config import EMBEDDING_MODEL, CLASSIFIER_FLAT_PATH, VECTOR_DB_DIR
-from annotations_storage import build_search_text, list_annotated_codes
+from annotations_storage import build_search_text
 
 BATCH_SIZE = 128
 
 
-def build_database():
-    print("=" * 60)
-    print("Построение векторной базы классификатора обращений")
-    print("=" * 60)
+def uses_passage_prefix(model_path: str) -> bool:
+    """Префикс "passage: " только для e5-семейства; BGE-M3 и др. современные
+    модели префиксов не требуют (см. model card)."""
+    return "e5" in str(model_path).lower()
 
-    # ── Загрузка классификатора ───────────────────────────────────────
-    print(f"\n[1/4] Загрузка классификатора из {CLASSIFIER_FLAT_PATH}...")
-    with open(CLASSIFIER_FLAT_PATH, encoding="utf-8") as f:
-        entries = json.load(f)
-    print(f"      Загружено записей: {len(entries)}")
 
-    codes_with_ann = list_annotated_codes()
-    print(f"      Кодов с аннотациями: {len(codes_with_ann)}")
+def passage_text(text: str, model_path: str) -> str:
+    return f"passage: {text}" if uses_passage_prefix(model_path) else text
 
-    # ── Загрузка модели эмбеддингов ───────────────────────────────────
-    print(f"\n[2/4] Загрузка модели эмбеддингов: {EMBEDDING_MODEL}...")
-    model = SentenceTransformer(EMBEDDING_MODEL)
-    print("      Модель загружена.")
 
-    # ── Векторизация ──────────────────────────────────────────────────
-    print(f"\n[3/4] Векторизация {len(entries)} записей (батч {BATCH_SIZE})...")
-    total = len(entries)
-    all_embeddings = []
-    metadata = []
+def build_database(storage, model_path: str, version: int) -> int:
+    """Пишет базовые и аннотационные векторы версии version. Возвращает число строк."""
+    entries = storage.classifier.load_entries()
+    annotated = set(storage.classifier.annotated_codes())
+    print(f"Построение векторов v{version}: {len(entries)} записей, "
+          f"кодов с аннотациями: {len(annotated)}; модель {model_path}")
 
-    # Префикс "passage: " только для e5-семейства; BGE-M3 и др. современные
-    # модели префиксов не требуют (см. model card)
-    use_prefix = "e5" in EMBEDDING_MODEL.lower()
-    if not use_prefix:
-        print(f"      (без 'passage: ' префикса — модель {EMBEDDING_MODEL} префиксов не требует)")
+    rows: list[tuple[str, str, str]] = []
+    for e in entries:
+        anns = storage.classifier.annotations_for(e.code) if e.code in annotated else []
+        rows.append((e.code, "base", build_search_text(e.code, e.name, e.full_path, anns)))
+        rows.extend((e.code, "annotation", text) for text in anns)
 
-    for start in range(0, total, BATCH_SIZE):
-        batch = entries[start:start + BATCH_SIZE]
-        texts = []
-        for e in batch:
-            search_txt = build_search_text(
-                code=e["code"],
-                base_name=e["name"],
-                base_full_path=e.get("full_path", "")
-            )
-            texts.append(f"passage: {search_txt}" if use_prefix else search_txt)
-        embeddings = model.encode(texts, normalize_embeddings=True)
-        all_embeddings.append(embeddings)
+    model = SentenceTransformer(model_path)
+    vectors = []
+    for start in range(0, len(rows), BATCH_SIZE):
+        batch = rows[start:start + BATCH_SIZE]
+        vectors.append(np.asarray(
+            model.encode([passage_text(t, model_path) for _, _, t in batch],
+                         normalize_embeddings=True),
+            dtype=np.float32,
+        ))
+        done = min(start + BATCH_SIZE, len(rows))
+        print(f"  [{done / len(rows) * 100:5.1f}%] {done}/{len(rows)}", end="\r")
+    matrix = np.vstack(vectors) if vectors else np.zeros((0, 768), dtype=np.float32)
 
-        for e in batch:
-            search_txt = build_search_text(
-                code=e["code"],
-                base_name=e["name"],
-                base_full_path=e.get("full_path", "")
-            )
-            metadata.append({
-                "code":           e["code"],
-                "name":           e["name"],
-                "level":          e["level"],
-                "parent_code":    e.get("parent_code") or "",
-                "full_path":      e["full_path"],
-                "children_count": e.get("children_count", 0),
-                "search_text":    search_txt,
-            })
-
-        done = min(start + BATCH_SIZE, total)
-        pct  = done / total * 100
-        print(f"      [{pct:5.1f}%] {done}/{total} записей обработано", end="\r")
-
-    # ── Сохранение ────────────────────────────────────────────────────
-    print(f"\n\n[4/4] Сохранение базы в {VECTOR_DB_DIR}...")
-    Path(VECTOR_DB_DIR).mkdir(parents=True, exist_ok=True)
-
-    embeddings_matrix = np.vstack(all_embeddings)
-    np.save(Path(VECTOR_DB_DIR) / "embeddings.npy", embeddings_matrix)
-
-    with open(Path(VECTOR_DB_DIR) / "metadata.json", "w", encoding="utf-8") as f:
-        json.dump(metadata, f, ensure_ascii=False, indent=2)
-
-    print(f"   embeddings.npy : {embeddings_matrix.shape}  ({embeddings_matrix.nbytes // 1024} KB)")
-    print(f"   metadata.json  : {len(metadata)} записей")
-    print(f"\nБаза построена! {len(metadata)} записей в {VECTOR_DB_DIR}")
+    n = storage.classifier.add_vectors(
+        version, [(code, st, text, matrix[i]) for i, (code, st, text) in enumerate(rows)]
+    )
+    print(f"\nГотово: {n} векторов для версии {version}")
+    return n
 
 
 if __name__ == "__main__":
-    build_database()
+    print(
+        "Векторы классификатора теперь хранятся в PostgreSQL (classifier_vectors).\n"
+        "  Перенос текущей базы:        python scripts/db/migrate_from_files.py\n"
+        "  Векторы новой версии модели строит дообучение (finetune) через build_database()."
+    )
+    # Ненулевой код: старые вызовы (дообучение через subprocess) не должны считать,
+    # что база перестроена.
+    sys.exit(2)

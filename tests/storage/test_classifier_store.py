@@ -128,3 +128,18 @@ def test_register_active_deactivates_others(storage):
     # регистрация неактивной версии не трогает активную
     storage.models.register(ModelVersion(2, "base", "m2", False))
     assert storage.models.active().version == 1
+
+
+def test_delete_annotations_by_prefix(storage):
+    storage.classifier.upsert_entries(entries())
+    setup_versions(storage)
+    storage.classifier.add_annotation(A, "note: x", 0)
+    storage.classifier.add_annotation(A, "note: y", 0)
+    storage.classifier.add_annotation(A, "comment 100%_", 0)
+    assert storage.classifier.delete_annotations(A, "note: ") == 2
+    assert storage.classifier.annotations_for(A) == ["comment 100%_"]
+    assert storage.classifier.delete_annotations(A, "comment 100%_") == 1
+    assert storage.classifier.delete_annotations(A) == 0
+    storage.classifier.add_annotation(A, "z", 0)
+    assert storage.classifier.delete_annotations(A) == 1
+    assert storage.classifier.annotated_codes() == []

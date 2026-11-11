@@ -17,13 +17,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from api_server import verify, get_examples, VerifyRequest, backoffice_stats, log_request, get_current_user
 from appeals_logger import AppealsLogger
+from storage.memory import MemoryStorage
 
 
 @pytest.fixture
 def backoffice_logger(tmp_path):
-    """Logger with a temp file, and patch _REQUEST_LOG for log_request tests."""
-    log_path = tmp_path / "appeals_log.jsonl"
-    logger = AppealsLogger(log_path=log_path)
+    """Logger on an in-memory storage, and patch _REQUEST_LOG for log_request tests."""
+    logger = AppealsLogger(MemoryStorage())
 
     # Patch the module-level _REQUEST_LOG so log_request writes to temp dir
     import api_server as api_mod
@@ -35,9 +35,8 @@ def backoffice_logger(tmp_path):
 
 @pytest.fixture
 def isolated_logger(tmp_path):
-    """Логгер с временным JSONL-файлом — не пишет в продовый лог."""
-    log_path = tmp_path / "test_log.jsonl"
-    return AppealsLogger(log_path=log_path)
+    """Логгер на MemoryStorage — не пишет в продовое хранилище."""
+    return AppealsLogger(MemoryStorage())
 
 
 @pytest.fixture
@@ -270,8 +269,7 @@ def test_backoffice_stats_daily_usage_count(isolated_logger):
 
 def test_backoffice_stats_empty_log(tmp_path):
     """empty log returns zeros and empty arrays, not crashes."""
-    log_path = tmp_path / "appeals_log.jsonl"
-    logger = AppealsLogger(log_path=log_path)
+    logger = AppealsLogger(MemoryStorage())
 
     result = asyncio.run(backoffice_stats(_username="admin", logger=logger))
     assert result["total_classifications"] == 0

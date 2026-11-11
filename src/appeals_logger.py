@@ -1,11 +1,12 @@
 """
 appeals_logger.py — Логирование классификаций для накопления данных дообучения
 
-Каждая классификация пишется в data/appeals_log.jsonl.
-Оператор верифицирует результат → запись обогащается статусом.
+Каждая классификация — карточка обращения в хранилище (Storage.appeals:
+appeal_classifications + appeal_questions + appeal_verifications).
+Оператор верифицирует результат → карточка обогащается статусом.
 Подтверждённые/исправленные пары → обучающий датасет для fine-tuning.
 
-Формат записи:
+read_all()/read_verified() отдают записи в формате старого appeals_log.jsonl:
 {
   "id": "uuid",
   "timestamp": "2026-04-20T10:30:00",
@@ -25,26 +26,45 @@ appeals_logger.py — Логирование классификаций для �
 }
 """
 
-import json
-import uuid
-from datetime import datetime
+from __future__ import annotations
+
 from pathlib import Path
+from typing import Optional
 
-try:
-    from annotations_storage import add_annotation as _add_annotation, get_annotations as _get_annotations
-except ImportError:
-    _add_annotation = None
-    _get_annotations = None
+from storage import get_storage
+from storage.models import AppealQuestionRow, AppealResult, Storage
 
-
+# Старый файловый лог. Остаётся только как имя для импорта (auto_finetune),
+# данные теперь в БД; перенос — scripts/db/migrate_from_files.py.
 LOG_FILE = Path(__file__).parent.parent / "data" / "appeals_log.jsonl"
+
+
+def _legacy_result(candidates: list, agent_questions: list,
+                   overall_confidence: float) -> AppealResult:
+    """AppealResult из аргументов старого log() (без полей, которых там не было)."""
+    return AppealResult(
+        summary=None, applicant_fio=None, applicant_email=None,
+        vid_obrascheniya=None, tip_obrascheniya=None, is_ustnoe=None,
+        overall_confidence=overall_confidence, needs_verification=None,
+        full_fallback_used=None, candidates=list(candidates or []),
+        llm_provider=None, llm_model=None, elapsed_seconds=None,
+        questions=[
+            AppealQuestionRow(
+                ordinal=i,
+                question_text=q.get("question_text", ""),
+                selected_code=q.get("selected_code", ""),
+                confidence=q.get("confidence", 0.0),
+                alternative_codes=list(q.get("alternative_codes") or []),
+            )
+            for i, q in enumerate(agent_questions or [], 1)
+        ],
+    )
 
 
 class AppealsLogger:
 
-    def __init__(self, log_path: Path = LOG_FILE):
-        self.log_path = log_path
-        self.log_path.parent.mkdir(parents=True, exist_ok=True)
+    def __init__(self, storage: Optional[Storage] = None):
+        self.storage = storage or get_storage()
 
     # ── Запись новой классификации ────────────────────────────────────────────
 
@@ -54,33 +74,39 @@ class AppealsLogger:
         candidates: list,
         agent_questions: list,
         overall_confidence: float,
+        appeal_id: Optional[str] = None,
+        result: Optional[AppealResult] = None,
+        conn=None,
     ) -> str:
         """
-        Записывает результат классификации в лог.
-        Возвращает log_id — уникальный идентификатор записи.
+        Записывает результат классификации в карточку обращения.
+        Возвращает id обращения (log_id).
+
+        appeal_id — карточка уже создана (воркер): только сохраняем результат;
+                    None — создаём новую карточку.
+        result    — полный результат; если не передан, собирается из
+                    candidates / agent_questions / overall_confidence.
+        conn      — соединение внешней транзакции (воркер); без него запись
+                    идёт в собственной транзакции.
 
         agent_questions — список dict с ключами:
             question_text, selected_code, confidence, alternative_codes
         candidates — топ-K из векторного поиска, список dict:
             code, name, similarity
         """
-        log_id = str(uuid.uuid4())
-        entry = {
-            "id":                 log_id,
-            "timestamp":          datetime.now().isoformat(timespec="seconds"),
-            "appeal_text":        appeal_text,
-            "candidates":         candidates,
-            "agent_questions":    agent_questions,
-            "overall_confidence": overall_confidence,
-            "verification": {
-                "status":         "pending",
-                "verified_at":    None,
-                "operator_codes": None,
-                "comment":        None,
-            },
-        }
-        self._append(entry)
-        return log_id
+        if result is None:
+            result = _legacy_result(candidates, agent_questions, overall_confidence)
+        appeals = self.storage.appeals
+
+        def write(c) -> str:
+            aid = appeal_id or appeals.create(appeal_text, conn=c)
+            appeals.save_result(aid, result, conn=c)
+            return aid
+
+        if conn is not None:
+            return write(conn)
+        with self.storage.transaction() as c:
+            return write(c)
 
     # ── Верификация оператором ────────────────────────────────────────────────
 
@@ -89,12 +115,7 @@ class AppealsLogger:
         Оператор подтвердил классификацию агента.
         Самый ценный сигнал: (appeal_text, agent_code) → позитивная пара.
         """
-        return self._update_verification(log_id, {
-            "status":         "confirmed",
-            "verified_at":    datetime.now().isoformat(timespec="seconds"),
-            "operator_codes": None,
-            "comment":        comment,
-        })
+        return self.storage.appeals.set_verification(log_id, "confirmed", None, comment)
 
     def correct(self, log_id: str, operator_codes: list[str], comment: str = None) -> bool:
         """
@@ -103,112 +124,39 @@ class AppealsLogger:
           - (appeal_text, operator_code)  → позитивная пара
           - (appeal_text, agent_code)     → негативная пара
         operator_codes — список правильных кодов классификатора.
-        comment — пояснение оператора (сохраняется в classifier_annotations.json)
+        comment — пояснение оператора (сохраняется как аннотация каждого кода)
         """
-        # Получаем код агента для аннотации
-        agent_code = None
-        for entry in self.read_all():
-            if entry["id"] == log_id:
-                if entry.get("agent_questions") and len(entry["agent_questions"]) > 0:
-                    agent_code = entry["agent_questions"][0].get("selected_code")
-                break
-
-        # Сохраняем аннотации в classifier_annotations.json
-        if _add_annotation and comment:
+        updated = self.storage.appeals.set_verification(
+            log_id, "corrected", operator_codes, comment)
+        if updated and comment:
+            from annotations_storage import add_annotation
             for op_code in operator_codes:
-                _add_annotation(
-                    code=op_code,
-                    text=comment,
-                    case_id=log_id,
-                    operator_code=agent_code or ""
-                )
-
-        return self._update_verification(log_id, {
-            "status":         "corrected",
-            "verified_at":    datetime.now().isoformat(timespec="seconds"),
-            "operator_codes": operator_codes,
-            "comment":        comment,
-        })
+                try:
+                    add_annotation(op_code, comment, case_id=log_id, storage=self.storage)
+                except Exception as e:  # noqa: BLE001 — аннотация не должна терять исправление
+                    print(f"  [logger] Аннотация для {op_code} не сохранена: {e}")
+        return updated
 
     def reject(self, log_id: str, comment: str = None) -> bool:
         """
         Оператор отклонил обращение (некорректное, спам и т.п.).
         Запись исключается из обучения.
         """
-        return self._update_verification(log_id, {
-            "status":         "rejected",
-            "verified_at":    datetime.now().isoformat(timespec="seconds"),
-            "operator_codes": None,
-            "comment":        comment,
-        })
+        return self.storage.appeals.set_verification(log_id, "rejected", None, comment)
 
     # ── Чтение и фильтрация ───────────────────────────────────────────────────
 
     def read_all(self) -> list[dict]:
-        """Читает весь лог."""
-        if not self.log_path.exists():
-            return []
-        entries = []
-        with open(self.log_path, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    try:
-                        entries.append(json.loads(line))
-                    except json.JSONDecodeError:
-                        continue
-        return entries
+        """Все записи в формате старого лога (по времени создания)."""
+        return self.storage.appeals.as_log_entries()
 
     def read_verified(self) -> list[dict]:
         """Возвращает только подтверждённые и исправленные записи (для обучения)."""
-        return [
-            e for e in self.read_all()
-            if e["verification"]["status"] in ("confirmed", "corrected")
-        ]
+        return self.storage.appeals.as_log_entries(statuses=("confirmed", "corrected"))
 
     def stats(self) -> dict:
         """Статистика по логу."""
-        all_entries = self.read_all()
-        counts = {"pending": 0, "confirmed": 0, "corrected": 0, "rejected": 0}
-        for e in all_entries:
-            status = e["verification"]["status"]
-            counts[status] = counts.get(status, 0) + 1
-        return {
-            "total":     len(all_entries),
-            "verified":  counts["confirmed"] + counts["corrected"],
-            "pending":   counts["pending"],
-            "confirmed": counts["confirmed"],
-            "corrected": counts["corrected"],
-            "rejected":  counts["rejected"],
-        }
-
-    # ── Внутренние методы ─────────────────────────────────────────────────────
-
-    def _append(self, entry: dict):
-        """Дописывает запись в конец JSONL-файла."""
-        with open(self.log_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-
-    def _update_verification(self, log_id: str, verification: dict) -> bool:
-        """
-        Обновляет поле verification записи с указанным id.
-        JSONL не поддерживает изменение на месте — перезаписываем весь файл.
-        Для небольших логов (тысячи строк) это нормально.
-        """
-        entries = self.read_all()
-        updated = False
-        for entry in entries:
-            if entry["id"] == log_id:
-                entry["verification"] = verification
-                updated = True
-                break
-
-        if updated:
-            with open(self.log_path, "w", encoding="utf-8") as f:
-                for entry in entries:
-                    f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-
-        return updated
+        return self.storage.appeals.stats()
 
 
 # ── Глобальный экземпляр (опционально) ───────────────────────────────────────
@@ -220,5 +168,5 @@ def get_logger() -> AppealsLogger:
     """Возвращает глобальный экземпляр логгера (создаёт при первом вызове)."""
     global _logger
     if _logger is None:
-        _logger = AppealsLogger()
+        _logger = AppealsLogger(get_storage())
     return _logger

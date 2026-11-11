@@ -1,115 +1,105 @@
 """
-annotations_storage.py — хранение и управление пользовательскими аннотациями
-к записям классификатора обращений граждан.
+annotations_storage.py — пользовательские аннотации к записям классификатора.
 
-Аннотации хранятся в data/classifier_annotations.json как словарь:
-    {<code>: {<field>: <value>, ...}, ...}
+Аннотации хранятся в БД (classifier_vectors, source_type='annotation'):
+одна строка на текст. Новые строки привязываются к АКТИВНОЙ версии модели,
+эмбеддинг считает воркер (embed_annotation) или build_vectordb.
 
-Запуск: используется из finetune_model.py и operator_cli.py
+Старые поля-«словарь» (correct_name / category / note) хранятся как тексты
+с префиксом "<поле>: <значение>" и учитываются в build_search_text.
+
+Используется из finetune_model.py, operator_cli.py, appeals_logger.py, api_server.py.
 """
 
-import json
-import shutil
-from pathlib import Path
-from datetime import datetime
+from __future__ import annotations
+
 from typing import Optional
 
-from config import CLASSIFIER_FLAT_PATH, VECTOR_DB_DIR, MODELS_DIR
+from storage import get_storage
 
-# ── Путь к файлу аннотаций ───────────────────────────────────────────────────
-ANNOTATIONS_PATH = Path(__file__).parent.parent / "data" / "classifier_annotations.json"
-
-
-def _load_annotations() -> dict:
-    """Внутренняя: загружает JSON-файл аннотаций. Возвращает {} при отсутствии файла."""
-    if not ANNOTATIONS_PATH.exists():
-        return {}
-    with open(ANNOTATIONS_PATH, encoding="utf-8") as f:
-        return json.load(f)
+# Поля старого словарного формата, которые влияют на search_text
+_LEGACY_FIELDS = ("correct_name", "category", "note")
 
 
-def _save_annotations(data: dict) -> None:
-    """Внутренняя: сохраняет словарь аннотаций в JSON-файл."""
-    with open(ANNOTATIONS_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+def _store(storage=None):
+    return (storage or get_storage()).classifier
 
 
-# ── 1. Сохранение аннотации ──────────────────────────────────────────────────
+def _active_version(storage=None) -> int:
+    active = (storage or get_storage()).models.active()
+    if active is None:
+        raise RuntimeError(
+            "Нет активной модели в ml_model_registry — запустите scripts/db/migrate_from_files.py"
+        )
+    return active.version
 
-def save_annotation(code: str, field: str, value: str) -> None:
+
+# ── 1. Добавление аннотации ──────────────────────────────────────────────────
+
+def add_annotation(code: str, text: str, case_id: Optional[str] = None,
+                   operator_code: str = "", *, storage=None) -> int:
     """
-    Сохраняет (или обновляет) поле field аннотации для записи code.
+    Добавляет текст аннотации к записи code (версия модели — активная).
 
-    Args:
-        code:  код записи классификатора (напр. "03.01.01.001")
-        field: имя поля ("note", "correct_name", "category", …)
-        value: значение (строка)
+    case_id / operator_code принимаются для совместимости вызовов, в БД не хранятся.
+    Возвращает id строки classifier_vectors.
     """
-    data = _load_annotations()
-    if code not in data:
-        data[code] = {"_updated": datetime.now().isoformat(timespec="seconds")}
-    data[code][field] = value
-    data[code]["_updated"] = datetime.now().isoformat(timespec="seconds")
-    _save_annotations(data)
+    return _store(storage).add_annotation(code, text, _active_version(storage))
 
 
-# ── 2. Получение всех аннотаций для кода ─────────────────────────────────────
+# ── 2. Сохранение поля старого формата ───────────────────────────────────────
 
-def get_annotations(code: str) -> dict:
+def save_annotation(code: str, field: str, value: str, *, storage=None) -> None:
     """
-    Возвращает все аннотации для записи code.
-    Если записей нет — пустой словарь.
-
-    Returns:
-        dict с полями аннотации, ключ _updated содержит ISO-дату последнего изменения
-    """
-    data = _load_annotations()
-    return data.get(code, {})
-
-
-# ── 3. Удаление аннотации ────────────────────────────────────────────────────
-
-def delete_annotation(code: str, field: Optional[str] = None) -> None:
-    """
-    Удаляет конкретное поле или всю запись аннотации.
+    Сохраняет (заменяет) поле field аннотации для записи code.
 
     Args:
         code:  код записи классификатора
-        field: если указано — удалить только это поле; если None — удалить всю запись
+        field: имя поля ("note", "correct_name", "category", …)
+        value: значение (строка)
     """
-    data = _load_annotations()
-    if code not in data:
-        return
-
-    if field is None:
-        del data[code]
-    else:
-        data[code].pop(field, None)
-        # если остались только служебные поля — удаляем запись целиком
-        if not any(k for k in data[code] if not k.startswith("_")):
-            del data[code]
-
-    _save_annotations(data)
+    _store(storage).delete_annotations(code, f"{field}: ")
+    add_annotation(code, f"{field}: {value}", storage=storage)
 
 
-# ── 4. Список кодов с аннотациями ─────────────────────────────────────────────
+# ── 3. Получение всех аннотаций для кода ─────────────────────────────────────
 
-def list_annotated_codes() -> list[str]:
+def get_annotations(code: str, *, storage=None) -> list[str]:
+    """Тексты всех аннотаций записи code (по порядку добавления); [] если нет."""
+    return _store(storage).annotations_for(code)
+
+
+# ── 4. Удаление аннотации ────────────────────────────────────────────────────
+
+def delete_annotation(code: str, field: Optional[str] = None, *, storage=None) -> None:
     """
-    Возвращает список кодов, для которых есть хотя бы одна пользовательская аннотация.
-    Служебные ключи (_updated) не учитываются.
+    Удаляет поле field (строки "<field>: ...") или все аннотации записи (field=None).
     """
-    data = _load_annotations()
-    result = []
-    for code, fields in data.items():
-        if any(not k.startswith("_") for k in fields):
-            result.append(code)
-    return sorted(result)
+    _store(storage).delete_annotations(code, None if field is None else f"{field}: ")
 
 
-# ── 5. Построение расширенного search_text с учётом аннотаций ───────────────
+# ── 5. Список кодов с аннотациями ─────────────────────────────────────────────
 
-def build_search_text(code: str, base_name: str, base_full_path: str) -> str:
+def list_annotated_codes(*, storage=None) -> list[str]:
+    """Отсортированный список кодов, для которых есть хотя бы одна аннотация."""
+    return _store(storage).annotated_codes()
+
+
+# ── 6. Построение расширенного search_text с учётом аннотаций ───────────────
+
+def _legacy_fields(texts: list[str]) -> dict:
+    """Поля старого формата из текстов "<поле>: <значение>" (последнее значение побеждает)."""
+    fields: dict[str, str] = {}
+    for text in texts:
+        for name in _LEGACY_FIELDS:
+            prefix = f"{name}: "
+            if text.startswith(prefix):
+                fields[name] = text[len(prefix):]
+    return fields
+
+
+def build_search_text(code: str, base_name: str, base_full_path: str,
+                      annotations: Optional[list[str]] = None, *, storage=None) -> str:
     """
     Формирует расширенный search_text для записи классификатора.
 
@@ -117,9 +107,10 @@ def build_search_text(code: str, base_name: str, base_full_path: str) -> str:
     в итоговой строке. Также дописывает category и note (если есть).
 
     Args:
-        code:         код записи
-        base_name:    название из classifier_flat.json
-        base_full_path: полный путь из metadata.json
+        code:           код записи
+        base_name:      название записи классификатора
+        base_full_path: полный путь записи
+        annotations:    тексты аннотаций, если уже загружены (иначе читаются из БД)
 
     Returns:
         Строку вида:
@@ -127,7 +118,9 @@ def build_search_text(code: str, base_name: str, base_full_path: str) -> str:
           "#category: <category>"   (если есть)
           "Note: <note>"             (если есть)
     """
-    ann = get_annotations(code)
+    if annotations is None:
+        annotations = get_annotations(code, storage=storage)
+    ann = _legacy_fields(annotations)
 
     # Основной текст: prefer correct_name
     name = ann.get("correct_name", base_name)
@@ -141,28 +134,3 @@ def build_search_text(code: str, base_name: str, base_full_path: str) -> str:
         parts.append(f"Note: {ann['note']}")
 
     return " | ".join(parts)
-
-
-# ── Дополнительная функция: бэкап аннотаций ─────────────────────────────────
-
-def backup_annotations(dest_dir: Optional[Path] = None) -> Path:
-    """
-    Создаёт бэкап-копию classifier_annotations.json.
-
-    Args:
-        dest_dir: папка для бэкапа (по умолчанию — MODELS_DIR / "annotation_backups")
-
-    Returns:
-        Path к созданному бэкап-файлу
-    """
-    if not ANNOTATIONS_PATH.exists():
-        raise FileNotFoundError(f"Аннотации не найдены: {ANNOTATIONS_PATH}")
-
-    dest = dest_dir or (Path(MODELS_DIR) / "annotation_backups")
-    dest.mkdir(parents=True, exist_ok=True)
-
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_path = dest / f"classifier_annotations_{timestamp}.json"
-
-    shutil.copy2(ANNOTATIONS_PATH, backup_path)
-    return backup_path

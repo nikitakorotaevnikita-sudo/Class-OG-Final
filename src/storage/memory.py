@@ -154,6 +154,17 @@ class MemoryClassifierStore:
                 if v["code"] == code and v["source_type"] == "annotation"
             ]
 
+    def delete_annotations(self, code, text_prefix=None):
+        with self._lock:
+            ids = [
+                i for i, v in self._vectors.items()
+                if v["code"] == code and v["source_type"] == "annotation"
+                and (text_prefix is None or v["search_text"].startswith(text_prefix))
+            ]
+            for i in ids:
+                del self._vectors[i]
+            return len(ids)
+
     def annotated_codes(self):
         with self._lock:
             return sorted(
