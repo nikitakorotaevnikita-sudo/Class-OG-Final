@@ -50,7 +50,6 @@ LLM_TIMEOUT_SEC: int = int(os.getenv("LLM_TIMEOUT_SEC", "360"))
 LLM_MAX_RETRIES: int = max(1, int(os.getenv("LLM_MAX_RETRIES", "5")))
 
 # Фоновая обработка: RX получает идентификатор задачи сразу и опрашивает статус.
-JOBS_DIR: str = os.getenv("JOBS_DIR", str(Path(__file__).parent.parent / "data" / "jobs"))
 JOB_TTL_HOURS: float = float(os.getenv("JOB_TTL_HOURS", "24"))
 JOB_MAX_QUEUED: int = int(os.getenv("JOB_MAX_QUEUED", "100"))
 

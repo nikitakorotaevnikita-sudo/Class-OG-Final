@@ -10,17 +10,23 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from fastapi import APIRouter, HTTPException, Request, Response
-from typing import Optional
+import asyncio
+
+import psycopg
+from fastapi import APIRouter, HTTPException, Response
+from fastapi.responses import JSONResponse
 
 import config
+import job_api
 import rx_client
 import text_extractor
 from responses import (ClassifyDocumentRequest, RxQuestion, ClassifyDocumentResponse,  # noqa: F401
                        AcceptedResponse, JobStatusResponse, REASONING_MAX_LEN,
-                       build_document_response, _unique_by_code, _build_reasoning,
-                       _clip_reasoning)
-from job_queue import JobQueue, QueueFull, STATUS_DONE, STATUS_ERROR
+                       build_document_response, job_status_payload, _unique_by_code,
+                       _build_reasoning, _clip_reasoning)
+from queueing import webhook
+from storage import get_storage
+from storage.models import QueueFull
 
 router = APIRouter(prefix="/integration", tags=["Интеграция RX"])
 
@@ -66,83 +72,71 @@ def _resolve_text(body: ClassifyDocumentRequest) -> str:
     raise HTTPException(status_code=400, detail="Нужен appeal_text либо document_id")
 
 
-def _build_response(agent, text: str, document_id: Optional[int]) -> ClassifyDocumentResponse:
-    """Классификация и сборка ответа. Общая для синхронного и фонового путей."""
-    return build_document_response(agent.classify(text), document_id)
+_WEBHOOK_REJECTED = "webhook_url не разрешён: хост не входит в WEBHOOK_ALLOWED_HOSTS"
+_JOB_TYPE = "classify"
 
 
-def _get_agent(request: Request):
-    agent = getattr(request.app.state, "agent", None)
-    if agent is None:
-        raise HTTPException(status_code=503, detail="Агент не инициализирован")
-    return agent
+def _document_payload() -> dict:
+    return {"llm_provider": None, "llm_model": None, "response_kind": "document"}
+
+
+async def _db(fn, *args):
+    """Обращение к хранилищу вне event loop; сбой БД → 503."""
+    try:
+        return await asyncio.to_thread(fn, *args)
+    except psycopg.Error as exc:
+        raise HTTPException(status_code=503, detail=job_api.DB_UNAVAILABLE) from exc
 
 
 @router.post("/classify-document", response_model=ClassifyDocumentResponse)
-async def classify_document(body: ClassifyDocumentRequest, request: Request):
+async def classify_document(body: ClassifyDocumentRequest):
     """Синхронный вызов: ответ приходит по завершении классификации.
 
-    Оставлен без изменений для уже работающей интеграции. Если вызывающая
-    сторона не может держать соединение минутами, использовать
+    Оставлен без изменений для уже работающей интеграции. Задача идёт через
+    очередь `classify_sync`; если ответа нет за SYNC_WAIT_TIMEOUT_SEC — 504, а
+    результат можно забрать опросом `GET /integration/jobs/{job_id}`. Если
+    вызывающая сторона не может держать соединение минутами, использовать
     `/classify-document-async`.
     """
-    agent = _get_agent(request)
     text = _resolve_text(body)
-    try:
-        return _build_response(agent, text, body.document_id)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ошибка классификации: {str(e)}")
-
-
-# ── Фоновая обработка ────────────────────────────────────────────────────────
-
-_jobs: Optional[JobQueue] = None
-
-
-def get_job_queue() -> JobQueue:
-    """Очередь создаётся при первом обращении: на старте сервиса она не нужна."""
-    global _jobs
-    if _jobs is None:
-        _jobs = JobQueue(jobs_dir=config.JOBS_DIR,
-                         ttl_hours=config.JOB_TTL_HOURS,
-                         max_queued=config.JOB_MAX_QUEUED)
-    return _jobs
+    sub = await job_api.run_sync_job("classify", "classify_appeal", _document_payload(),
+                                     appeal_text=text, document_id=body.document_id)
+    return ClassifyDocumentResponse(**sub.job.result)
 
 
 @router.post("/classify-document-async", response_model=AcceptedResponse, status_code=202)
-async def classify_document_async(body: ClassifyDocumentRequest, request: Request,
-                                  response: Response):
+async def classify_document_async(body: ClassifyDocumentRequest, response: Response):
     """Принять обращение в обработку и сразу вернуть идентификатор задачи.
 
     Нужен, чтобы вызывающая сторона не держала процесс заблокированным: модель
     отвечает от десятков секунд до нескольких минут. Результат забирается
-    опросом `GET /integration/jobs/{job_id}`.
+    опросом `GET /integration/jobs/{job_id}` либо приходит на `webhook_url`
+    (хост должен входить в WEBHOOK_ALLOWED_HOSTS).
 
-    Ошибки в самом запросе (нет текста и document_id, документ не найден)
-    возвращаются сразу, как и раньше — до постановки в очередь.
+    Ошибки в самом запросе (нет текста и document_id, документ не найден,
+    webhook не разрешён) возвращаются сразу — до постановки в очередь.
     """
-    agent = _get_agent(request)
     text = _resolve_text(body)
-    document_id = body.document_id
-    jobs = get_job_queue()
-
-    def work() -> dict:
-        return _build_response(agent, text, document_id).model_dump()
+    if body.webhook_url and not webhook.is_allowed(body.webhook_url):
+        raise HTTPException(status_code=400, detail=_WEBHOOK_REJECTED)
 
     try:
-        job = jobs.submit(work, meta={"document_id": document_id,
-                                      "text_len": len(text)})
+        sub = await job_api.submit_job(
+            _JOB_TYPE, "classify_appeal", "classify", _document_payload(),
+            appeal_text=text, document_id=body.document_id,
+            webhook_url=body.webhook_url or None, max_queued=config.JOB_MAX_QUEUED)
     except QueueFull as e:
         # 429 — вызывающей стороне нужно повторить позже, а не считать это сбоем.
         raise HTTPException(status_code=429, detail=f"Очередь заполнена: {e}")
 
     # Воркер может подхватить задачу за миллисекунды, поэтому статус читается
     # заново: иначе в ответе оказывалось «queued» без позиции в очереди.
-    fresh = jobs.get(job.id) or job
-    response.headers["Location"] = f"/integration/jobs/{job.id}"
-    return AcceptedResponse(job_id=job.id, status=fresh.status,
-                            queue_position=jobs.position(job.id),
-                            poll_url=f"/integration/jobs/{job.id}")
+    jobs = get_storage().jobs
+    fresh = await _db(jobs.get, sub.job.id) or sub.job
+    position = await _db(jobs.position, sub.job.id)
+    response.headers["Location"] = f"/integration/jobs/{sub.job.id}"
+    return AcceptedResponse(job_id=sub.job.id, status=fresh.status, queue_position=position,
+                            poll_url=f"/integration/jobs/{sub.job.id}")
 
 
 @router.get("/jobs/{job_id}", response_model=JobStatusResponse)
@@ -150,40 +144,37 @@ async def get_job(job_id: str):
     """Статус задачи и результат, когда он готов.
 
     Пока задача не завершена, `result` пустой — это не ошибка, а нормальное
-    состояние: `queued` (ждёт) или `running` (обрабатывается).
+    состояние: `queued` (ждёт) или `running` (обрабатывается). Здесь же
+    забирается результат синхронного вызова, закончившегося 504.
     """
-    jobs = get_job_queue()
-    job = jobs.get(job_id)
-    if job is None:
+    jobs = get_storage().jobs
+    job = await _db(jobs.get, job_id)
+    if job is None or job.job_type != _JOB_TYPE:
         raise HTTPException(status_code=404,
                             detail=f"Задача {job_id} не найдена: неверный идентификатор "
                                    f"либо срок хранения результата истёк")
-
-    return JobStatusResponse(
-        job_id=job.id,
-        status=job.status,
-        queue_position=jobs.position(job.id),
-        elapsed_sec=job.elapsed_sec,
-        document_id=job.meta.get("document_id"),
-        result=job.result if job.status == STATUS_DONE else None,
-        error=job.error if job.status == STATUS_ERROR else None,
-    )
+    position = await _db(jobs.position, job_id)
+    # Тело строится вручную: результат у задач /classify и /classify-document
+    # разной формы, он отдаётся как сохранён воркером.
+    return JSONResponse(job_status_payload(job, queue_position=position))
 
 
 @router.get("/jobs")
 async def list_jobs(limit: int = 20):
     """Сводка по очереди — для диагностики на стенде."""
-    jobs = get_job_queue()
+    jobs = get_storage().jobs
+    stats = await _db(jobs.stats)
+    items = await _db(lambda: jobs.list(limit=limit, job_type=_JOB_TYPE))
     return {
-        "stats": jobs.stats(),
+        "stats": stats,
         "jobs": [
             {
                 "job_id": j.id,
                 "status": j.status,
                 "elapsed_sec": j.elapsed_sec,
-                "document_id": j.meta.get("document_id"),
+                "document_id": j.document_id,
                 "error": j.error,
             }
-            for j in jobs.list(limit=limit)
+            for j in items
         ],
     }

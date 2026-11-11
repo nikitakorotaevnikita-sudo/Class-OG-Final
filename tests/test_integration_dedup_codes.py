@@ -14,11 +14,7 @@ from dataclasses import dataclass
 
 sys.path.insert(0, "src")
 
-import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
-import integration_api
+from rx_harness import make_client, poll_until_done
 
 
 @dataclass
@@ -40,15 +36,12 @@ class _Agent:
     def __init__(self, questions):
         self.questions = questions
 
-    def classify(self, text):
+    def classify(self, text, llm_provider=None, llm_model=None, appeal_id=None, log_conn=None):
         return _Result(questions=self.questions)
 
 
 def answer(questions) -> dict:
-    app = FastAPI()
-    app.include_router(integration_api.router)
-    app.state.agent = _Agent(questions)
-    response = TestClient(app).post("/integration/classify-document",
+    response = make_client(_Agent(questions)).post("/integration/classify-document",
                                     json={"appeal_text": "текст обращения"})
     assert response.status_code == 200, response.text
     return response.json()
@@ -98,26 +91,14 @@ def test_single_question_reasoning_has_no_code_prefix():
     assert data["reasoning"] == "обоснование"
 
 
-def test_async_path_returns_the_same_deduplicated_result(tmp_path, monkeypatch):
-    monkeypatch.setattr(integration_api, "_jobs", None)
-    monkeypatch.setattr(integration_api.config, "JOBS_DIR", str(tmp_path / "jobs"))
+def test_async_path_returns_the_same_deduplicated_result():
     same = "0005.0005.0056.1161"
     questions = [_Q(same, "Свалка", "обоснование")] * 3
 
-    app = FastAPI()
-    app.include_router(integration_api.router)
-    app.state.agent = _Agent(questions)
-    api = TestClient(app)
-
+    api = make_client(_Agent(questions))
     job_id = api.post("/integration/classify-document-async",
                       json={"appeal_text": "текст"}).json()["job_id"]
-    import time
-    deadline = time.time() + 10
-    while time.time() < deadline:
-        status = api.get(f"/integration/jobs/{job_id}").json()
-        if status["status"] in ("done", "error"):
-            break
-        time.sleep(0.05)
+    status = poll_until_done(api, job_id)
 
     assert status["status"] == "done", status
     assert [q["code"] for q in status["result"]["questions"]] == [same]

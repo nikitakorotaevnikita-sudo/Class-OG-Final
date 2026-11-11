@@ -5,7 +5,7 @@
 за собой классификатор (torch, sentence-transformers).
 """
 
-from typing import Optional
+from typing import Optional, Union
 
 from pydantic import BaseModel
 
@@ -189,7 +189,7 @@ class JobStatusResponse(BaseModel):
     queue_position: Optional[int] = None          # только пока задача ждёт
     elapsed_sec: float = 0.0
     document_id: Optional[int] = None
-    result: Optional[ClassifyDocumentResponse] = None
+    result: Optional[Union[ClassifyDocumentResponse, ClassifyResponse]] = None
     error: Optional[str] = None
 
 

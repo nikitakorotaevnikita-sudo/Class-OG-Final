@@ -11,11 +11,10 @@ from dataclasses import dataclass
 sys.path.insert(0, "src")
 
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
 import integration_api
 import rx_client
+from rx_harness import make_client, poll_until_done
 
 
 @dataclass
@@ -33,7 +32,7 @@ class _FakeAgent:
         self.boom = boom
         self.calls = 0
 
-    def classify(self, text):
+    def classify(self, text, llm_provider=None, llm_model=None, appeal_id=None, log_conn=None):
         self.calls += 1
         time.sleep(self.delay)
         if self.boom:
@@ -50,29 +49,14 @@ class _FakeAgent:
 
 
 @pytest.fixture(autouse=True)
-def isolated_queue(tmp_path, monkeypatch):
-    """Своя очередь на каждый тест: файлы задач не должны смешиваться."""
-    monkeypatch.setattr(integration_api, "_jobs", None)
-    monkeypatch.setattr(integration_api.config, "JOBS_DIR", str(tmp_path / "jobs"))
+def isolated_queue(monkeypatch):
+    """Своё memory-хранилище на каждый тест (conftest) и свой лимит очереди."""
     monkeypatch.setattr(integration_api.config, "JOB_MAX_QUEUED", 3)
     yield
 
 
 def client(agent):
-    app = FastAPI()
-    app.include_router(integration_api.router)
-    app.state.agent = agent
-    return TestClient(app)
-
-
-def poll_until_done(api, job_id, timeout=10.0):
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        body = api.get(f"/integration/jobs/{job_id}").json()
-        if body["status"] in ("done", "error"):
-            return body
-        time.sleep(0.05)
-    raise AssertionError(f"задача {job_id} не завершилась за {timeout}с")
+    return make_client(agent)
 
 
 def test_accept_returns_job_id_without_waiting():
@@ -160,12 +144,19 @@ def test_unknown_job_id_gives_404():
 
 def test_queue_overflow_answers_429():
     """Переполнение — сигнал «повторите позже», а не внутренняя ошибка."""
-    api = client(_FakeAgent(delay=1.5))
-    codes = [api.post("/integration/classify-document-async",
-                      json={"appeal_text": f"обращение {i}"}).status_code
-             for i in range(6)]
+    class _Idle:  # брокер принимает, воркеров нет: задачи остаются queued
+        def send(self, task_name, msg, queue):
+            pass
+
+    api = make_client(_FakeAgent(), dispatcher=_Idle())
+    resps = [api.post("/integration/classify-document-async",
+                      json={"appeal_text": f"обращение {i}"}) for i in range(6)]
+    codes = [r.status_code for r in resps]
     assert 429 in codes
     assert codes.count(202) >= 3
+    assert resps[0].json()["queue_position"] == 1
+    refused = next(r for r in resps if r.status_code == 429)
+    assert refused.json()["detail"].startswith("Очередь заполнена: ")
 
 
 def test_queue_listing_shows_stats():
@@ -198,3 +189,80 @@ def test_odata_failure_surfaces_at_accept(monkeypatch):
     api = client(_FakeAgent())
     resp = api.post("/integration/classify-document-async", json={"document_id": 999})
     assert resp.status_code == 404
+
+
+def test_webhook_host_not_allowed_returns_400(monkeypatch):
+    monkeypatch.setattr(integration_api.config, "WEBHOOK_ALLOWED_HOSTS", ["rx.example"])
+    api = client(_FakeAgent())
+    resp = api.post("/integration/classify-document-async",
+                    json={"appeal_text": "текст", "webhook_url": "http://evil.example/hook"})
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == ("webhook_url не разрешён: хост не входит в "
+                                     "WEBHOOK_ALLOWED_HOSTS")
+    assert api.get("/integration/jobs").json()["jobs"] == [], "до записи в БД"
+
+
+def test_webhook_rejected_when_allowlist_empty(monkeypatch):
+    monkeypatch.setattr(integration_api.config, "WEBHOOK_ALLOWED_HOSTS", [])
+    resp = client(_FakeAgent()).post("/integration/classify-document-async",
+                                     json={"appeal_text": "текст",
+                                           "webhook_url": "http://rx.example/hook"})
+    assert resp.status_code == 400
+
+
+def test_webhook_delivered_on_done(monkeypatch):
+    from queueing import webhook
+    monkeypatch.setattr(integration_api.config, "WEBHOOK_ALLOWED_HOSTS", ["rx.example"])
+    delivered = []
+    monkeypatch.setattr(webhook, "deliver", lambda url, payload, **kw: delivered.append(
+        (url, payload)) or True)
+    api = client(_FakeAgent())
+    resp = api.post("/integration/classify-document-async",
+                    json={"appeal_text": "текст", "document_id": 26,
+                          "webhook_url": "http://rx.example/hook"})
+    assert resp.status_code == 202
+    job_id = resp.json()["job_id"]
+    poll_until_done(api, job_id)
+    deadline = time.time() + 5
+    while not delivered and time.time() < deadline:
+        time.sleep(0.05)
+    assert len(delivered) == 1
+    url, payload = delivered[0]
+    assert url == "http://rx.example/hook"
+    assert payload["job_id"] == job_id and payload["status"] == "done"
+    assert payload["result"]["questions"][0]["code"] == "0005.0005.0056.1160"
+
+
+def test_polling_job_created_by_classify_endpoint():
+    """504 у /classify отсылает к GET /integration/jobs/{id}: результат classify-вида."""
+    from storage import get_storage
+    storage = get_storage()
+    api = client(_FakeAgent())
+    result = {"log_id": "abc", "questions": [], "operator_card": "карточка"}
+    job = storage.jobs.create("classify", {"response_kind": "classify",
+                                           "queue": "classify_sync"})
+    storage.jobs.claim(job.id)
+    storage.jobs.finish(job.id, result, None)
+    body = api.get(f"/integration/jobs/{job.id}").json()
+    assert body["status"] == "done"
+    assert body["result"] == result
+
+
+def test_polling_non_classify_job_gives_404():
+    from storage import get_storage
+    job = get_storage().jobs.create("finetune", {}, queue_class="training")
+    assert client(_FakeAgent()).get(f"/integration/jobs/{job.id}").status_code == 404
+
+
+def test_sync_timeout_returns_504(monkeypatch):
+    api = client(_FakeAgent(delay=1.0))
+    monkeypatch.setattr(integration_api.config, "SYNC_WAIT_TIMEOUT_SEC", 0.2)
+    resp = api.post("/integration/classify-document", json={"appeal_text": "текст"})
+    assert resp.status_code == 504
+
+
+def test_sync_failure_returns_500():
+    resp = client(_FakeAgent(boom=True)).post("/integration/classify-document",
+                                              json={"appeal_text": "текст"})
+    assert resp.status_code == 500
+    assert resp.json()["detail"].startswith("Ошибка классификации: ")

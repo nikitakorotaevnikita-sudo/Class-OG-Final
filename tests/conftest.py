@@ -53,3 +53,11 @@ def pg_conn():
             conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
         finally:
             conn.close()
+
+
+@pytest.fixture(autouse=True)
+def _rx_harness_cleanup():
+    """Закрыть клиенты, созданные tests/rx_harness.make_client."""
+    yield
+    if "rx_harness" in sys.modules:
+        sys.modules["rx_harness"].cleanup()

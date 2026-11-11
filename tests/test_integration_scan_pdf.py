@@ -15,34 +15,20 @@ from pathlib import Path
 
 sys.path.insert(0, "src")
 
-import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
-import integration_api
 import rx_client
+from rx_harness import make_client
 import text_extractor
-
-
-@pytest.fixture(autouse=True)
-def isolated_queue(tmp_path, monkeypatch):
-    monkeypatch.setattr(integration_api, "_jobs", None)
-    monkeypatch.setattr(integration_api.config, "JOBS_DIR", str(tmp_path / "jobs"))
-    yield
 
 
 class _Agent:
     """Агент, который не должен быть вызван: до классификации дело не доходит."""
 
-    def classify(self, text):
+    def classify(self, text, llm_provider=None, llm_model=None, appeal_id=None, log_conn=None):
         raise AssertionError("классификация при нечитаемом документе не нужна")
 
 
-def _client() -> TestClient:
-    app = FastAPI()
-    app.include_router(integration_api.router)
-    app.state.agent = _Agent()
-    return TestClient(app)
+def _client():
+    return make_client(_Agent())
 
 
 def _raises(exc):
