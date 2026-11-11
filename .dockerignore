@@ -19,3 +19,6 @@ Template/
 .claude/
 logs/
 data/eval_baselines/
+
+# Локальные процессы start.sh: pid-файлы и логи
+run/

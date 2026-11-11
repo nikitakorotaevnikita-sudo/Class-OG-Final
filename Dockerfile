@@ -21,12 +21,17 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Копируем код и данные
 COPY src/ ./src/
+# Скрипты БД (init_db, migrate_from_files) — их запускает сервис migrate;
+# deploy/ — init-SQL и шаблоны развёртывания.
+COPY scripts/ ./scripts/
+COPY deploy/ ./deploy/
 COPY data/classifier_flat.json ./data/
 COPY data/classifier_hierarchy.json ./data/
 COPY data/test_appeals.json ./data/
-# Боевая база — adapted_v3 (VECTOR_DB_DIR в .env.example и монтирование в compose
-# указывают на неё). Каталог data/vector_db в .gitignore, на чистом клоне его нет,
-# и COPY по нему ронял сборку на стенде.
+# Боевая база — adapted_v3 (на неё указывает VECTOR_DB_DIR в .env.example; сервис
+# migrate импортирует её векторы в PostgreSQL как версию модели v0).
+# Каталог data/vector_db в .gitignore, на чистом клоне его нет, и COPY по нему
+# ронял сборку на стенде.
 COPY data/vector_db_adapted_v3/ ./data/vector_db_adapted_v3/
 COPY data/allowed_codes_top69.json ./data/allowed_codes_top69.json
 COPY models/adapter_v1.npz ./models/adapter_v1.npz
@@ -34,6 +39,11 @@ COPY models/adapter_v1.json ./models/adapter_v1.json
 COPY models/ltr_v1.json ./models/ltr_v1.json
 COPY .env.example .env
 
+# Модули из src/ импортируются верхним уровнем (`import config`,
+# `queueing.celery_app`) — нужно и celery-воркерам, и скриптам миграции.
+ENV PYTHONPATH=/app/src
+
 EXPOSE 8005
 
+# По умолчанию — API. Воркеры и migrate переопределяют command в docker-compose.yml.
 CMD ["uvicorn", "src.api_server:app", "--host", "0.0.0.0", "--port", "8005"]

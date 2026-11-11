@@ -2,7 +2,7 @@
 # Запуск прототипа на Linux. Аналог launch.bat.
 #
 #   ./launch.sh                 меню
-#   ./launch.sh server [порт]   API-сервис (по умолчанию 8010)
+#   ./launch.sh server [порт]   локальный стек через start.sh local (порт 8010)
 #   ./launch.sh check           проверка установки
 #   ./launch.sh tests           тесты классификатора
 #   ./launch.sh operator        режим оператора (верификация)
@@ -16,12 +16,6 @@ cd "$(dirname "$(readlink -f "$0")")"
 
 [ -x "$VENV_PY" ] || die "нет venv — сначала ./install.sh (или ./install_offline.sh)"
 
-VDB="$(vdb_dir)"
-# Каталог базы настраивается через VECTOR_DB_DIR: боевая сборка лежит в
-# data/vector_db_adapted_v3, поэтому проверять фиксированный путь нельзя.
-[ -f "$VDB/embeddings.npy" ] \
-    || die "векторная база не найдена в $VDB — запустить установщик или src/build_vectordb.py"
-
 # Порт: аргумент запуска, затем API_PORT из .env, затем 8010.
 default_port() {
     local configured
@@ -30,12 +24,14 @@ default_port() {
 ' "${configured:-8010}"
 }
 
+# Векторы классификатора теперь в PostgreSQL, классифицируют Celery-воркеры:
+# «server» поднимает весь локальный стек через start.sh local (PostgreSQL и
+# RabbitMQ в Docker, миграция, API и воркеры из venv).
 run_server() {
     local port="${1:-$(default_port)}"
+    say "server теперь запускает ./start.sh local (API + воркеры, БД в Docker)"
     say "провайдер LLM: $(get_env_key LLM_PROVIDER)"
-    say "векторная база: $VDB"
-    printf '   http://0.0.0.0:%s  (Ctrl+C — остановить)\n\n' "$port"
-    exec "$VENV_PY" -m uvicorn src.api_server:app --host 0.0.0.0 --port "$port"
+    exec bash ./start.sh local --port "$port"
 }
 
 case "${1:-menu}" in

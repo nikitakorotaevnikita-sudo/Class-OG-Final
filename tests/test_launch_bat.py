@@ -108,3 +108,17 @@ def test_provider_is_known_before_arguments_are_parsed():
 def test_empty_menu_input_does_not_loop():
     """При конце ввода `set /p` оставляет выбор пустым — меню крутилось вечно."""
     assert 'if "%CHOICE%"=="" goto :server' in BAT
+
+
+# ── Новый стек: PostgreSQL + воркеры ────────────────────────────────────────
+
+def test_server_mode_delegates_to_start_local():
+    """Классифицируют Celery-воркеры — один uvicorn без них ничего не обработает."""
+    assert "start.cmd\" local --port" in BAT
+    assert "start.sh local --port" in SH
+
+
+def test_missing_file_vector_db_does_not_block_startup():
+    """Векторы живут в PostgreSQL: проверка embeddings.npy больше не нужна."""
+    assert "embeddings.npy" not in BAT
+    assert "embeddings.npy" not in SH

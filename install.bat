@@ -276,6 +276,7 @@ if exist "data\vector_db\embeddings.npy" (
 echo.
 echo =====================================================
 echo   Installation complete! Run launch.bat to start.
+echo   Full stack: start.cmd (Docker) or start.cmd local (venv + DB in Docker)
 echo =====================================================
 echo.
 pause

@@ -62,11 +62,14 @@ def test_every_backoffice_field_is_in_the_example():
 
 
 def test_vector_db_matches_the_image_and_the_mount():
-    """База в .env.example, в COPY образа и в монтировании compose — одна и та же."""
+    """База в .env.example, в COPY образа и в источнике миграции compose — одна и та же."""
     db = (env_value("VECTOR_DB_DIR") or "").strip("/")
     assert db, "VECTOR_DB_DIR не задан"
     assert db in DOCKERFILE.replace("\\", "/"), "образ копирует другую базу"
-    assert db in COMPOSE.replace("\\", "/"), "compose монтирует другую базу"
+    # Векторы импортирует в PostgreSQL сервис migrate: ему монтируется весь
+    # ./data, так что база из VECTOR_DB_DIR должна лежать внутри data/.
+    assert db.startswith("data/"), "VECTOR_DB_DIR вне data/ — migrate её не увидит"
+    assert "./data:/app/data" in COMPOSE.replace(" ", ""), "compose не монтирует data/ в migrate"
 
 
 # ── Образ ───────────────────────────────────────────────────────────────────

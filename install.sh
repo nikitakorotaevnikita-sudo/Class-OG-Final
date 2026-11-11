@@ -175,7 +175,8 @@ if [ "$MAKE_SYSTEMD" = "1" ]; then
 fi
 
 banner "Установка завершена"
-printf '   Запуск:      ./launch.sh server %s\n' "$PORT"
+printf '   Запуск:      ./start.sh local --port %s  (или ./start.sh — весь стек в Docker)\n' "$PORT"
+printf '   Остановка:   ./stop.sh local\n'
 printf '   Проверка:    curl http://127.0.0.1:%s/health\n' "$PORT"
 printf '   Бэк-офис:    http://<адрес-машины>:%s/backoffice\n\n' "$PORT"
 exit "${CHECK_FAILED:-0}"

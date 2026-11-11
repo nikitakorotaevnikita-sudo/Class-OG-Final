@@ -1,42 +1,157 @@
-version: "3.9"
+# Стек классификатора: PostgreSQL + pgvector, RabbitMQ, разовая миграция,
+# тонкий API и Celery-воркеры. Запуск: ./start.sh (Linux) / start.cmd (Windows)
+# или напрямую `docker compose up -d --build` (+ `--profile training`).
+#
+# Остановка — `docker compose down` БЕЗ `-v`: том pgdata хранит тексты
+# обращений (ПДн по 59-ФЗ) и обязан переживать пересоздание контейнеров.
+#
+# Код живёт в src/ и импортируется верхним уровнем (`import config`,
+# `queueing.celery_app`), поэтому всем прикладным сервисам нужен PYTHONPATH=/app/src.
+
+# Общие настройки прикладных сервисов (migrate, api, воркеры).
+x-app-env: &app-env
+  # Адреса сервисов внутри compose-сети. Значения из .env (localhost) здесь
+  # перекрываются: внутри контейнера localhost — это сам контейнер.
+  DATABASE_URL: postgresql://${POSTGRES_USER:-classifier}:${POSTGRES_PASSWORD:-classifier}@postgres:5432/${POSTGRES_DB:-classifier}
+  RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-classifier}:${RABBITMQ_DEFAULT_PASS:-classifier}@rabbitmq:5672//
+  PYTHONPATH: /app/src
+  STORAGE_BACKEND: postgres
+
 services:
-  classifier:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-classifier}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-classifier}
+      POSTGRES_DB: ${POSTGRES_DB:-classifier}
+    volumes:
+      # Данные БД — в именованном томе. В Git и в образ не попадают.
+      - pgdata:/var/lib/postgresql/data
+      # Расширения и схема применяются при первом создании тома.
+      # На уже существующем томе схему догоняет сервис migrate (init_db.py).
+      - ./deploy/db/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      # Порт на хосте — для режима `start local` и обслуживания (psql).
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-classifier} -d ${POSTGRES_DB:-classifier}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-classifier}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-classifier}
+    ports:
+      - "5672:5672"
+      # Веб-консоль управления очередями: http://localhost:15672
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+    restart: unless-stopped
+
+  # Разовый шаг: схема (идемпотентно) + импорт файлового хранилища в БД.
+  # Повторный запуск безопасен; при расхождении сверки выходит с кодом 1,
+  # и api не стартует.
+  migrate:
     build: .
+    command: sh -c "python scripts/db/init_db.py && python scripts/db/migrate_from_files.py"
+    env_file: .env
+    environment: *app-env
+    volumes:
+      - ./.env:/app/.env
+      # Источники миграции: журналы, аннотации, векторная база VECTOR_DB_DIR
+      # (боевая data/vector_db_adapted_v3). Только чтение — файлы не меняются.
+      - ./data:/app/data:ro
+      # training_report.json дообученных моделей → реестр моделей.
+      - ./models:/app/models
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  # Тонкий API: без модели эмбеддингов и без файлов с ПДн. Всё — через БД и очередь.
+  api:
+    build: .
+    command: ["uvicorn", "src.api_server:app", "--host", "0.0.0.0", "--port", "8005"]
     ports:
       # host 8010 (адрес для разработчика/RX) → внутренний 8005 приложения.
       # При переносе на другую машину порт меняется через HOST_PORT в .env.
       - "${HOST_PORT:-8010}:8005"
+    env_file: .env
+    environment: *app-env
+    volumes:
+      # Хостовый .env: бэк-офис пишет в него настройки, воркеры подхватывают
+      # их на лету. Файл должен существовать до up (cp .env.example .env),
+      # иначе Docker создаст на его месте каталог.
+      - ./.env:/app/.env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Воркеры классификации. Масштабирование: docker compose up -d --scale worker-classify=3
+  worker-classify:
+    build: .
+    command: celery -A queueing.celery_app worker -Q classify_sync,classify -c ${CLASSIFY_CONCURRENCY:-2} --loglevel=INFO
+    env_file: .env
+    environment: *app-env
     extra_hosts:
       # На Linux Docker нет host.docker.internal по умолчанию. Нужно, чтобы
-      # контейнер видел Ollama / vLLM / RX на той же машине.
+      # воркер видел Ollama / vLLM / RX на той же машине.
       # В .env: OLLAMA_BASE_URL=http://host.docker.internal:11434/v1
       - "host.docker.internal:host-gateway"
     volumes:
-      # Хостовый .env. Без этого бэк-офис пишет настройки в слой образа,
-      # и они пропадают при recreate. Файл должен существовать до up
-      # (cp .env.example .env) — иначе Docker создаст каталог.
       - ./.env:/app/.env
-      # persistent storage for logs and fine-tuned models
-      - ./data/appeals_log.jsonl:/app/data/appeals_log.jsonl
-      - ./data/request_log.jsonl:/app/data/request_log.jsonl
-      - ./data/historical_verified.jsonl:/app/data/historical_verified.jsonl
-      - ./data/classifier_annotations.json:/app/data/classifier_annotations.json
-      # Фоновые задачи: без монтирования результаты живут только внутри
-      # контейнера и пропадают при его пересоздании
-      - ./data/jobs:/app/data/jobs
-      # Боевая векторная база — на запись: rebuild и apply_adapter из контейнера
-      # иначе упираются в Read-only file system, и права приходится чинить руками.
-      - ./data/vector_db_adapted_v3:/app/data/vector_db_adapted_v3
-      # Adapters and trained components
+      # Адаптеры, LTR и дообученные модели (активная версия — из реестра в БД).
       - ./models:/app/models
-      # Кэш моделей Hugging Face. Контейнер переиспользует веса, уже скачанные
-      # на хост; путь машинно-зависимый — задаётся HF_CACHE_DIR в .env.
-      # Монтируется на ЗАПИСЬ: при пустом кеше контейнер скачивает
-      # multilingual-e5-base (~435 МБ) и должен куда-то её положить. С :ro
-      # скачивание падало, даже когда интернет был.
+      # Кэш моделей Hugging Face. Путь машинно-зависимый — HF_CACHE_DIR в .env.
+      # На запись: при пустом кеше воркер скачивает multilingual-e5-base (~435 МБ).
       - ${HF_CACHE_DIR:-./.hf-cache}:/root/.cache/huggingface
-      # Allowed-codes whitelist (changes don't require image rebuild)
+      # Белый список кодов (правка без пересборки образа)
       - ./data/allowed_codes_top69.json:/app/data/allowed_codes_top69.json:ro
-    env_file:
-      - .env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
     restart: unless-stopped
+
+  # Дообучение — один процесс, включается профилем: --profile training.
+  worker-training:
+    build: .
+    command: celery -A queueing.celery_app worker -Q training -c 1 --loglevel=INFO
+    profiles: [training]
+    env_file: .env
+    environment: *app-env
+    volumes:
+      - ./.env:/app/.env
+      # Сюда пишутся новые версии модели (models/e5-finetuned-vN).
+      - ./models:/app/models
+      - ${HF_CACHE_DIR:-./.hf-cache}:/root/.cache/huggingface
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    # GPU для дообучения: раскомментировать на хосте с NVIDIA Container Toolkit
+    # и собрать образ с CUDA-torch (--build-arg TORCH_INDEX_URL=.../cu124).
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+volumes:
+  pgdata:

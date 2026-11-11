@@ -278,9 +278,8 @@ if !errorlevel! neq 0 (
 echo.
 echo =====================================================
 echo   OFFLINE Installation complete!
-echo   Start the service:
-echo     venv\Scripts\python.exe -m uvicorn src.api_server:app ^
-echo         --host 0.0.0.0 --port 8010
+echo   Start the service ^(PostgreSQL + RabbitMQ in Docker, API and workers^):
+echo     start.cmd local      ^(stop: stop.cmd local^)
 echo   Or run launch.bat for the interactive menu.
 echo =====================================================
 echo.

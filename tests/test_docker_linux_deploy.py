@@ -39,12 +39,15 @@ def test_compose_has_host_gateway():
     assert "host-gateway" in text
 
 
-def test_compose_vector_db_is_writable():
-    text = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
-    assert "vector_db_adapted_v3:/app/data/vector_db_adapted_v3" in text.replace(" ", "")
-    assert "vector_db_adapted_v3:/app/data/vector_db_adapted_v3:ro" not in text.replace(" ", ""), (
-        ":ro на боевой базе блокирует rebuild/adapter apply внутри контейнера"
-    )
+def test_compose_vector_db_reaches_the_migration():
+    """Векторы теперь живут в PostgreSQL: файловую базу читает только migrate.
+
+    Раньше база монтировалась на запись ради rebuild/apply_adapter в контейнере;
+    теперь пересборка пишет в БД, а migrate импортирует VECTOR_DB_DIR из ./data.
+    """
+    text = (ROOT / "docker-compose.yml").read_text(encoding="utf-8").replace(" ", "")
+    assert "./data:/app/data:ro" in text, "migrate должен видеть data/ (и VECTOR_DB_DIR)"
+    assert "vector_db_adapted_v3:/app/data/vector_db_adapted_v3:ro" not in text
 
 
 def test_dockerignore_excludes_heavy_paths():

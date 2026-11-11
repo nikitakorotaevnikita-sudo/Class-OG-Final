@@ -4,7 +4,7 @@ setlocal enabledelayedexpansion
 :: Launcher for the appeals classifier (Windows). Linux analogue: launch.sh
 ::
 ::   launch.bat                menu
-::   launch.bat server [port]  API service (default 8010)
+::   launch.bat server [port]  local stack via start.cmd local (default 8010)
 ::   launch.bat check          verify the installation
 ::   launch.bat tests          test suite
 ::   launch.bat operator       operator mode (verification)
@@ -26,22 +26,6 @@ if not exist "venv\Scripts\python.exe" (
     exit /b 1
 )
 set "PY=venv\Scripts\python.exe"
-
-:: The DB directory is configurable (VECTOR_DB_DIR): an adapted build lives in
-:: data\vector_db_adapted_v3, so a hardcoded path blocked a healthy install.
-set "VDB_DIR=data\vector_db"
-for /f "tokens=2 delims==" %%a in ('findstr /R "^VECTOR_DB_DIR=" .env 2^>nul') do set "VDB_CFG=%%a"
-if defined VDB_CFG (
-    for %%p in ("!VDB_CFG!") do set "VDB_DIR=data\%%~nxp"
-)
-
-if not exist "!VDB_DIR!\embeddings.npy" (
-    echo ERROR: Vector DB not found in !VDB_DIR!.
-    echo        Run install.bat / install_offline.bat, or build it:
-    echo        %PY% src\build_vectordb.py
-    pause
-    exit /b 1
-)
 
 :: Port fixed by the operator in .env, if any.
 set "PORT=%DEFAULT_PORT%"
@@ -84,7 +68,7 @@ echo   [6] Operator mode  (verify + fine-tuning)
 echo   [7] Select LLM provider
 echo ================================================
 
-echo   Current LLM: !CURRENT_LLM!    Vector DB: !VDB_DIR!
+echo   Current LLM: !CURRENT_LLM!
 echo.
 
 set "CHOICE="
@@ -110,14 +94,14 @@ set /p ASK_PORT=Port [!PORT!]:
 if not "!ASK_PORT!"=="" set "PORT=!ASK_PORT!"
 
 :server
+:: Classifier vectors live in PostgreSQL now and classification runs in Celery
+:: workers, so "server" starts the whole local stack through start.cmd local:
+:: PostgreSQL + RabbitMQ in Docker, migration, API window and worker windows.
 echo.
+echo   NOTE: "server" now runs "start.cmd local" ^(API + workers, DB in Docker^).
 echo   LLM provider: !CURRENT_LLM!
-echo   Listening on http://0.0.0.0:!PORT!   (Ctrl+C to stop)
-echo   Back office:  http://localhost:!PORT!/backoffice
 echo.
-:: Autoreload is deliberately off: it restarts the service on every file change
-:: and doubles the memory taken by the embedding model.
-%PY% -m uvicorn src.api_server:app --host 0.0.0.0 --port !PORT!
+call "%PROJECT%\start.cmd" local --port !PORT!
 goto :end
 
 :check
@@ -138,7 +122,7 @@ goto :end
 
 :help
 echo   launch.bat                menu
-echo   launch.bat server [port]  API service (default %DEFAULT_PORT%)
+echo   launch.bat server [port]  local stack via start.cmd local (default %DEFAULT_PORT%)
 echo   launch.bat check          verify the installation
 echo   launch.bat tests          test suite
 echo   launch.bat operator       operator mode
