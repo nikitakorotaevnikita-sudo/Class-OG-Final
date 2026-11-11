@@ -148,6 +148,23 @@ def test_finish_notifies_memory():
     assert seen == [job.id]
 
 
+def test_raising_listener_does_not_break_finish():
+    from storage.memory import MemoryStorage
+
+    st = MemoryStorage()
+    seen = []
+
+    def bad(_job_id):
+        raise RuntimeError("сбой слушателя")
+
+    st.jobs.add_listener(bad)
+    st.jobs.add_listener(seen.append)
+    job = st.jobs.create("classify", {})
+    assert st.jobs.finish(job.id, {"ok": 1}, None) is True
+    assert seen == [job.id]
+    assert st.jobs.get(job.id).status == STATUS_DONE
+
+
 @pytest.mark.db
 def test_finish_notifies_pg(pg_conn):
     import psycopg

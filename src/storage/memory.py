@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import dataclasses
+import logging
 import threading
 import re
 import uuid
@@ -14,6 +15,8 @@ import numpy as np
 from . import appeal_common as ac
 from .models import (STATUS_DONE, STATUS_ERROR, STATUS_QUEUED, STATUS_RUNNING,
                      AppealResult, ClassifierEntry, Job, ModelVersion, QueueFull, Storage)
+
+logger = logging.getLogger(__name__)
 
 _ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
@@ -408,7 +411,10 @@ class MemoryJobStore:
             job.finished_at = _utcnow()
             listeners = list(self._listeners)
         for fn in listeners:
-            fn(job_id)
+            try:
+                fn(job_id)
+            except Exception:  # noqa: BLE001 — сбой слушателя не должен ломать finish
+                logger.exception("слушатель job_done упал для задачи %s", job_id)
         return True
 
     def position(self, job_id):
