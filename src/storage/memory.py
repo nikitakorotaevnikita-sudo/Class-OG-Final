@@ -5,12 +5,17 @@ from __future__ import annotations
 import copy
 import dataclasses
 import threading
+import re
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
 
 from . import appeal_common as ac
-from .models import AppealResult, ClassifierEntry, ModelVersion, Storage
+from .models import (STATUS_DONE, STATUS_ERROR, STATUS_QUEUED, STATUS_RUNNING,
+                     AppealResult, ClassifierEntry, Job, ModelVersion, QueueFull, Storage)
+
+_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
 
 class MemoryModelStore:
@@ -316,9 +321,159 @@ class MemoryAppealStore:
                 card["elapsed_seconds"] = elapsed_seconds
 
 
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+class MemoryJobStore:
+    def __init__(self) -> None:
+        self._jobs: dict[str, Job] = {}
+        self._seq: dict[str, int] = {}
+        self._next_seq = 0
+        self._listeners: list = []
+        self._lock = threading.RLock()
+
+    # --- эмуляция NOTIFY job_done ---
+    def add_listener(self, fn) -> None:
+        with self._lock:
+            self._listeners.append(fn)
+
+    def remove_listener(self, fn) -> None:
+        with self._lock:
+            if fn in self._listeners:
+                self._listeners.remove(fn)
+
+    @staticmethod
+    def _queue_of(job: Job) -> str:
+        return (job.payload or {}).get("queue", "classify")
+
+    def _order(self, job: Job):
+        return (job.created_at, self._seq[job.id])
+
+    def _store(self, job: Job) -> None:
+        self._jobs[job.id] = job
+        self._seq[job.id] = self._next_seq
+        self._next_seq += 1
+
+    def create(self, job_type, payload, appeal_id=None, document_id=None, webhook_url=None,
+               max_queued=None, queue_class="classify"):
+        with self._lock:
+            if max_queued is not None:
+                queued = sum(
+                    1 for j in self._jobs.values()
+                    if j.status == STATUS_QUEUED and j.job_type == job_type
+                    and self._queue_of(j) == queue_class
+                )
+                if queued >= max_queued:
+                    raise QueueFull(f"в очереди уже {queued} задач, лимит {max_queued}")
+            job = Job(
+                id=uuid.uuid4().hex, job_type=job_type, status=STATUS_QUEUED,
+                appeal_id=ac.norm_uuid(appeal_id) if appeal_id else None,
+                document_id=document_id, webhook_url=webhook_url,
+                payload={**copy.deepcopy(payload), "queue": queue_class},
+                result=None, error=None, attempts=0, created_at=_utcnow(),
+            )
+            self._store(job)
+            return copy.deepcopy(job)
+
+    def get(self, job_id):
+        if not _ID_RE.match(job_id or ""):
+            return None
+        with self._lock:
+            job = self._jobs.get(job_id)
+            return copy.deepcopy(job) if job else None
+
+    def claim(self, job_id):
+        if not _ID_RE.match(job_id or ""):
+            return None
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None or job.status not in (STATUS_QUEUED, STATUS_RUNNING):
+                return None
+            job.status = STATUS_RUNNING
+            job.attempts += 1
+            job.started_at = _utcnow()
+            return copy.deepcopy(job)
+
+    def finish(self, job_id, result, error, conn=None):
+        if not _ID_RE.match(job_id or ""):
+            return False
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None or job.status not in (STATUS_QUEUED, STATUS_RUNNING):
+                return False
+            job.status = STATUS_ERROR if error is not None else STATUS_DONE
+            job.result = copy.deepcopy(result)
+            job.error = error
+            job.finished_at = _utcnow()
+            listeners = list(self._listeners)
+        for fn in listeners:
+            fn(job_id)
+        return True
+
+    def position(self, job_id):
+        if not _ID_RE.match(job_id or ""):
+            return None
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None or job.status != STATUS_QUEUED:
+                return None
+            waiting = sorted(
+                (j for j in self._jobs.values()
+                 if j.status == STATUS_QUEUED and j.job_type == job.job_type
+                 and self._queue_of(j) == self._queue_of(job)),
+                key=self._order,
+            )
+            return next((i + 1 for i, j in enumerate(waiting) if j.id == job_id), None)
+
+    def list(self, limit=50, job_type=None):
+        with self._lock:
+            jobs = [j for j in self._jobs.values() if job_type is None or j.job_type == job_type]
+            jobs.sort(key=self._order, reverse=True)
+            return [copy.deepcopy(j) for j in jobs[:limit]]
+
+    def stats(self):
+        with self._lock:
+            counts = {STATUS_QUEUED: 0, STATUS_RUNNING: 0, STATUS_DONE: 0, STATUS_ERROR: 0}
+            for j in self._jobs.values():
+                counts[j.status] += 1
+            return counts
+
+    def latest(self, job_type):
+        found = self.list(limit=1, job_type=job_type)
+        return found[0] if found else None
+
+    def has_active(self, job_type):
+        with self._lock:
+            return any(
+                j.job_type == job_type and j.status in (STATUS_QUEUED, STATUS_RUNNING)
+                for j in self._jobs.values()
+            )
+
+    def cleanup_expired(self, ttl_hours):
+        # Сравнение нестрогое (как в старой очереди): метки времени могут совпасть.
+        deadline = _utcnow() - timedelta(hours=ttl_hours)
+        with self._lock:
+            stale = [
+                j.id for j in self._jobs.values()
+                if j.status in (STATUS_DONE, STATUS_ERROR)
+                and (j.finished_at or j.created_at) <= deadline
+            ]
+            for jid in stale:
+                del self._jobs[jid]
+                del self._seq[jid]
+            return len(stale)
+
+    def import_job(self, job):
+        with self._lock:
+            if job.id not in self._jobs:
+                self._store(copy.deepcopy(job))
+
+
 class MemoryStorage(Storage):
     def __init__(self) -> None:
         models = MemoryModelStore()
         super().__init__(
-            classifier=MemoryClassifierStore(models), models=models, appeals=MemoryAppealStore()
+            classifier=MemoryClassifierStore(models), models=models,
+            appeals=MemoryAppealStore(), jobs=MemoryJobStore(),
         )
