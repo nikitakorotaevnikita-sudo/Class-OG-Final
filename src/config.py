@@ -221,3 +221,25 @@ def _via_proxy(name: str) -> Optional[bool]:
 
 RX_VIA_PROXY: Optional[bool] = _via_proxy("RX_VIA_PROXY")
 LLM_VIA_PROXY: Optional[bool] = _via_proxy("LLM_VIA_PROXY")
+
+
+# ── PostgreSQL / RabbitMQ / воркеры ─────────────────────────────────────────────
+def _flag(name: str, default: str = "false") -> bool:
+    return os.getenv(name, default).strip().lower() == "true"
+
+
+STORAGE_BACKEND: str = os.getenv("STORAGE_BACKEND", "postgres")  # "postgres" | "memory" (тесты)
+DATABASE_URL: str = os.getenv(
+    "DATABASE_URL", "postgresql://classifier:classifier@localhost:5432/classifier"
+)
+DB_POOL_MAX: int = int(os.getenv("DB_POOL_MAX", "10"))
+RABBITMQ_URL: str = os.getenv("RABBITMQ_URL", "amqp://classifier:classifier@localhost:5672//")
+CLASSIFY_CONCURRENCY: int = int(os.getenv("CLASSIFY_CONCURRENCY", "2"))
+CLASSIFY_WORKERS: int = int(os.getenv("CLASSIFY_WORKERS", "2"))
+SYNC_WAIT_TIMEOUT_SEC: int = int(os.getenv("SYNC_WAIT_TIMEOUT_SEC", "1800"))
+JOB_MAX_ATTEMPTS: int = max(1, int(os.getenv("JOB_MAX_ATTEMPTS", "2")))
+ENABLE_ANNOTATION_VECTORS: bool = _flag("ENABLE_ANNOTATION_VECTORS")
+WEBHOOK_ALLOWED_HOSTS: list[str] = [
+    h.strip() for h in os.getenv("WEBHOOK_ALLOWED_HOSTS", "").split(",") if h.strip()
+]
+WEBHOOK_SECRET: str = os.getenv("WEBHOOK_SECRET", "")
