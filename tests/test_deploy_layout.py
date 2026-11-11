@@ -122,7 +122,6 @@ def test_classify_worker_command_and_mounts():
     assert "/root/.cache/huggingface" in vols
     assert "./models:/app/models" in vols
     assert "allowed_codes_top69.json" in vols
-    assert "host.docker.internal:host-gateway" in services()["worker-classify"]["extra_hosts"]
 
 
 def test_training_worker_is_single_and_optional():
@@ -145,6 +144,21 @@ def test_app_services_share_env_and_point_at_compose_hosts(name):
     assert "@rabbitmq:5672/" in env["RABBITMQ_URL"]
     assert env["PYTHONPATH"] == "/app/src"
     assert env["STORAGE_BACKEND"] == "postgres"
+
+
+@pytest.mark.parametrize("name", ["api", "worker-classify", "worker-training"])
+def test_app_services_see_the_host(name):
+    """RX / LLM на той же машине: api ходит в RX, воркеры — в LLM."""
+    assert "host.docker.internal:host-gateway" in services()[name].get("extra_hosts", [])
+
+
+def test_infra_ports_bound_to_loopback_by_default():
+    """В БД ПДн, пароли по умолчанию classifier — наружу только осознанно."""
+    pg = [str(p) for p in services()["postgres"]["ports"]]
+    assert pg == ["${POSTGRES_BIND:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"]
+    rmq = [str(p) for p in services()["rabbitmq"]["ports"]]
+    assert rmq and all(p.startswith("${RABBITMQ_BIND:-127.0.0.1}:") for p in rmq)
+    assert {p.rsplit(":", 1)[1] for p in rmq} == {"5672", "15672"}
 
 
 # ── Образ ───────────────────────────────────────────────────────────────────
@@ -236,6 +250,7 @@ def test_run_dir_is_ignored():
     "JOB_MAX_ATTEMPTS", "ENABLE_ANNOTATION_VECTORS", "WEBHOOK_ALLOWED_HOSTS",
     "WEBHOOK_SECRET", "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB",
     "POSTGRES_PORT", "RABBITMQ_DEFAULT_USER", "RABBITMQ_DEFAULT_PASS",
+    "POSTGRES_BIND", "RABBITMQ_BIND",
 ])
 def test_env_example_declares_key_once(key):
     text = (ROOT / ".env.example").read_text(encoding="utf-8")

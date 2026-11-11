@@ -32,7 +32,9 @@ services:
       - ./deploy/db/init:/docker-entrypoint-initdb.d:ro
     ports:
       # Порт на хосте — для режима `start local` и обслуживания (psql).
-      - "${POSTGRES_PORT:-5432}:5432"
+      # По умолчанию только loopback: в БД ПДн. 0.0.0.0 (POSTGRES_BIND) — лишь
+      # для нескольких машин и только после смены POSTGRES_PASSWORD.
+      - "${POSTGRES_BIND:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-classifier} -d ${POSTGRES_DB:-classifier}"]
       interval: 5s
@@ -46,9 +48,11 @@ services:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-classifier}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-classifier}
     ports:
-      - "5672:5672"
+      # Только loopback по умолчанию (RABBITMQ_BIND); наружу — для нескольких
+      # машин и только после смены RABBITMQ_DEFAULT_PASS.
+      - "${RABBITMQ_BIND:-127.0.0.1}:5672:5672"
       # Веб-консоль управления очередями: http://localhost:15672
-      - "15672:15672"
+      - "${RABBITMQ_BIND:-127.0.0.1}:15672:15672"
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
@@ -84,6 +88,9 @@ services:
       # host 8010 (адрес для разработчика/RX) → внутренний 8005 приложения.
       # При переносе на другую машину порт меняется через HOST_PORT в .env.
       - "${HOST_PORT:-8010}:8005"
+    extra_hosts:
+      # API ходит в RX (rx_client): .env может указывать RX на host.docker.internal.
+      - "host.docker.internal:host-gateway"
     env_file: .env
     environment: *app-env
     volumes:
@@ -131,6 +138,8 @@ services:
     command: celery -A queueing.celery_app worker -Q training -c 1 --loglevel=INFO
     profiles: [training]
     env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment: *app-env
     volumes:
       - ./.env:/app/.env

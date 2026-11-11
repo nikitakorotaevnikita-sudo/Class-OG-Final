@@ -512,8 +512,8 @@ Directum RX / UI ──HTTP──► API (FastAPI, без модели)
 
 | Сервис | Что делает |
 |---|---|
-| `postgres` | `pgvector/pgvector:pg16`, данные в томе `pgdata`, схема из `deploy/db/init/` при первом создании тома. Порт на хосте — `POSTGRES_PORT` (5432) |
-| `rabbitmq` | `rabbitmq:3.13-management`, порты 5672 и 15672 (веб-консоль очередей) |
+| `postgres` | `pgvector/pgvector:pg16`, данные в томе `pgdata`, схема из `deploy/db/init/` при первом создании тома. Порт на хосте — `127.0.0.1:POSTGRES_PORT` (5432) |
+| `rabbitmq` | `rabbitmq:3.13-management`, порты 5672 и 15672 (веб-консоль очередей), по умолчанию только на `127.0.0.1` |
 | `migrate` | разовый: `init_db.py` (схема, идемпотентно) + `migrate_from_files.py` (импорт файлов). При расхождении сверки выходит с ошибкой, и API не стартует |
 | `api` | uvicorn, `HOST_PORT` (8010) → 8005. Без модели и без файлов с ПДн |
 | `worker-classify` | `-Q classify_sync,classify -c CLASSIFY_CONCURRENCY`; масштабируется `docker compose up -d --scale worker-classify=3` |
@@ -582,7 +582,11 @@ Directum RX / UI ──HTTP──► API (FastAPI, без модели)
 
 Текущая версия собрана и проверена на одной машине. Для разнесения воркеров по нескольким хостам:
 
-- PostgreSQL и RabbitMQ остаются общими (одна машина или отдельные серверы);
+- PostgreSQL и RabbitMQ остаются общими (одна машина или отдельные серверы). По умолчанию compose
+  публикует их только на `127.0.0.1` (`POSTGRES_BIND`, `RABBITMQ_BIND`); для доступа с других хостов
+  задать `0.0.0.0` (или адрес нужного интерфейса) — **только после смены** `POSTGRES_PASSWORD` и
+  `RABBITMQ_DEFAULT_PASS` и, желательно, с ограничением доступа файрволом. Пароли без символов
+  `@ / :` — они подставляются в `DATABASE_URL`/`RABBITMQ_URL` без экранирования;
 - на каждом хосте воркера — свой `.env`, в котором `DATABASE_URL` и `RABBITMQ_URL` указывают на
   общие сервисы (не на `localhost`);
 - каталог `models/` — общая сетевая папка (NFS/SMB), смонтированная на всех хостах по одному
