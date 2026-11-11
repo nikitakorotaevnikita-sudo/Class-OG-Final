@@ -10,7 +10,7 @@
 # Остановка: ./stop.sh [docker|local]. Логи локального режима — run/*.log.
 
 set -euo pipefail
-cd "$(dirname "$(readlink -f "$0")")"
+cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 
 # shellcheck source=scripts/install_common.sh
 . scripts/install_common.sh
@@ -60,19 +60,87 @@ require_venv() {
     [ -x "$VENV_PY" ] || die "нет venv — сначала ./install.sh (или ./install_offline.sh)"
 }
 
-# Ждёт GET /health: 60 попыток по 2 секунды.
+# Ждёт GET /health: 60 попыток по 2 секунды. /health всегда отвечает 200 —
+# готовность определяется по телу: нужны "db":true и "broker":true.
 wait_health() {
-    local url="http://localhost:$1/health" i
+    local url="http://localhost:$1/health" i body seen=0 db=0 mq=0
     say "жду готовности API: $url"
     for i in $(seq 1 60); do
         if command -v curl >/dev/null 2>&1; then
-            curl -fsS -o /dev/null --max-time 5 "$url" 2>/dev/null && { ok "API отвечает: $url"; return 0; }
+            body="$(curl -fsS --max-time 5 "$url" 2>/dev/null)" || body=""
         else
-            wget -q -O /dev/null -T 5 "$url" 2>/dev/null && { ok "API отвечает: $url"; return 0; }
+            body="$(wget -q -O - -T 5 "$url" 2>/dev/null)" || body=""
+        fi
+        if [ -n "$body" ]; then
+            seen=1
+            case "$body" in *'"db":true'*) db=1 ;; *) db=0 ;; esac
+            case "$body" in *'"broker":true'*) mq=1 ;; *) mq=0 ;; esac
+            if [ "$db$mq" = "11" ]; then
+                ok "API отвечает, БД и брокер доступны: $url"
+                return 0
+            fi
         fi
         sleep 2
     done
+    if [ "$seen" = "1" ]; then
+        [ "$db" = "1" ] || warn "API не видит PostgreSQL (\"db\": false)"
+        [ "$mq" = "1" ] || warn "API не видит RabbitMQ (\"broker\": false)"
+        die "API отвечает, но не готов за 120 с. Docker: docker compose logs api; локально: run/api.log"
+    fi
     die "API не ответил за 120 с. Docker: docker compose logs api; локально: run/api.log"
+}
+
+# Значение: переменная окружения, иначе активная строка .env, иначе по умолчанию.
+env_or_file() {
+    local current="${!1:-}"
+    if [ -n "$current" ]; then
+        printf '%s\n' "$current"
+    else
+        env_value "$1" "$2"
+    fi
+}
+
+# host:port из URL вида scheme://user:pass@host:port/...; без порта — порт по умолчанию.
+url_hostport() {
+    local rest="${1#*://}"
+    rest="${rest##*@}"
+    rest="${rest%%/*}"
+    case "$rest" in
+        *:*) printf '%s\n' "$rest" ;;
+        *) printf '%s:%s\n' "$rest" "$2" ;;
+    esac
+}
+
+# DATABASE_URL / RABBITMQ_URL для local и migrate. Не заданы (ни в окружении, ни в
+# .env) — собираются из учётных данных compose и портов POSTGRES_PORT /
+# RABBITMQ_PORT: иначе config взял бы localhost:5432/5672, где может работать
+# чужой («родной») PostgreSQL или RabbitMQ. Заданы, но порт расходится с
+# POSTGRES_PORT / RABBITMQ_PORT — остановка с понятной ошибкой.
+resolve_service_urls() {
+    local db_url mq_url pg_port_set mq_port_set db_hp mq_hp
+    db_url="$(env_or_file DATABASE_URL "")"
+    mq_url="$(env_or_file RABBITMQ_URL "")"
+    pg_port_set="$(env_or_file POSTGRES_PORT "")"
+    mq_port_set="$(env_or_file RABBITMQ_PORT "")"
+
+    if [ -z "$db_url" ]; then
+        db_url="postgresql://$(env_or_file POSTGRES_USER classifier):$(env_or_file POSTGRES_PASSWORD classifier)@localhost:${pg_port_set:-5432}/$(env_or_file POSTGRES_DB classifier)"
+    fi
+    db_hp="$(url_hostport "$db_url" 5432)"
+    if [ -n "$pg_port_set" ] && [ "${db_hp##*:}" != "$pg_port_set" ]; then
+        die "DATABASE_URL указывает на порт ${db_hp##*:}, а POSTGRES_PORT=$pg_port_set — исправить одно из них в .env (иначе подключение уйдёт к другому PostgreSQL)"
+    fi
+
+    if [ -z "$mq_url" ]; then
+        mq_url="amqp://$(env_or_file RABBITMQ_DEFAULT_USER classifier):$(env_or_file RABBITMQ_DEFAULT_PASS classifier)@localhost:${mq_port_set:-5672}//"
+    fi
+    mq_hp="$(url_hostport "$mq_url" 5672)"
+    if [ -n "$mq_port_set" ] && [ "${mq_hp##*:}" != "$mq_port_set" ]; then
+        die "RABBITMQ_URL указывает на порт ${mq_hp##*:}, а RABBITMQ_PORT=$mq_port_set — исправить одно из них в .env (иначе подключение уйдёт к другому RabbitMQ)"
+    fi
+
+    export DATABASE_URL="$db_url" RABBITMQ_URL="$mq_url"
+    say "PostgreSQL: $db_hp   RabbitMQ: $mq_hp"
 }
 
 # Модули из src/ импортируются верхним уровнем (import config, queueing.celery_app).
@@ -83,9 +151,10 @@ export_pythonpath() {
 run_migrate() {
     require_venv
     export_pythonpath
+    resolve_service_urls
     step 1 "Схема БД"
     "$VENV_PY" scripts/db/init_db.py
-    step 2 "Импорт файлового хранилища в БД (повторный запуск безопасен)"
+    step 2 "Импорт файлового хранилища в БД (после успешного переноса — пропуск)"
     "$VENV_PY" scripts/db/migrate_from_files.py \
         || die "сверка миграции не сошлась — смотреть таблицу выше; сервис не запускаю"
 }
@@ -119,6 +188,7 @@ start_local() {
     require_venv
     ensure_env
     banner "Локальный запуск: инфраструктура в Docker, сервис из venv"
+    resolve_service_urls  # до docker compose: ошибка портов — сразу
     step 0 "PostgreSQL и RabbitMQ"
     docker compose up -d --wait postgres rabbitmq
     run_migrate
@@ -141,6 +211,11 @@ start_local() {
     wait_health "$port"
     say "бэк-офис: http://localhost:$port/backoffice   остановка: ./stop.sh local"
 }
+
+# Подключение через `source` (тесты функций) — без запуска.
+if [ "${BASH_SOURCE[0]}" != "$0" ]; then
+    return 0
+fi
 
 case "$MODE" in
     docker) start_docker ;;

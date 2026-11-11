@@ -36,11 +36,17 @@ docker compose --profile training down
 exit /b %errorlevel%
 
 :local
-:: start.cmd local gives every window a title starting with "classifier-".
-:: /T also ends the python process started inside the window. A task killed
-:: mid-classification is not lost: acks_late returns it to the queue.
-taskkill /F /T /FI "WINDOWTITLE eq classifier-*"
-echo   OK: classifier-* windows closed ^(if any were open^).
+:: 1) Python processes of THIS project: API (uvicorn src.api_server:app) and
+::    Celery workers (queueing.celery_app) whose executable path or command
+::    line lies under the project folder. Window titles are not reliable: an
+::    elevated console prefixes them ("Administrator: classifier-api").
+::    /T also ends children (the venv launcher starts the real interpreter).
+::    A task killed mid-classification is not lost: acks_late re-queues it.
+set "PROJ=%~dp0"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$root = $env:PROJ.TrimEnd('\'); Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'python.exe' -and $_.CommandLine -match 'queueing\.celery_app|src\.api_server:app|uvicorn' -and ((($_.ExecutablePath) -and $_.ExecutablePath.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) -or $_.CommandLine.IndexOf($root, [StringComparison]::OrdinalIgnoreCase) -ge 0) } | ForEach-Object { taskkill /F /T /PID $_.ProcessId 2>$null | Out-Null; Write-Output ('  stopped PID ' + $_.ProcessId) }"
+:: 2) Leftover cmd windows of start.cmd local (titles start with "classifier-").
+taskkill /F /T /FI "WINDOWTITLE eq classifier-*" >nul 2>&1
+echo   OK: classifier processes and windows closed ^(if any were open^).
 where docker >nul 2>&1
 if not errorlevel 1 (
     rem stop, not down: containers and the data volume stay.

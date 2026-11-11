@@ -530,7 +530,7 @@ Directum RX / UI ──HTTP──► API (FastAPI, без модели)
 | `start.cmd local --port 9100` | локальный режим на другом порту (иначе `API_PORT` из `.env`) |
 | `start.cmd migrate` | только схема + импорт файлов (БД должна быть запущена) |
 | `stop.cmd` / `./stop.sh` | `docker compose down` — контейнеры удаляются, **том `pgdata` остаётся** |
-| `stop.cmd local` / `./stop.sh local` | закрыть окна `classifier-*` / процессы из `run/*.pid`, остановить PostgreSQL и RabbitMQ |
+| `stop.cmd local` / `./stop.sh local` | Windows: завершить процессы `python.exe` этого проекта (API и воркеры Celery — по командной строке и пути к интерпретатору, в том числе из консоли администратора), затем закрыть оставшиеся окна `classifier-*`; Linux: процессы из `run/*.pid`. Затем остановить PostgreSQL и RabbitMQ |
 
 Если `.env` нет, скрипт создаёт его из `.env.example` и предупреждает: заполнить ключи LLM и
 пароли до первого запуска (пароль PostgreSQL запоминается томом при его создании).
@@ -558,6 +558,14 @@ Directum RX / UI ──HTTP──► API (FastAPI, без модели)
 ### Эксплуатация
 
 - **Порты заняты родными PostgreSQL/RabbitMQ.** Если на хосте уже работают свои PostgreSQL (5432) или RabbitMQ (5672/15672), задать в `.env` другие `POSTGRES_PORT` / `RABBITMQ_PORT` / `RABBITMQ_MGMT_PORT` (например 5434 / 5673 / 15673) и те же порты в `DATABASE_URL` / `RABBITMQ_URL` — иначе локальный режим подключится к чужим серверам.
+- **Адреса БД и брокера в `start.* local` / `start.* migrate`.** Если `DATABASE_URL` / `RABBITMQ_URL`
+  не заданы ни в окружении, ни в `.env`, скрипт собирает их из `POSTGRES_USER/PASSWORD/DB` +
+  `localhost` + `POSTGRES_PORT` (по умолчанию 5432) и из `RABBITMQ_DEFAULT_USER/PASS` +
+  `RABBITMQ_PORT` (5672). Если они заданы, но порт в URL не совпадает с `POSTGRES_PORT` /
+  `RABBITMQ_PORT`, скрипт останавливается с ошибкой. Перед запуском печатаются используемые
+  `хост:порт` (пароли — никогда).
+- **Готовность после запуска.** `GET /health` всегда отвечает `200`, поэтому `start.*` ждут в теле
+  `"db":true` и `"broker":true`; если за 120 с этого нет, сообщают, что недоступно — БД или брокер.
 - **Долгие задачи и RabbitMQ.** Задачи подтверждаются после выполнения (`acks_late`), а
   RabbitMQ по умолчанию через 30 минут закрывает канал с неподтверждённым сообщением
   (`consumer_timeout`) и отдаёт задачу другому воркеру — дообучение идёт часами. В compose
