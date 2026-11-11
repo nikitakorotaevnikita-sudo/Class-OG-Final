@@ -341,3 +341,29 @@ def test_parity_numpy_vs_store():
     tie = [(np_top[0][0], 0.5), (np_top[1][0], 0.5 + 1e-7)]
     tie_all = {np_top[0][0]: 0.5, np_top[1][0]: 0.5 + 1e-7}
     assert mod.compare_topk(tie, list(reversed(tie)), tie_all) is None
+
+
+def test_agent_metadata_keeps_store_order(fake_st):
+    """Порядок self.metadata = порядок classifier_flat.json (не сортировка по коду)."""
+    s = MemoryStorage()
+    given = [ENTRIES[2], ENTRIES[0], ENTRIES[1]]
+    s.classifier.upsert_entries(given)
+    s.models.register(ModelVersion(0, "base-e5", "intfloat/multilingual-e5-base", True))
+    agent = ClassifierAgent(storage=s)
+    assert [m["code"] for m in agent.metadata] == [e.code for e in given]
+
+
+def test_agent_metadata_order_equals_classifier_flat(fake_st):
+    import json
+
+    flat_path = Path(__file__).parent.parent / "data" / "classifier_flat.json"
+    flat = json.loads(flat_path.read_text(encoding="utf-8"))
+    s = MemoryStorage()
+    s.classifier.upsert_entries([
+        ClassifierEntry(e["code"], e["name"], int(e["level"]), e.get("parent_code") or None,
+                        e.get("full_path", ""), int(e.get("children_count", 0)))
+        for e in flat
+    ])
+    s.models.register(ModelVersion(0, "base-e5", "intfloat/multilingual-e5-base", True))
+    agent = ClassifierAgent(storage=s)
+    assert [m["code"] for m in agent.metadata] == [e["code"] for e in flat]

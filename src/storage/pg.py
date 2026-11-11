@@ -44,14 +44,16 @@ class PgClassifierStore(_PgBase):
             with c.cursor() as cur:
                 cur.executemany(
                     """INSERT INTO classifier_entries
-                       (code, name, level, parent_code, full_path, children_count)
-                       VALUES (%s,%s,%s,%s,%s,%s)
+                       (code, name, level, parent_code, full_path, children_count, sort_order)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s)
                        ON CONFLICT (code) DO UPDATE SET name=EXCLUDED.name,
                          level=EXCLUDED.level, parent_code=EXCLUDED.parent_code,
-                         full_path=EXCLUDED.full_path, children_count=EXCLUDED.children_count""",
+                         full_path=EXCLUDED.full_path, children_count=EXCLUDED.children_count,
+                         sort_order=EXCLUDED.sort_order""",
                     [
-                        (e.code, e.name, e.level, e.parent_code, e.full_path, e.children_count)
-                        for e in entries
+                        (e.code, e.name, e.level, e.parent_code, e.full_path, e.children_count,
+                         i if e.sort_order is None else e.sort_order)
+                        for i, e in enumerate(entries)
                     ],
                 )
         return len(entries)
@@ -60,7 +62,7 @@ class PgClassifierStore(_PgBase):
         with self._tx(conn) as c:
             rows = c.execute(
                 """SELECT e.code, e.name, e.level, e.parent_code, e.full_path,
-                          e.children_count, coalesce(b.search_text, '')
+                          e.children_count, coalesce(b.search_text, ''), e.sort_order
                    FROM classifier_entries e
                    LEFT JOIN LATERAL (
                      SELECT v.search_text FROM classifier_vectors v
@@ -68,7 +70,7 @@ class PgClassifierStore(_PgBase):
                      WHERE v.code = e.code AND v.source_type = 'base'
                      ORDER BY v.id LIMIT 1
                    ) b ON true
-                   ORDER BY e.code"""
+                   ORDER BY e.sort_order NULLS LAST, e.code"""
             ).fetchall()
         return [ClassifierEntry(*r) for r in rows]
 

@@ -233,3 +233,26 @@ def test_transaction_rolls_back_card_on_error_pg(pg_storage):
     with pg_storage.transaction() as tx:
         pg_storage.appeals.create("t", appeal_id=aid, conn=tx)
     assert pg_storage.appeals.get_text(aid) == "t"
+
+
+def test_entries_keep_flat_order_and_correct_name_is_honoured(mem, tmp_path, monkeypatch):
+    """Порядок classifier_flat.json сохраняется; correct_name пишется с префиксом."""
+    import json
+
+    data = tmp_path / "data"
+    shutil.copytree(FIX, data, ignore=shutil.ignore_patterns("make_*"))
+    flat_path = data / "classifier_flat.json"
+    flat = json.loads(flat_path.read_text(encoding="utf-8"))
+    flat = [flat[2], flat[0], flat[1]]  # не по коду
+    flat_path.write_text(json.dumps(flat, ensure_ascii=False), encoding="utf-8")
+    (data / "classifier_annotations.json").write_text(
+        json.dumps({CODE: {"correct_name": "Новое имя", "note": "x"}}, ensure_ascii=False),
+        encoding="utf-8")
+
+    mig.migrate(mem, data, FIX / "vector_db", FIX / "models", "intfloat/multilingual-e5-base")
+
+    assert [e.code for e in mem.classifier.load_entries()] == [e["code"] for e in flat]
+    assert "correct_name: Новое имя" in mem.classifier.annotations_for(CODE)
+    import annotations_storage
+    assert annotations_storage.build_search_text(CODE, "Старое", "путь", storage=mem) == (
+        "Новое имя. путь | Note: x")

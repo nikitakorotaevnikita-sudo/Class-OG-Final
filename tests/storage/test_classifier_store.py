@@ -30,7 +30,8 @@ def setup_versions(storage, n=1):
 def test_upsert_and_load_entries_roundtrip(storage):
     assert storage.classifier.upsert_entries(entries()) == 3
     got = storage.classifier.load_entries()
-    assert [e.code for e in got] == sorted(e.code for e in entries())
+    # порядок как во входном списке (classifier_flat.json), не по коду
+    assert [e.code for e in got] == [e.code for e in entries()]
     assert all(e.search_text == "" for e in got)
     assert storage.classifier.count_entries() == 3
     storage.classifier.upsert_entries(entries())
@@ -143,3 +144,10 @@ def test_delete_annotations_by_prefix(storage):
     storage.classifier.add_annotation(A, "z", 0)
     assert storage.classifier.delete_annotations(A) == 1
     assert storage.classifier.annotated_codes() == []
+
+
+def test_load_entries_preserves_given_order(storage):
+    given = [entries()[2], entries()[0], entries()[1]]  # A1, B, A — не по коду
+    storage.classifier.upsert_entries(given)
+    assert [e.code for e in storage.classifier.load_entries()] == [e.code for e in given]
+    assert [e.sort_order for e in storage.classifier.load_entries()] == [0, 1, 2]

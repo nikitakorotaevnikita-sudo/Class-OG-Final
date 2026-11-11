@@ -72,8 +72,9 @@ class MemoryClassifierStore:
 
     def upsert_entries(self, entries):
         with self._lock:
-            for e in entries:
-                self._entries[e.code] = dataclasses.replace(e, search_text="")
+            for i, e in enumerate(entries):
+                order = i if e.sort_order is None else e.sort_order
+                self._entries[e.code] = dataclasses.replace(e, search_text="", sort_order=order)
             return len(entries)
 
     def load_entries(self):
@@ -86,7 +87,8 @@ class MemoryClassifierStore:
                         base.setdefault(v["code"], v["search_text"])
             return [
                 dataclasses.replace(self._entries[c], search_text=base.get(c, ""))
-                for c in sorted(self._entries)
+                for c in sorted(self._entries, key=lambda c: (
+                    self._entries[c].sort_order is None, self._entries[c].sort_order or 0, c))
             ]
 
     def count_entries(self):

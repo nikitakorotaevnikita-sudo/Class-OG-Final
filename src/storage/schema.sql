@@ -13,8 +13,10 @@ CREATE TABLE IF NOT EXISTS classifier_entries (
   parent_code TEXT REFERENCES classifier_entries(code) DEFERRABLE INITIALLY DEFERRED,
   full_path TEXT NOT NULL,
   children_count INT NOT NULL DEFAULT 0,
+  sort_order INT,                 -- порядок записей как в classifier_flat.json
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE classifier_entries ADD COLUMN IF NOT EXISTS sort_order INT;
 
 -- Реестр версий эмбеддинг-модели. adapter: параметры адаптера (например, v3_blend).
 CREATE TABLE IF NOT EXISTS ml_model_registry (

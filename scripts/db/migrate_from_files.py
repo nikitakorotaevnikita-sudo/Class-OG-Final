@@ -98,8 +98,9 @@ def _load_entries(data_dir: Path) -> list[ClassifierEntry]:
             parent_code=None if e.get("parent_code") in (None, "", ROOT_PARENT)
             else e["parent_code"],
             full_path=e.get("full_path", ""), children_count=int(e.get("children_count", 0)),
+            sort_order=i,
         )
-        for e in flat
+        for i, e in enumerate(flat)
     ]
 
 
@@ -190,7 +191,7 @@ def _migrate_annotations(storage, data_dir: Path, entry_codes: set[str], rec):
         for field, value in fields.items():
             if field.startswith("_") or value is None or not str(value).strip():
                 continue
-            text = str(value) if field == "correct_name" else f"{field}: {value}"
+            text = f"{field}: {value}"
             rows.append((code, text))
     added = 0
     for code, text in rows:

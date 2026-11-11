@@ -17,6 +17,7 @@ class ClassifierEntry:
     full_path: str
     children_count: int
     search_text: str = ""  # текст базовой строки активной версии модели
+    sort_order: Optional[int] = None  # порядок в classifier_flat.json (None -> индекс в списке)
 
 
 @dataclass
