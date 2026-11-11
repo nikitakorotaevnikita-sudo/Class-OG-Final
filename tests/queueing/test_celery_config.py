@@ -24,3 +24,11 @@ def test_routes():
     assert routes["search_classifier"] == {"queue": "classify_sync"}
     assert routes["embed_annotation"] == {"queue": "classify"}
     assert routes["finetune"] == {"queue": "training"}
+
+
+def test_short_broker_timeouts_for_publishing():
+    """API не должен зависать на отправке, когда RabbitMQ недоступен."""
+    assert app.conf.broker_connection_timeout == 3
+    assert app.conf.task_publish_retry_policy == {
+        "max_retries": 2, "interval_start": 0, "interval_step": 0.5, "interval_max": 1,
+    }

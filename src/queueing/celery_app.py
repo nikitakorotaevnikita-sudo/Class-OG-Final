@@ -43,6 +43,12 @@ app.conf.update(
     worker_prefetch_multiplier=1,
     task_ignore_result=True,
     broker_connection_retry_on_startup=True,
+    # Короткие таймауты отправки: при недоступном RabbitMQ запрос API не должен
+    # висеть — диспетчер превращает сбой в DispatchError (503).
+    broker_connection_timeout=3,
+    task_publish_retry_policy={
+        "max_retries": 2, "interval_start": 0, "interval_step": 0.5, "interval_max": 1,
+    },
     broker_transport_options={"confirm_publish": True},
     worker_detect_quorum_queues=True,
 )
