@@ -106,6 +106,33 @@
           </div>
         </article>
       </section>
+
+      <section class="tool-section" aria-label="Модели">
+        <div class="section-heading">
+          <div>
+            <h2>Модели</h2>
+            <p>Версии модели эмбеддингов. Активация меняет модель поиска у воркеров без перезапуска
+               (нужен логин бэк-офиса).</p>
+          </div>
+        </div>
+        <div class="table-scroll">
+          <table id="models-table">
+            <thead>
+              <tr>
+                <th>Версия</th>
+                <th>Модель</th>
+                <th>Recall@5 до / после</th>
+                <th>Примеров</th>
+                <th>Обучена</th>
+                <th>Статус</th>
+              </tr>
+            </thead>
+            <tbody id="models-body">
+              <tr><td colspan="6" class="empty-cell">Загрузка...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
     </section>
 
     <section class="backoffice-workspace hidden" id="panel-settings"

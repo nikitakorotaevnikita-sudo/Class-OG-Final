@@ -229,7 +229,76 @@
     setTimeout(() => el.remove(), 5000);
   }
 
+  // ── Модели (реестр версий) ────────────────────────────────────────────────
+  function esc(value) {
+    return String(value ?? '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;');
+  }
+
+  function fmtRecall(v) {
+    return v == null ? '—' : (Math.round(v * 1000) / 10) + '%';
+  }
+
+  function renderModels(models) {
+    const tbody = document.getElementById('models-body');
+    if (!tbody) return;
+    if (!models.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="empty-cell">Нет зарегистрированных версий</td></tr>';
+      return;
+    }
+    tbody.innerHTML = models.map(m => `
+      <tr>
+        <td style="text-align:center;font-weight:600">${esc(m.version)}</td>
+        <td style="font-family:monospace;font-size:12px">${esc(m.model_path || m.base_model_name)}</td>
+        <td>${fmtRecall(m.recall5_before)} / ${fmtRecall(m.recall5_after)}</td>
+        <td style="text-align:center">${m.training_samples_count ?? '—'}</td>
+        <td>${m.trained_at ? esc(m.trained_at.substring(0, 16).replace('T', ' ')) : '—'}</td>
+        <td>${m.is_active
+          ? '<span class="badge badge-green">Активна</span>'
+          : `<button class="btn btn-ghost btn-sm" type="button" data-activate="${esc(m.version)}">Активировать</button>`}</td>
+      </tr>
+    `).join('');
+  }
+
+  async function loadModels() {
+    try {
+      const res = await apiFetch('/api/models');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      renderModels(await res.json());
+    } catch (err) {
+      const tbody = document.getElementById('models-body');
+      if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="empty-cell">Не удалось загрузить: ' + esc(err.message) + '</td></tr>';
+    }
+  }
+
+  async function activateModel(version, btn) {
+    if (!confirm('Активировать версию модели ' + version + '?')) return;
+    btn.disabled = true;
+    try {
+      // Basic Auth: при 401 браузер сам запросит логин бэк-офиса и повторит запрос.
+      const res = await fetch('/api/models/' + encodeURIComponent(version) + '/activate', {
+        method: 'POST',
+        credentials: 'same-origin',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
+      await loadModels();
+    } catch (err) {
+      showError('Активация не выполнена: ' + err.message);
+      btn.disabled = false;
+    }
+  }
+
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-activate]');
+    if (btn) activateModel(btn.getAttribute('data-activate'), btn);
+  });
+
   // ── Init ──────────────────────────────────────────────────────────────────
   loadStats();
+  loadModels();
 
 })();
