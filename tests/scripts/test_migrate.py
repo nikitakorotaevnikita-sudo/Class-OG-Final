@@ -171,3 +171,65 @@ def test_cli_exit_code(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert code == 0
     assert "OK" in out and "MISMATCH" not in out
+
+
+def _copy_data(tmp_path, old=None, new=None):
+    data = tmp_path / "data"
+    shutil.copytree(FIX, data)
+    if old:
+        f = data / "appeals_log.jsonl"
+        f.write_text(f.read_text(encoding="utf-8").replace(old, new), encoding="utf-8")
+    return data
+
+
+def _cli(data):
+    return ["--data-dir", str(data), "--vector-db-dir", str(data / "vector_db"),
+            "--models-dir", str(data / "models")]
+
+
+def test_rerun_after_live_activity_still_exits_zero(monkeypatch, tmp_path, capsys):
+    from storage.models import AppealResult
+
+    data = _copy_data(tmp_path, '"status": "confirmed"', '"status": "pending"')
+    mem = MemoryStorage()
+    monkeypatch.setattr(mig, "_get_storage", lambda: mem)
+    assert mig.main(_cli(data)) == 0
+
+    # живая работа между запусками
+    mem.appeals.set_verification(CARD_A, "confirmed", [CODE], None)  # оператор проверил pending
+    live = mem.appeals.create("живое обращение", ip_address="10.9.9.9")
+    mem.appeals.save_result(live, AppealResult(
+        summary=None, applicant_fio=None, applicant_email=None, vid_obrascheniya=None,
+        tip_obrascheniya=None, is_ustnoe=None, overall_confidence=0.9,
+        needs_verification=None, full_fallback_used=None, candidates=[],
+        llm_provider=None, llm_model=None, elapsed_seconds=None, questions=[]))
+    mem.appeals.log_llm_request(live, True, 1, 1.0, 0.9, None, 5)
+    capsys.readouterr()
+
+    assert mig.main(_cli(data)) == 0
+    out = capsys.readouterr().out
+    assert "MISMATCH" not in out
+    assert "skipped (table not empty)" in out
+
+
+def test_unknown_legacy_status_warns_and_imports_pending(mem, tmp_path):
+    data = _copy_data(tmp_path, '"status": "corrected"', '"status": "weird"')
+    rec = mig.migrate(mem, data, data / "vector_db", data / "models", "m")
+    assert rec.warnings == 1
+    assert all(a == b for a, b in rec.values()), rec
+    entry = {e["id"]: e for e in mem.appeals.as_log_entries()}[CARD_B]
+    assert entry["verification"]["status"] == "pending"
+    assert len(entry["agent_questions"]) == 2
+
+
+@pytest.mark.db
+def test_transaction_rolls_back_card_on_error_pg(pg_storage):
+    aid = str(uuid.uuid4())
+    with pytest.raises(RuntimeError):
+        with pg_storage.transaction() as tx:
+            pg_storage.appeals.create("t", appeal_id=aid, conn=tx)
+            raise RuntimeError("сбой после create")
+    assert pg_storage.appeals.get_text(aid) is None
+    with pg_storage.transaction() as tx:
+        pg_storage.appeals.create("t", appeal_id=aid, conn=tx)
+    assert pg_storage.appeals.get_text(aid) == "t"

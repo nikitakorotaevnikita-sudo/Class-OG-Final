@@ -176,7 +176,7 @@ class MemoryAppealStore:
         self._lock = threading.RLock()
 
     def create(self, appeal_text, document_id=None, ip_address=None, appeal_id=None,
-               created_at=None):
+               created_at=None, conn=None):
         aid = ac.norm_uuid(appeal_id) if appeal_id else str(uuid.uuid4())
         if aid is None:
             raise ValueError(f"appeal_id не UUID: {appeal_id!r}")
@@ -198,7 +198,7 @@ class MemoryAppealStore:
             }
         return aid
 
-    def save_result(self, appeal_id, result: AppealResult):
+    def save_result(self, appeal_id, result: AppealResult, conn=None):
         with self._lock:
             card = self._cards.get(ac.norm_uuid(appeal_id))
             if card is None:
@@ -213,7 +213,7 @@ class MemoryAppealStore:
             return card["appeal_text"] if card else None
 
     def set_verification(self, appeal_id, status, operator_codes, comment,
-                         verified_by=None, verified_at=None):
+                         verified_by=None, verified_at=None, conn=None):
         if status not in ac.STATUSES:
             raise ValueError(f"неизвестный статус верификации: {status!r}")
         with self._lock:
@@ -302,6 +302,15 @@ class MemoryAppealStore:
                 for c in self._cards.values()
             ]
         return ac.compute_backoffice_stats(cards, days)
+
+    def ip_addresses(self, appeal_ids):
+        with self._lock:
+            out = {}
+            for a in appeal_ids:
+                card = self._cards.get(ac.norm_uuid(a))
+                if card is not None:
+                    out[card["id"]] = card["ip_address"]
+            return out
 
     def llm_log_count(self):
         with self._lock:

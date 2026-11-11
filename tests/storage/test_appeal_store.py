@@ -310,3 +310,10 @@ def test_llm_log_count_and_explicit_created_at(storage):
     storage.appeals.log_llm_request(None, True, 1, 1.0, 0.5, None, 3, created_at=when)
     storage.appeals.log_llm_request(None, False, 2, None, None, "err", 3)
     assert storage.appeals.llm_log_count() == 2
+
+
+def test_ip_addresses_per_card(storage):
+    a = storage.appeals.create("a", ip_address="10.0.0.1")
+    b = storage.appeals.create("b")
+    got = storage.appeals.ip_addresses([a, b, UNKNOWN])
+    assert got == {a: "10.0.0.1", b: None}

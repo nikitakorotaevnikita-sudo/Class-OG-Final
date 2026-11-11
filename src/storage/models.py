@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -105,3 +106,8 @@ class Storage:
     appeals: Any = None
     jobs: Any = None
     historical: Any = None
+
+    @contextmanager
+    def transaction(self):
+        """Атомарная группа записей. Memory: no-op (None); PostgreSQL: соединение для conn=."""
+        yield None

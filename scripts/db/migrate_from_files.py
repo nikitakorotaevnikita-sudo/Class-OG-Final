@@ -32,6 +32,15 @@ HIST_SOURCE = "historical_verified.jsonl"
 _MODEL_DIR_RE = re.compile(r"^e5-finetuned-v(\d+)$")
 
 
+class Reconciliation(dict):
+    """{источник: (в файлах, в БД)} + пометки пропущенных источников и счётчик предупреждений."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.notes: dict[str, str] = {}
+        self.warnings = 0
+
+
 def _say(msg: str) -> None:
     print(msg, flush=True)
 
@@ -224,22 +233,31 @@ def _migrate_appeals(storage, data_dir: Path, rec) -> dict[str, dict]:
     for c in _read_jsonl(data_dir / "appeals_log.jsonl"):
         if c.get("id") and c.get("appeal_text") is not None:
             cards.setdefault(_legacy_uuid(c["id"]), c)
+    for aid, c in cards.items():
+        v = c.get("verification") or {}
+        status = v.get("status") or "pending"
+        if status not in ac.STATUSES:
+            _say(f"  предупреждение: карточка {aid}: неизвестный статус {status!r} -> pending")
+            rec.warnings += 1
+            c["verification"] = {**v, "status": "pending"}
 
     created = 0
     for aid, c in cards.items():
         if storage.appeals.get_text(aid) is not None:
             continue  # карточка уже есть - не трогаем вопросы и верификацию
-        storage.appeals.create(
-            c["appeal_text"], appeal_id=aid, created_at=_parse_dt(c.get("timestamp"))
-        )
-        storage.appeals.save_result(aid, _legacy_result(c))
         v = c.get("verification") or {}
         status = v.get("status") or "pending"
-        if status != "pending":
-            storage.appeals.set_verification(
-                aid, status, v.get("operator_codes"), v.get("comment"),
-                verified_at=_parse_dt(v.get("verified_at")),
+        with storage.transaction() as tx:  # карточка целиком или никак
+            storage.appeals.create(
+                c["appeal_text"], appeal_id=aid, created_at=_parse_dt(c.get("timestamp")),
+                conn=tx,
             )
+            storage.appeals.save_result(aid, _legacy_result(c), conn=tx)
+            if status != "pending":
+                storage.appeals.set_verification(
+                    aid, status, v.get("operator_codes"), v.get("comment"),
+                    verified_at=_parse_dt(v.get("verified_at")), conn=tx,
+                )
         created += 1
     _say(f"  обращения: создано {created}, уже было {len(cards) - created}")
 
@@ -250,13 +268,14 @@ def _migrate_appeals(storage, data_dir: Path, rec) -> dict[str, dict]:
         sum(len(c.get("agent_questions") or []) for c in cards.values()),
         sum(len(in_db[a]["agent_questions"]) for a in present),
     )
-    non_pending = sum(
-        1 for c in cards.values() if (c.get("verification") or {}).get("status", "pending") != "pending"
+    # файл не pending => в БД тот же статус; файл pending => в БД любой (оператор мог
+    # проверить карточку уже после переноса)
+    ok = sum(
+        1 for a in present
+        if (cards[a].get("verification") or {}).get("status", "pending") == "pending"
+        or in_db[a]["verification"]["status"] == cards[a]["verification"]["status"]
     )
-    rec["verifications"] = (
-        non_pending,
-        sum(1 for a in present if in_db[a]["verification"]["status"] != "pending"),
-    )
+    rec["verifications"] = (len(cards), ok)
     return cards
 
 
@@ -276,8 +295,8 @@ def _migrate_request_log(storage, data_dir: Path, cards: dict, rec):
         matched[aid] = r
     for aid, r in matched.items():
         storage.appeals.set_request_meta(aid, r.get("ip"), r.get("elapsed_seconds"))
-    stats_ips = storage.appeals.backoffice_stats(days=1)["ip_stats"]
-    rec["ip_records"] = (len(matched), sum(i["count"] for i in stats_ips))
+    have_ip = storage.appeals.ip_addresses(list(matched))
+    rec["ip_records"] = (len(matched), sum(1 for a in matched if have_ip.get(a)))
     _say(f"  IP-записи: применено {len(matched)}, без пары {unmatched}")
 
     if storage.appeals.llm_log_count() == 0:
@@ -289,6 +308,9 @@ def _migrate_request_log(storage, data_dir: Path, cards: dict, rec):
             )
     else:
         _say("  llm_request_log уже заполнен - пропуск")
+        rec.notes["llm_events"] = "skipped (table not empty)"
+        rec["llm_events"] = (len(events), len(events))
+        return
     rec["llm_events"] = (len(events), storage.appeals.llm_log_count())
 
 
@@ -343,7 +365,7 @@ def migrate(storage: Storage, data_dir: Path, vector_db_dir: Path, models_dir: P
             embedding_model: str) -> dict[str, tuple[int, int]]:
     """Импортирует все файловые источники. Возвращает {источник: (в файлах, в БД)}."""
     data_dir, vector_db_dir, models_dir = Path(data_dir), Path(vector_db_dir), Path(models_dir)
-    rec: dict[str, tuple[int, int]] = {}
+    rec = Reconciliation()
 
     entries = _load_entries(data_dir)
     entry_codes = {e.code for e in entries}
@@ -390,7 +412,10 @@ def main(argv: Optional[list[str]] = None) -> int:
     for name, (files, db_n) in rec.items():
         ok = files == db_n
         bad += not ok
-        _say(f"  {name:<20} {files:>8} {db_n:>8}  {'OK' if ok else 'MISMATCH'}")
+        note = rec.notes.get(name)
+        _say(f"  {name:<20} {files:>8} {db_n:>8}  {note or ('OK' if ok else 'MISMATCH')}"
+             + (" OK" if note else ""))
+    _say(f"  {'warnings':<20} {rec.warnings:>8}")
     _say("Готово." if not bad else f"Расхождений: {bad}")
     return 1 if bad else 0
 

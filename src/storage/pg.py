@@ -420,6 +420,17 @@ class PgAppealStore(_PgBase):
                  candidates_count, error, ac.aware(created_at) if created_at else None),
             )
 
+    def ip_addresses(self, appeal_ids, conn=None):
+        ids = [a for a in (ac.norm_uuid(x) for x in appeal_ids) if a]
+        if not ids:
+            return {}
+        with self._tx(conn) as c:
+            rows = c.execute(
+                "SELECT id, host(ip_address) FROM appeal_classifications WHERE id = ANY(%s::uuid[])",
+                (ids,),
+            ).fetchall()
+        return {str(r[0]): r[1] for r in rows}
+
     def llm_log_count(self, conn=None):
         with self._tx(conn) as c:
             return c.execute("SELECT count(*) FROM llm_request_log").fetchone()[0]
@@ -625,6 +636,7 @@ class PgHistoricalStore(_PgBase):
 
 class PgStorage(Storage):
     def __init__(self, connect: ConnectFn = db.transaction) -> None:
+        self._connect = connect
         super().__init__(
             classifier=PgClassifierStore(connect),
             models=PgModelStore(connect),
@@ -632,3 +644,7 @@ class PgStorage(Storage):
             jobs=PgJobStore(connect),
             historical=PgHistoricalStore(connect),
         )
+
+    def transaction(self):
+        """Одна транзакция: commit на выходе, rollback при исключении; отдаёт соединение."""
+        return self._connect()
