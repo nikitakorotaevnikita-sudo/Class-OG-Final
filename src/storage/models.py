@@ -75,6 +75,10 @@ class QueueFull(RuntimeError):
     """Очередь заполнена — вызывающей стороне нужно повторить позже."""
 
 
+class ModelVersionExists(RuntimeError):
+    """Версия модели с таким номером уже есть в реестре (register_new)."""
+
+
 @dataclass
 class Job:
     """Фоновая задача (строка таблицы jobs)."""

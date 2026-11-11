@@ -108,8 +108,26 @@ def main(argv=None) -> int:
 
     from storage import get_storage
 
-    build_database(get_storage(), args.model_path, args.version)
+    storage = get_storage()
+    refusal = _refusal(storage, args.version)
+    if refusal:
+        print(f"Отказ: {refusal}")
+        return 2
+    build_database(storage, args.model_path, args.version)
     return 0
+
+
+def _refusal(storage, version: int):
+    """Причина отказа ручной сборки (build_database только добавляет строки)."""
+    if version == 0:
+        return ("версия 0 — перенесённые прод-векторы (с адаптером); "
+                "пересчёт испортил бы поиск")
+    if storage.models.get(version) is None:
+        return f"версии {version} нет в реестре моделей (ml_model_registry)"
+    if storage.classifier.vectors_for_version(version):
+        return (f"у версии {version} уже есть векторы; повторная сборка "
+                f"продублировала бы строки")
+    return None
 
 
 if __name__ == "__main__":

@@ -2002,7 +2002,7 @@ class ClassifierAgent:
         log_conn  — соединение транзакции воркера: ошибка записи результата тогда
                     пробрасывается, чтобы задача не завершилась без карточки.
         """
-        classify_start = time.time()
+        classify_start = time.perf_counter()
         _REQUEST_CTX.appeal_id = appeal_id
         try:
             return self._classify(appeal_text, llm_provider, llm_model, appeal_id,
@@ -2349,7 +2349,7 @@ class ClassifierAgent:
             summary=summary,
             full_fallback_used=full_fallback_used,
         )
-        result.elapsed_seconds = round(time.time() - classify_start, 3)
+        result.elapsed_seconds = round(time.perf_counter() - classify_start, 3)
 
         # Логируем для накопления данных дообучения
         try:

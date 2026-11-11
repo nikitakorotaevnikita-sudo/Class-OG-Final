@@ -301,3 +301,98 @@ def test_adapter_applies_only_to_version_zero(monkeypatch):
 
     monkeypatch.setattr(classifier_agent, "ENABLE_EMBEDDING_ADAPTER", False)
     assert _agent(BASE_MODEL, 0)._embed_query("т")[0] == pytest.approx(1.0)
+
+
+# ── Защита от гонки версий и от повторной сборки векторов ───────────────────
+
+def _mv(version, path="models/other"):
+    from storage.models import ModelVersion
+
+    return ModelVersion(version=version, base_model_name=BASE_MODEL, model_path=path,
+                        is_active=False)
+
+
+def test_register_new_refuses_taken_version(store):
+    from storage.models import ModelVersionExists
+
+    seed(store)
+    store.models.register_new(_mv(1))
+    with pytest.raises(ModelVersionExists):
+        store.models.register_new(_mv(1, "models/second"))
+    assert store.models.get(1).model_path == "models/other"
+    # upsert register (миграция) по-прежнему перезаписывает
+    store.models.register(_mv(1, "models/third"))
+    assert store.models.get(1).model_path == "models/third"
+
+
+def test_concurrent_registration_of_same_version_fails(store):
+    """Другое дообучение заняло версию N, пока шло это: результат не пишется."""
+    storage = seed(store)
+
+    class RacingTrain(FakeTrain):
+        def __call__(self, base, train, val, output_path):
+            storage.models.register_new(_mv(1, "models/winner"))
+            return super().__call__(base, train, val, output_path)
+
+    result = finetune_model.run_training(storage, train_fn=RacingTrain())
+
+    assert result["status"] == "failed"
+    assert "другое дообучение" in result["message"]
+    assert storage.models.get(1).model_path == "models/winner"
+    assert storage.classifier.vectors_for_version(1) == []
+    assert storage.models.active().version == 0
+
+
+def test_existing_model_dir_refuses_training():
+    storage = seed()
+    (Path(config.MODELS_DIR) / "e5-finetuned-v1").mkdir(parents=True)
+    train = FakeTrain()
+
+    result = finetune_model.run_training(storage, train_fn=train)
+
+    assert result["status"] == "failed" and "уже существует" in result["message"]
+    assert train.calls == [] and [mv.version for mv in storage.models.list()] == [0]
+
+
+def _cli_storage():
+    from storage import get_storage
+
+    return seed(get_storage())
+
+
+def test_build_vectordb_cli_refuses_version_zero(capsys):
+    storage = _cli_storage()
+    before = len(storage.classifier.vectors_for_version(0))
+    assert build_vectordb.main(["--version", "0", "--model-path", BASE_MODEL]) == 2
+    assert "версия 0" in capsys.readouterr().out
+    assert len(storage.classifier.vectors_for_version(0)) == before
+    assert FakeSentenceTransformer.loaded == []
+
+
+def test_build_vectordb_cli_refuses_unregistered_version(capsys):
+    storage = _cli_storage()
+    assert build_vectordb.main(["--version", "5", "--model-path", "m"]) == 2
+    assert "нет в реестре" in capsys.readouterr().out
+    assert storage.classifier.vectors_for_version(5) == []
+
+
+def test_build_vectordb_cli_refuses_version_with_vectors(capsys):
+    storage = _cli_storage()
+    storage.models.register(_mv(1, "m"))
+    storage.classifier.add_vectors(1, [(CODES[0], "base", "t", np.ones(768, dtype=np.float32))])
+    assert build_vectordb.main(["--version", "1", "--model-path", "m"]) == 2
+    assert "уже есть векторы" in capsys.readouterr().out
+    assert len(storage.classifier.vectors_for_version(1)) == 1
+
+
+def test_build_vectordb_cli_builds_registered_empty_version():
+    storage = _cli_storage()
+    storage.models.register(_mv(1, "m"))
+    assert build_vectordb.main(["--version", "1", "--model-path", "m"]) == 0
+    assert sorted(c for c, st, _ in storage.classifier.vectors_for_version(1)
+                  if st == "base") == sorted(CODES)
+
+
+def test_build_vectordb_cli_usage_without_args(capsys):
+    assert build_vectordb.main([]) == 2
+    assert "--version" in capsys.readouterr().out

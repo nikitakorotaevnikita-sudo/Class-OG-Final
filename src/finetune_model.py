@@ -38,7 +38,7 @@ import env_bootstrap  # noqa: F401  — .env до HF-библиотек
 import build_vectordb
 import config
 from annotations_storage import build_search_text
-from storage.models import ModelVersion
+from storage.models import ModelVersion, ModelVersionExists
 
 SOURCES = ("verified", "historical", "combined")
 HISTORICAL_WEIGHT = 3   # исторические пары размечены экспертами — вес 3x в "combined"
@@ -274,6 +274,11 @@ def _train(storage, source: str, force: bool, train_fn: TrainFn, result: dict, s
     # ── Дообучение ────────────────────────────────────────────────────────────
     version = storage.models.next_version()
     output_path = Path(config.MODELS_DIR) / f"e5-finetuned-v{version}"
+    if output_path.exists():
+        raise RuntimeError(
+            f"Папка {output_path} уже существует, а версии {version} нет в реестре: "
+            f"возможно, идёт другое дообучение или осталась незарегистрированная модель. "
+            f"Перенесите папку и запустите дообучение снова.")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     result.update(version=version, model_path=str(output_path))
 
@@ -329,7 +334,12 @@ def _train(storage, source: str, force: bool, train_fn: TrainFn, result: dict, s
     )
     with storage.transaction() as conn:
         kw = {} if conn is None else {"conn": conn}
-        storage.models.register(mv, **kw)
+        try:
+            storage.models.register_new(mv, **kw)
+        except ModelVersionExists as exc:
+            raise RuntimeError(
+                f"Версию {version} уже зарегистрировало другое дообучение — результат этого "
+                f"запуска не сохранён в реестре ({exc})") from exc
         n_vectors = storage.classifier.add_vectors(version, rows, **kw)
     say(f"  Версия v{version} зарегистрирована, векторов: {n_vectors}")
     if improved:

@@ -14,7 +14,8 @@ import numpy as np
 
 from . import appeal_common as ac
 from .models import (STATUS_DONE, STATUS_ERROR, STATUS_QUEUED, STATUS_RUNNING,
-                     AppealResult, ClassifierEntry, Job, ModelVersion, QueueFull, Storage)
+                     AppealResult, ClassifierEntry, Job, ModelVersion, ModelVersionExists,
+                     QueueFull, Storage)
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,13 @@ class MemoryModelStore:
                 for other in self._items.values():
                     other.is_active = False
             self._items[mv.version] = dataclasses.replace(mv)
+
+    def register_new(self, mv):
+        """Как register, но только новая версия: занятый номер → ModelVersionExists."""
+        with self._lock:
+            if mv.version in self._items:
+                raise ModelVersionExists(f"версия модели {mv.version} уже есть в реестре")
+            self.register(mv)
 
     def active(self):
         with self._lock:

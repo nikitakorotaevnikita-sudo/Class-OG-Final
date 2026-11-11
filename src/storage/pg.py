@@ -13,7 +13,7 @@ from psycopg.types.json import Jsonb
 
 from . import appeal_common as ac
 from . import db
-from .models import ClassifierEntry, Job, ModelVersion, QueueFull, Storage
+from .models import ClassifierEntry, Job, ModelVersion, ModelVersionExists, QueueFull, Storage
 
 _ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
@@ -215,6 +215,17 @@ class PgModelStore(_PgBase):
                     None if mv.adapter is None else Jsonb(mv.adapter),
                 ),
             )
+
+    def register_new(self, mv, conn=None):
+        """Регистрация только новой версии (дообучение): под advisory-локом реестра
+        до конца транзакции; занятый номер → ModelVersionExists. Upsert register
+        (миграция) не меняется."""
+        with self._tx(conn) as c:
+            c.execute("SELECT pg_advisory_xact_lock(hashtext('ml_model_registry'))")
+            if c.execute("SELECT 1 FROM ml_model_registry WHERE version = %s",
+                         (mv.version,)).fetchone():
+                raise ModelVersionExists(f"версия модели {mv.version} уже есть в реестре")
+            self.register(mv, conn=c)
 
     def active(self, conn=None):
         with self._tx(conn) as c:
