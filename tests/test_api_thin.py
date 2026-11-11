@@ -373,3 +373,22 @@ def test_finetune_double_submit_race_is_409(env, client, monkeypatch):
     resp = client.post("/api/finetune", json={"source": "combined"})
     assert resp.status_code == 409
     assert resp.json()["detail"] == "Дообучение уже выполняется"
+
+
+def test_search_timeout_504_does_not_point_to_jobs_endpoint(env, client, monkeypatch):
+    """/integration/jobs/{id} отвечает 404 для задач поиска — ссылаться на него нельзя."""
+    import api_server
+
+    real = env.agent._search_candidates
+
+    def slow(q, top_k=None):
+        time.sleep(1.5)
+        return real(q, top_k)
+
+    monkeypatch.setattr(env.agent, "_search_candidates", slow)
+    monkeypatch.setattr(api_server, "SEARCH_WAIT_TIMEOUT_SEC", 0.2)
+    resp = client.get("/classifier/search", params={"q": "мусор"})
+    assert resp.status_code == 504
+    detail = resp.json()["detail"]
+    assert "/integration/jobs" not in detail
+    assert detail == "Поиск по классификатору не завершился за 0.2 с, повторите запрос позже"

@@ -89,13 +89,22 @@ async def submit_job(job_type: str, task_name: str, queue: str, payload: dict, *
 
 async def wait_job(job_id: str, timeout: float, *,
                    timeout_text: str = "Классификация не завершилась",
-                   error_prefix: str = "Ошибка классификации") -> Job:
-    """Дождаться конечной задачи: done → Job; таймаут → 504; error → 500."""
+                   error_prefix: str = "Ошибка классификации",
+                   pollable: bool = True) -> Job:
+    """Дождаться конечной задачи: done → Job; таймаут → 504; error → 500.
+
+    pollable=False — задачу нельзя запросить через /integration/jobs/{id}
+    (например, поиск): 504 не ссылается на этот адрес.
+    """
     try:
         job = await waiter_mod.get_waiter().wait(job_id, timeout)
     except psycopg.Error as exc:
         raise HTTPException(status_code=503, detail=DB_UNAVAILABLE) from exc
     if job is None:
+        if not pollable:
+            raise HTTPException(
+                status_code=504,
+                detail=f"{timeout_text} за {timeout:g} с, повторите запрос позже")
         raise HTTPException(
             status_code=504,
             detail=(f"{timeout_text} за {timeout:g} с, задача {job_id} продолжает "
@@ -115,10 +124,12 @@ async def run_sync_job(job_type: str, task_name: str, payload: dict, *,
                        appeal_text: Optional[str] = None, document_id: Optional[int] = None,
                        ip: Optional[str] = None,
                        timeout_text: str = "Классификация не завершилась",
-                       error_prefix: str = "Ошибка классификации") -> Submitted:
+                       error_prefix: str = "Ошибка классификации",
+                       pollable: bool = True) -> Submitted:
     """submit_job + wait_job. Возвращает Submitted с завершённой (done) задачей."""
     sub = await submit_job(job_type, task_name, queue, payload, appeal_text=appeal_text,
                            document_id=document_id, ip=ip)
     sub.job = await wait_job(sub.job.id, sync_wait_timeout() if timeout is None else timeout,
-                             timeout_text=timeout_text, error_prefix=error_prefix)
+                             timeout_text=timeout_text, error_prefix=error_prefix,
+                             pollable=pollable)
     return sub

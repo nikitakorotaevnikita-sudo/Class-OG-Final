@@ -320,7 +320,8 @@ async def search_classifier(q: str, top_k: int = 5):
         "search", "search_classifier", {"q": q, "top_k": top_k},
         timeout=SEARCH_WAIT_TIMEOUT_SEC,
         timeout_text="Поиск по классификатору не завершился",
-        error_prefix="Ошибка поиска")
+        error_prefix="Ошибка поиска",
+        pollable=False)  # /integration/jobs/{id} отдаёт только задачи классификации
     return sub.job.result
 
 
