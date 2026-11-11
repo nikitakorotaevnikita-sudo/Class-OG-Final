@@ -4,7 +4,8 @@
   модуль задач и модель API не импортирует).
 - `LocalDispatcher` — выполнение `tasks.run_*` в потоке этого же процесса
   (тесты и `STORAGE_BACKEND=memory`): `await waiter.wait(...)` ведёт себя как в
-  проде. Повторов нет — любой сбой завершает задачу ошибкой.
+  проде. Повторов нет — любой сбой завершает задачу ошибкой. Агент берётся из
+  `agent_factory()` на каждую задачу (кэширует и перезагружает его worker_main).
 
 Модуль импортирует API, поэтому classifier_agent/torch здесь не грузятся:
 `worker_main` и `queueing.tasks` импортируются лениво.
@@ -57,17 +58,9 @@ class LocalDispatcher:
 
     def __init__(self, storage, agent_factory: Callable[[], object]) -> None:
         self._storage = storage
+        # Фабрика вызывается на каждую задачу: кэш агента, горячая перезагрузка
+        # модели после дообучения и применение .env живут в worker_main.get_agent.
         self._agent_factory = agent_factory
-        self._agent = None
-        self._agent_lock = threading.Lock()
-
-    def _get_agent(self):
-        if self._agent is None:
-            with self._agent_lock:
-                if self._agent is None:
-                    # при сбое не кэшируется — следующая задача попробует снова
-                    self._agent = self._agent_factory()
-        return self._agent
 
     def send(self, task_name: str, msg: dict, queue: str) -> None:
         if task_name not in _LOCAL_TASKS:
@@ -86,7 +79,7 @@ class LocalDispatcher:
             fn_name, with_agent = _LOCAL_TASKS[task_name]
             fn = getattr(tasks, fn_name)
             if with_agent:
-                fn(msg, self._storage, self._get_agent())
+                fn(msg, self._storage, self._agent_factory())
             else:
                 fn(msg, self._storage)
         except Exception as exc:  # noqa: BLE001 — в т.ч. RetryableError: повторов нет

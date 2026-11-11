@@ -118,6 +118,62 @@ def test_wait_returns_already_finished_job_immediately():
     assert result.status == "error" and result.error == "boom"
 
 
+def test_recheck_db_error_does_not_abort_wait(monkeypatch):
+    """Сбой БД при перепроверке логируется, ожидание продолжается."""
+    storage = MemoryStorage()
+    job = _new_job(storage)
+    waiter = JobWaiter(storage)
+    real_get = storage.jobs.get
+    calls = {"n": 0}
+
+    def flaky_get(job_id):
+        calls["n"] += 1
+        if calls["n"] == 2:  # первое чтение проходит, вторая перепроверка падает
+            raise ConnectionError("БД недоступна")
+        return real_get(job_id)
+
+    monkeypatch.setattr(storage.jobs, "get", flaky_get)
+
+    async def scenario():
+        _finish_later(storage, job.id, 0.3)
+        return await waiter.wait(job.id, timeout=5, recheck_every=0.1)
+
+    result = asyncio.run(_with_waiter(waiter, scenario))
+    assert calls["n"] >= 3
+    assert result is not None and result.status == "done"
+
+
+def test_first_read_error_propagates(monkeypatch):
+    storage = MemoryStorage()
+    waiter = JobWaiter(storage)
+
+    def broken_get(job_id):
+        raise ConnectionError("БД недоступна")
+
+    monkeypatch.setattr(storage.jobs, "get", broken_get)
+    with pytest.raises(ConnectionError):
+        asyncio.run(waiter.wait("a" * 32, timeout=1, recheck_every=0.1))
+    assert waiter._events == {}
+
+
+def test_recheck_every_is_clamped(monkeypatch):
+    """recheck_every=0 не превращается в busy-loop."""
+    storage = MemoryStorage()
+    job = _new_job(storage)
+    waiter = JobWaiter(storage)
+    real_get = storage.jobs.get
+    calls = {"n": 0}
+
+    def counting_get(job_id):
+        calls["n"] += 1
+        return real_get(job_id)
+
+    monkeypatch.setattr(storage.jobs, "get", counting_get)
+    result = asyncio.run(waiter.wait(job.id, timeout=0.3, recheck_every=0))
+    assert result is None
+    assert calls["n"] <= 0.3 / 0.05 + 2
+
+
 def test_concurrent_waiters_on_same_job_all_wake():
     storage = MemoryStorage()
     job = _new_job(storage)
@@ -209,11 +265,12 @@ def test_local_dispatcher_runs_task_and_waiter_sees_result(monkeypatch):
     result = asyncio.run(_with_waiter(waiter, scenario))
     assert result.status == "done" and result.result == {"agent": "AGENT"}
 
-    # агент создаётся один раз
+    # фабрика вызывается на каждую задачу: кэш и горячая перезагрузка модели
+    # живут в worker_main.get_agent (reload_model_if_changed, настройки .env)
     job2 = _new_job(storage)
     disp.send("classify_appeal", {"job_id": job2.id}, queue="classify")
     asyncio.run(_with_waiter(waiter, lambda: waiter.wait(job2.id, timeout=5)))
-    assert agents == [1]
+    assert agents == [1, 1]
 
 
 def test_local_dispatcher_finetune_has_no_agent(monkeypatch):

@@ -30,6 +30,7 @@ _WAKE_ALL = None  # «разбудить всех»: после переподк
 
 BACKOFF_START = 1.0
 BACKOFF_MAX = 10.0
+MIN_RECHECK_SEC = 0.05  # нижняя граница recheck_every (без busy-loop)
 
 
 class JobWaiter:
@@ -77,15 +78,30 @@ class JobWaiter:
 
     async def wait(self, job_id: str, timeout: float,
                    recheck_every: float = 5.0) -> Optional[Job]:
+        """Конечная задача или None по таймауту.
+
+        Ошибка БД при ПЕРВОМ чтении поднимается (API ответит 503); сбои при
+        последующих перепроверках логируются, ожидание продолжается до таймаута.
+        """
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
+        recheck_every = max(recheck_every, MIN_RECHECK_SEC)
         event = asyncio.Event()
         # Регистрируемся ДО чтения: уведомление между чтением и ожиданием не теряется.
         self._events.setdefault(job_id, set()).add(event)
         try:
+            first = True
             while True:
                 event.clear()
-                job = await asyncio.to_thread(self._storage.jobs.get, job_id)
+                try:
+                    job = await asyncio.to_thread(self._storage.jobs.get, job_id)
+                except Exception:
+                    if first:
+                        raise
+                    log.warning("Перепроверка задачи %s не удалась; ждём дальше",
+                                job_id, exc_info=True)
+                    job = None
+                first = False
                 if job is not None and job.status in _TERMINAL:
                     return job
                 remaining = deadline - loop.time()
