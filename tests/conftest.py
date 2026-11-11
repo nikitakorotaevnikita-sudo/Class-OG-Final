@@ -31,11 +31,14 @@ def _memory_storage_backend(monkeypatch):
 
 @pytest.fixture
 def pg_conn():
-    import config
     import psycopg
     from storage import db
 
-    url = os.getenv("TEST_DATABASE_URL") or config.DATABASE_URL
+    # Только явно заданная тестовая БД: тесты создают/удаляют схемы, и откат к
+    # config.DATABASE_URL мог бы задеть рабочую базу с персональными данными.
+    url = os.getenv("TEST_DATABASE_URL")
+    if not url:
+        pytest.skip("TEST_DATABASE_URL не задан — тесты PostgreSQL пропущены")
     try:
         conn = psycopg.connect(url, connect_timeout=2, autocommit=True)
     except Exception as exc:  # noqa: BLE001

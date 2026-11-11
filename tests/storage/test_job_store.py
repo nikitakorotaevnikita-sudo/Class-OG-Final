@@ -169,10 +169,9 @@ def test_raising_listener_does_not_break_finish():
 def test_finish_notifies_pg(pg_conn):
     import psycopg
 
-    import config
     from storage.pg import PgStorage
 
-    url = os.getenv("TEST_DATABASE_URL") or config.DATABASE_URL
+    url = os.environ["TEST_DATABASE_URL"]  # pg_conn пропускает тест без него
 
     @contextmanager
     def connect():

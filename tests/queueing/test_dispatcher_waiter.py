@@ -388,9 +388,8 @@ def test_modules_do_not_import_model_stack():
 # ── PostgreSQL ───────────────────────────────────────────────────────────────
 
 def _pg_url():
-    import config
-
-    return os.getenv("TEST_DATABASE_URL") or config.DATABASE_URL
+    # pg_conn уже пропустил тест, если TEST_DATABASE_URL не задан
+    return os.environ["TEST_DATABASE_URL"]
 
 
 @pytest.fixture
