@@ -348,7 +348,7 @@ class PgAppealStore(_PgBase):
             by_appeal.setdefault(str(aid), []).append({
                 "question_text": text,
                 "selected_code": code,
-                "confidence": conf,
+                "confidence": ac.real(conf),
                 "alternative_codes": alts or [],
             })
         out = []
@@ -359,7 +359,7 @@ class PgAppealStore(_PgBase):
                 "appeal_text": text,
                 "candidates": cands or [],
                 "agent_questions": by_appeal.get(str(aid), []),
-                "overall_confidence": conf or 0.0,
+                "overall_confidence": ac.real(conf) or 0.0,
                 "verification": {
                     "status": status,
                     "verified_at": ac.local_iso(vat),

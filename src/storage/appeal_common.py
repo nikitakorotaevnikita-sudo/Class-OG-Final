@@ -51,6 +51,14 @@ def norm_ip(value: Optional[str]) -> Optional[str]:
         return None
 
 
+REAL_DIGITS = 6
+
+
+def real(value):
+    """REAL (float32) из PostgreSQL -> float без хвоста расширения (0.8, а не 0.800000011920929)."""
+    return None if value is None else round(float(value), REAL_DIGITS)
+
+
 def hist_bin(conf: float) -> str:
     # round: REAL в PostgreSQL даёт 0.699999988 вместо 0.7
     idx = min(max(int(round(conf * 10, 6)), 0), 9)
@@ -69,6 +77,7 @@ def compute_backoffice_stats(cards: Iterable[tuple], days: int) -> dict:
     hist = histogram_template()
     conf_sum, conf_n, total = 0.0, 0, 0
     for created_at, conf, status, ip, codes in cards:
+        conf = real(conf)
         total += 1
         status_counts[status] += 1
         if conf is not None:

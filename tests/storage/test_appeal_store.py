@@ -105,17 +105,33 @@ def test_as_log_entries_shape_matches_legacy(storage):
     }
     assert e["id"] == aid
     assert e["appeal_text"] == "текст"
-    assert e["overall_confidence"] == pytest.approx(0.8)
+    assert e["overall_confidence"] == 0.8  # точное равенство: без хвоста float32
     assert e["candidates"] == [{"code": CODE, "name": "n", "similarity": 0.9}]
     [aq] = e["agent_questions"]
     assert set(aq) == Q_KEYS
     assert aq["selected_code"] == CODE
+    assert aq["confidence"] == 0.8
     assert aq["alternative_codes"] == ["0001.0001.0001.0001"]
     # формат как в старом логе: ISO без долей секунды и без часового пояса
     ts = e["timestamp"]
     assert datetime.fromisoformat(ts).isoformat(timespec="seconds") == ts
     assert abs(datetime.now() - datetime.fromisoformat(ts)) < timedelta(minutes=5)
     json.dumps(e)
+
+
+def test_confidences_exact_after_roundtrip(storage):
+    aid = storage.appeals.create("t")
+    storage.appeals.save_result(aid, result(conf=0.87, questions=[q(1, conf=0.87), q(2, conf=0.1)]))
+    [e] = storage.appeals.as_log_entries()
+    assert e["overall_confidence"] == 0.87
+    assert [x["confidence"] for x in e["agent_questions"]] == [0.87, 0.1]
+
+
+def test_avg_confidence_rounding_boundary_same_on_both_backends(storage):
+    # среднее 0.285: float32 мог бы сдвинуть округление; ожидание считаем на чистых float
+    classified(storage, conf=0.28)
+    classified(storage, conf=0.29)
+    assert storage.appeals.backoffice_stats()["avg_confidence"] == round((0.28 + 0.29) / 2, 2)
 
 
 def test_as_log_entries_order_and_filter(storage):
