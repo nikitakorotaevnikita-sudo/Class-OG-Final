@@ -424,3 +424,49 @@ def test_wrapper_backoff_and_storage_failure_retry(monkeypatch, retries, countdo
     assert captured["countdown"] == countdown
     assert captured["max_retries"] == 10
     assert isinstance(captured["exc"], psycopg.OperationalError)
+
+
+def test_agent_build_failure_marks_error_and_is_not_cached(storage, no_webhook, monkeypatch):
+    """Нет активной модели → задача error с текстом исключения; следующая строит агента заново."""
+    import worker_main
+
+    msg = _enqueue(storage, {"response_kind": "document"}, webhook_url="http://rx.local/hook")
+    monkeypatch.setattr(tasks, "get_storage", lambda: storage)
+    monkeypatch.setattr(worker_main, "_agent", None)
+    monkeypatch.setattr(worker_main, "embed_pending_annotations", lambda a: 0)
+    built = []
+
+    def broken_agent(st):
+        built.append(1)
+        raise RuntimeError("Нет активной модели в ml_model_registry")
+
+    monkeypatch.setattr(worker_main, "ClassifierAgent", broken_agent)
+
+    tasks.classify_appeal.run(msg)
+
+    job = storage.jobs.get(msg["job_id"])
+    assert job.status == "error" and job.attempts == 1 and job.started_at is not None
+    assert job.error == "RuntimeError: Нет активной модели в ml_model_registry"
+    assert len(no_webhook) == 1 and no_webhook[0][1]["status"] == "error"
+    assert worker_main._agent is None
+
+    msg2 = _enqueue(storage)
+    tasks.classify_appeal.run(msg2)
+    assert len(built) == 2  # неудачный агент не закэширован
+    assert storage.jobs.get(msg2["job_id"]).status == "error"
+
+
+def test_agent_build_infra_failure_retries(storage, monkeypatch):
+    from celery.exceptions import Retry
+
+    msg = _enqueue(storage)
+    monkeypatch.setattr(tasks, "get_storage", lambda: storage)
+
+    def broken():
+        raise psycopg.OperationalError("db down")
+
+    monkeypatch.setattr(tasks, "_agent", broken)
+    monkeypatch.setattr(tasks.classify_appeal, "retry", lambda **kw: Retry("retry"))
+    with pytest.raises(Retry):
+        tasks.classify_appeal.run(msg)
+    assert storage.jobs.get(msg["job_id"]).status == "queued"

@@ -212,6 +212,20 @@ def _agent():
     return worker_main.get_agent()
 
 
+def fail_without_agent(msg: dict, storage, exc: BaseException) -> None:
+    """Агент не создан (нет активной модели, битая модель): задача — в error.
+
+    Сначала claim, чтобы attempts/started_at были согласованы; агент не
+    кэшируется (worker_main.get_agent), следующая задача попробует снова.
+    """
+    log.error("Задача %s: агент не создан: %s", msg.get("job_id"), exc)
+    job = _claim(storage, msg["job_id"])
+    if job is None:
+        return
+    transitioned = _finish_error(storage, job.id, _error_text(exc))
+    _notify_webhook(storage, job, transitioned)
+
+
 def _retry_countdown(retries: int) -> int:
     return min(60, 5 * 2 ** retries)
 
@@ -220,10 +234,17 @@ def _retrying(task, fn, with_agent: bool, msg: dict) -> None:
     """storage/агент собираются внутри защищённой области: их сбой БД — тоже повтор."""
     try:
         storage = get_storage()
-        if with_agent:
-            fn(msg, storage, _agent())
-        else:
+        if not with_agent:
             fn(msg, storage)
+            return
+        try:
+            agent = _agent()
+        except INFRA_ERRORS:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            fail_without_agent(msg, storage, exc)
+            return
+        fn(msg, storage, agent)
     except (RetryableError, *INFRA_ERRORS) as exc:
         raise task.retry(exc=exc, countdown=_retry_countdown(task.request.retries),
                          max_retries=INFRA_MAX_RETRIES)
