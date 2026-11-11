@@ -7,3 +7,6 @@
 *.sh text eol=lf
 *.service text eol=lf
 *.service.template text eol=lf
+
+# Конфиг RabbitMQ монтируется в Linux-контейнер — только LF.
+deploy/rabbitmq/*.conf text eol=lf
