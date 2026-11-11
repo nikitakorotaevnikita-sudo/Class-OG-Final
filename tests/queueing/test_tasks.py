@@ -341,4 +341,86 @@ def test_celery_wrapper_converts_retryable_error_into_retry(monkeypatch):
     with pytest.raises(Retry):
         tasks.classify_appeal.run({"job_id": "x", "appeal_id": None, "document_id": None})
     assert captured["countdown"] == 5
-    assert captured["max_retries"] == config.JOB_MAX_ATTEMPTS
+    assert captured["max_retries"] == tasks.INFRA_MAX_RETRIES == 10
+
+
+def test_crash_redeliveries_capped_by_attempts(storage, no_webhook, monkeypatch):
+    """Воркер падал дважды (claim без finish) → третья доставка: ошибка, агент не вызван."""
+    monkeypatch.setattr(config, "JOB_MAX_ATTEMPTS", 2)
+    msg = _enqueue(storage, webhook_url="http://rx.local/hook")
+    storage.jobs.claim(msg["job_id"])
+    storage.jobs.claim(msg["job_id"])
+    agent = FakeAgent(storage)
+
+    tasks.run_classify_appeal(msg, storage, agent)
+
+    assert agent.calls == []
+    job = storage.jobs.get(msg["job_id"])
+    assert job.status == "error"
+    assert "Превышено число попыток" in job.error
+    assert len(no_webhook) == 1 and no_webhook[0][1]["status"] == "error"
+
+
+def test_finetune_crash_redeliveries_capped(storage, monkeypatch):
+    monkeypatch.setattr(config, "JOB_MAX_ATTEMPTS", 1)
+    job = storage.jobs.create("finetune", {}, queue_class="training")
+    storage.jobs.claim(job.id)
+
+    tasks.run_finetune({"job_id": job.id, "appeal_id": None, "document_id": None}, storage)
+
+    job = storage.jobs.get(job.id)
+    assert job.status == "error" and "Превышено число попыток" in job.error
+
+
+def test_finish_error_infra_failure_is_retryable(storage, monkeypatch):
+    msg = _enqueue(storage)
+
+    def broken_finish(*a, **kw):
+        raise psycopg.OperationalError("db down")
+
+    monkeypatch.setattr(storage.jobs, "finish", broken_finish)
+    with pytest.raises(tasks.RetryableError):
+        tasks._finish_error(storage, msg["job_id"], "RuntimeError: x")
+    # и в полном потоке: ошибка LLM, но записать её некуда → повтор, а не сырой psycopg
+    with pytest.raises(tasks.RetryableError):
+        tasks.run_classify_appeal(msg, storage, FakeAgent(storage, error=RuntimeError("llm")))
+
+
+def test_claim_infra_failure_is_retryable(storage, monkeypatch):
+    msg = _enqueue(storage)
+
+    def broken_claim(job_id):
+        raise psycopg.OperationalError("db down")
+
+    monkeypatch.setattr(storage.jobs, "claim", broken_claim)
+    agent = FakeAgent(storage)
+    with pytest.raises(tasks.RetryableError):
+        tasks.run_classify_appeal(msg, storage, agent)
+    assert agent.calls == []
+
+
+@pytest.mark.parametrize("retries, countdown", [(0, 5), (1, 10), (3, 40), (4, 60), (9, 60)])
+def test_wrapper_backoff_and_storage_failure_retry(monkeypatch, retries, countdown):
+    """Сбой БД при сборке storage тоже уходит в retry; пауза растёт экспоненциально."""
+    from celery.exceptions import Retry
+
+    def broken_storage():
+        raise psycopg.OperationalError("db down")
+
+    monkeypatch.setattr(tasks, "get_storage", broken_storage)
+    captured = {}
+
+    def fake_retry(**kw):
+        captured.update(kw)
+        return Retry("retry")
+
+    monkeypatch.setattr(tasks.search_classifier, "retry", fake_retry)
+    tasks.search_classifier.push_request(retries=retries)
+    try:
+        with pytest.raises(Retry):
+            tasks.search_classifier.run({"job_id": "x", "appeal_id": None, "document_id": None})
+    finally:
+        tasks.search_classifier.pop_request()
+    assert captured["countdown"] == countdown
+    assert captured["max_retries"] == 10
+    assert isinstance(captured["exc"], psycopg.OperationalError)

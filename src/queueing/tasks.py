@@ -10,8 +10,18 @@
 Повторы: при acks_late исключение задачи НЕ приводит к повторной доставке
 (только падение воркера). Поэтому инфраструктурный сбой (БД/брокер), пока
 `job.attempts < JOB_MAX_ATTEMPTS`, поднимается как RetryableError, а
-Celery-обёртка превращает его в `self.retry(...)`. Иначе задача завершается
-с ошибкой.
+Celery-обёртка превращает его в `self.retry(...)` с экспоненциальной паузой
+(5, 10, 20, 40, 60, 60… с, до INFRA_MAX_RETRIES повторов, ≈8 мин). Иначе задача
+завершается с ошибкой. Инфраструктурный сбой в любом месте — claim, транзакция
+работы, запись ошибки, сборка storage/агента в обёртке — тоже RetryableError.
+
+Падение воркера посреди задачи (OOM, SIGKILL) приводит к повторной доставке;
+claim увеличивает attempts, и при `attempts > JOB_MAX_ATTEMPTS` задача
+завершается ошибкой без запуска работы — бесконечного цикла падений нет.
+
+Остаточный случай: если БД/брокер недоступны дольше, чем покрывают
+INFRA_MAX_RETRIES повторов, строка задачи остаётся queued/running —
+фонового «подметальщика» таких задач пока нет.
 """
 import logging
 from typing import Optional
@@ -35,6 +45,9 @@ INFRA_ERRORS = (
 )
 
 
+INFRA_MAX_RETRIES = 10  # повторов Celery при сбое БД/брокера (≈8 мин с backoff)
+
+
 class RetryableError(Exception):
     """Инфраструктурный сбой: задачу нужно повторить (Celery retry)."""
 
@@ -44,9 +57,33 @@ def _error_text(exc: BaseException) -> str:
 
 
 def _finish_error(storage, job_id: str, error: str) -> bool:
-    """Завершить задачу с ошибкой в отдельной транзакции (прежняя откатилась)."""
-    with storage.transaction() as conn:
-        return storage.jobs.finish(job_id, result=None, error=error, conn=conn)
+    """Завершить задачу с ошибкой в отдельной транзакции (прежняя откатилась).
+
+    Сбой БД при этом — RetryableError: иначе задача навсегда осталась бы running.
+    """
+    try:
+        with storage.transaction() as conn:
+            return storage.jobs.finish(job_id, result=None, error=error, conn=conn)
+    except INFRA_ERRORS as exc:
+        raise RetryableError(_error_text(exc)) from exc
+
+
+def _claim(storage, job_id: str):
+    """claim с лимитом попыток. None — работать не нужно (завершена/лимит)."""
+    try:
+        job = storage.jobs.claim(job_id)
+    except INFRA_ERRORS as exc:
+        raise RetryableError(_error_text(exc)) from exc
+    if job is None:
+        return None  # задача уже завершена (повторная доставка) или не существует
+    if job.attempts > config.JOB_MAX_ATTEMPTS:
+        # Повторные доставки после падений воркера: работу больше не запускаем.
+        log.error("Задача %s: превышено число попыток (%d)", job_id, job.attempts)
+        transitioned = _finish_error(
+            storage, job_id, f"Превышено число попыток обработки ({job.attempts})")
+        _notify_webhook(storage, job, transitioned)
+        return None
+    return job
 
 
 def _notify_webhook(storage, job, transitioned: bool) -> None:
@@ -68,12 +105,9 @@ def _run(msg: dict, storage, work) -> None:
     `work` возвращает словарь результата либо бросает исключение.
     """
     job_id = msg["job_id"]
-    try:
-        job = storage.jobs.claim(job_id)
-    except INFRA_ERRORS as exc:
-        raise RetryableError(_error_text(exc)) from exc
+    job = _claim(storage, job_id)
     if job is None:
-        return  # задача уже завершена (повторная доставка) или не существует
+        return
 
     try:
         with storage.transaction() as conn:
@@ -145,10 +179,7 @@ def run_embed_annotation(msg: dict, storage, agent) -> None:
 
 def run_finetune(msg: dict, storage) -> None:
     job_id = msg["job_id"]
-    try:
-        job = storage.jobs.claim(job_id)
-    except INFRA_ERRORS as exc:
-        raise RetryableError(_error_text(exc)) from exc
+    job = _claim(storage, job_id)
     if job is None:
         return
     payload = job.payload or {}
@@ -164,8 +195,12 @@ def run_finetune(msg: dict, storage) -> None:
         error: Optional[str] = None
         if isinstance(status, dict) and status.get("status") == "failed":
             error = str(status.get("message") or "дообучение не удалось")
-        with storage.transaction() as conn:
-            transitioned = storage.jobs.finish(job_id, result=status, error=error, conn=conn)
+        try:
+            with storage.transaction() as conn:
+                transitioned = storage.jobs.finish(job_id, result=status, error=error,
+                                                   conn=conn)
+        except INFRA_ERRORS as exc:
+            raise RetryableError(_error_text(exc)) from exc
     _notify_webhook(storage, job, transitioned)
 
 
@@ -177,28 +212,38 @@ def _agent():
     return worker_main.get_agent()
 
 
-def _retrying(task, fn, *args) -> None:
+def _retry_countdown(retries: int) -> int:
+    return min(60, 5 * 2 ** retries)
+
+
+def _retrying(task, fn, with_agent: bool, msg: dict) -> None:
+    """storage/агент собираются внутри защищённой области: их сбой БД — тоже повтор."""
     try:
-        fn(*args)
-    except RetryableError as exc:
-        raise task.retry(exc=exc, countdown=5, max_retries=config.JOB_MAX_ATTEMPTS)
+        storage = get_storage()
+        if with_agent:
+            fn(msg, storage, _agent())
+        else:
+            fn(msg, storage)
+    except (RetryableError, *INFRA_ERRORS) as exc:
+        raise task.retry(exc=exc, countdown=_retry_countdown(task.request.retries),
+                         max_retries=INFRA_MAX_RETRIES)
 
 
 @app.task(name="classify_appeal", bind=True)
 def classify_appeal(self, msg: dict) -> None:
-    _retrying(self, run_classify_appeal, msg, get_storage(), _agent())
+    _retrying(self, run_classify_appeal, True, msg)
 
 
 @app.task(name="search_classifier", bind=True)
 def search_classifier(self, msg: dict) -> None:
-    _retrying(self, run_search_classifier, msg, get_storage(), _agent())
+    _retrying(self, run_search_classifier, True, msg)
 
 
 @app.task(name="embed_annotation", bind=True)
 def embed_annotation(self, msg: dict) -> None:
-    _retrying(self, run_embed_annotation, msg, get_storage(), _agent())
+    _retrying(self, run_embed_annotation, True, msg)
 
 
 @app.task(name="finetune", bind=True)
 def finetune(self, msg: dict) -> None:
-    _retrying(self, run_finetune, msg, get_storage())
+    _retrying(self, run_finetune, False, msg)
