@@ -1,14 +1,14 @@
 """Процесс воркера: singleton ClassifierAgent с горячей перезагрузкой.
 
 Celery запускается как `celery -A queueing.celery_app worker ...` с `src`
-в PYTHONPATH. Агент создаётся лениво (get_agent) и прогревается сигналами
-worker_process_init (prefork) и worker_ready (solo-пул, например Windows).
+в PYTHONPATH. Агент создаётся лениво (get_agent); прогрев по сигналам
+Celery подключает queueing.warmup (импортируется вместе с queueing.tasks и
+тянет этот модуль лишь в процессе, который выполняет задачи).
 """
 import logging
 import threading
 from typing import Optional
 
-from celery.signals import worker_process_init, worker_ready
 from dotenv import dotenv_values
 
 import config
@@ -83,14 +83,3 @@ def get_agent() -> ClassifierAgent:
         except Exception:
             log.exception("Обновление настроек из .env не удалось; повтор при следующем вызове")
         return _agent
-
-
-def _warm(**_kwargs) -> None:
-    try:
-        get_agent()
-    except Exception:
-        log.exception("Прогрев агента не удался; повторится при первой задаче")
-
-
-worker_process_init.connect(_warm, weak=False)
-worker_ready.connect(_warm, weak=False)

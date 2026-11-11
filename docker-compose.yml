@@ -47,6 +47,10 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-classifier}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-classifier}
+    volumes:
+      # consumer_timeout = 24 ч: задачи подтверждаются после выполнения, а
+      # стандартные 30 мин RabbitMQ оборвали бы долгую задачу и дообучение.
+      - ./deploy/rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/20-classifier.conf:ro
     ports:
       # Порты на хосте — RABBITMQ_PORT / RABBITMQ_MGMT_PORT (сменить, если на
       # машине уже работает свой RabbitMQ).

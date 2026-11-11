@@ -303,10 +303,10 @@ def test_card_and_job_status_commit_atomically(pg_conn, monkeypatch, no_webhook)
     msg = _enqueue(storage)
     real_finish = storage.jobs.finish
 
-    def finish(job_id, result, error, conn=None):
+    def finish(job_id, result, error, conn=None, attempts=None):
         if error is None:  # успешное завершение в транзакции классификации
             raise RuntimeError("сбой записи статуса")
-        return real_finish(job_id, result, error, conn=conn)
+        return real_finish(job_id, result, error, conn=conn, attempts=attempts)
 
     monkeypatch.setattr(storage.jobs, "finish", finish)
 
@@ -526,3 +526,112 @@ def test_run_finetune_failed_job_error(fake_training, no_webhook):
     assert job.status == "error" and "нет памяти" in job.error
     assert job.result["status"] == "failed"
     assert [mv.version for mv in storage.models.list()] == [0]
+
+
+# ── Владение задачей: устаревшая попытка не пишет карточку и не завершает задачу ──
+
+def _stale_claim(storage, monkeypatch):
+    """claim отдаёт попытку 1, но задачу тут же забирает повторная доставка (попытка 2)."""
+    real_claim = storage.jobs.claim
+
+    def claim(job_id, *a, **kw):
+        mine = real_claim(job_id, *a, **kw)
+        real_claim(job_id)  # RabbitMQ отдал сообщение второму воркеру
+        return mine
+
+    monkeypatch.setattr(storage.jobs, "claim", claim)
+
+
+def _run_stale(storage, monkeypatch, no_webhook):
+    msg = _enqueue(storage, webhook_url="http://rx.local/hook")
+    _stale_claim(storage, monkeypatch)
+    agent = FakeAgent(storage)
+    tasks.run_classify_appeal(msg, storage, agent)
+    return msg, agent
+
+
+def test_stale_attempt_does_not_overwrite_card_or_finish(storage, no_webhook, monkeypatch):
+    msg, agent = _run_stale(storage, monkeypatch, no_webhook)
+    assert agent.calls == []
+    assert _questions(storage, msg["appeal_id"]) == []
+    job = storage.jobs.get(msg["job_id"])
+    assert job.status == "running" and job.attempts == 2 and job.result is None
+    assert no_webhook == []
+
+
+def test_attempt_losing_ownership_mid_work_does_not_finish(storage, no_webhook, monkeypatch):
+    """Пока шла классификация, задачу забрала повторная доставка: finish не происходит."""
+    msg = _enqueue(storage, webhook_url="http://rx.local/hook")
+
+    class Redelivered(FakeAgent):
+        def classify(self, *a, **kw):
+            storage.jobs.claim(msg["job_id"])
+            return super().classify(*a, **kw)
+
+    tasks.run_classify_appeal(msg, storage, Redelivered(storage))
+    job = storage.jobs.get(msg["job_id"])
+    assert job.status == "running" and job.result is None
+    assert no_webhook == []
+
+
+def test_stale_attempt_error_does_not_finish_job(storage, no_webhook, monkeypatch):
+    msg = _enqueue(storage, webhook_url="http://rx.local/hook")
+
+    class Failing(FakeAgent):
+        def classify(self, *a, **kw):
+            storage.jobs.claim(msg["job_id"])  # повторная доставка
+            raise RuntimeError("LLM упал")
+
+    tasks.run_classify_appeal(msg, storage, Failing(storage))
+    job = storage.jobs.get(msg["job_id"])
+    assert job.status == "running" and job.error is None
+    assert no_webhook == []
+
+
+@pytest.mark.db
+def test_stale_attempt_does_not_overwrite_card_pg(pg_conn, monkeypatch, no_webhook):
+    from storage.pg import PgStorage
+
+    @contextmanager
+    def connect():
+        with pg_conn.transaction():
+            yield pg_conn
+
+    storage = PgStorage(connect)
+    msg, agent = _run_stale(storage, monkeypatch, no_webhook)
+    assert agent.calls == []
+    n = pg_conn.execute("SELECT count(*) FROM appeal_questions WHERE appeal_id = %s",
+                        (msg["appeal_id"],)).fetchone()[0]
+    assert n == 0
+    job = storage.jobs.get(msg["job_id"])
+    assert job.status == "running" and job.attempts == 2
+    assert no_webhook == []
+
+
+@pytest.mark.db
+def test_losing_ownership_mid_work_rolls_back_card_pg(pg_conn, monkeypatch, no_webhook):
+    """Условный finish (attempts) не прошёл → карточка устаревшей попытки откатывается."""
+    from storage.pg import PgStorage
+
+    @contextmanager
+    def connect():
+        with pg_conn.transaction():
+            yield pg_conn
+
+    storage = PgStorage(connect)
+    msg = _enqueue(storage, webhook_url="http://rx.local/hook")
+
+    class Redelivered(FakeAgent):
+        def classify(self, *a, log_conn=None, **kw):
+            # та же сессия держит блокировку строки — имитируем захват через UPDATE
+            log_conn.execute("UPDATE jobs SET attempts = attempts + 1 WHERE id = %s",
+                             (msg["job_id"],))
+            return super().classify(*a, log_conn=log_conn, **kw)
+
+    tasks.run_classify_appeal(msg, storage, Redelivered(storage))
+    n = pg_conn.execute("SELECT count(*) FROM appeal_questions WHERE appeal_id = %s",
+                        (msg["appeal_id"],)).fetchone()[0]
+    assert n == 0
+    job = storage.jobs.get(msg["job_id"])
+    assert job.status == "running" and job.result is None
+    assert no_webhook == []

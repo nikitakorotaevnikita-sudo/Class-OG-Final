@@ -233,6 +233,9 @@ DATABASE_URL: str = os.getenv(
 )
 DB_POOL_MAX: int = int(os.getenv("DB_POOL_MAX", "10"))
 RABBITMQ_URL: str = os.getenv("RABBITMQ_URL", "amqp://classifier:classifier@localhost:5672//")
+# Heartbeat AMQP, с. 0 — выключен: solo-пул не шлёт heartbeat во время задачи,
+# и RabbitMQ рвал бы соединение долгой классификации (повторная доставка).
+BROKER_HEARTBEAT_SEC: int = int(os.getenv("BROKER_HEARTBEAT_SEC", "0"))
 CLASSIFY_CONCURRENCY: int = int(os.getenv("CLASSIFY_CONCURRENCY", "2"))
 CLASSIFY_WORKERS: int = int(os.getenv("CLASSIFY_WORKERS", "2"))
 SYNC_WAIT_TIMEOUT_SEC: int = int(os.getenv("SYNC_WAIT_TIMEOUT_SEC", "1800"))

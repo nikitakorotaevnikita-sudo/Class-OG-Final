@@ -43,6 +43,10 @@ app.conf.update(
     worker_prefetch_multiplier=1,
     task_ignore_result=True,
     broker_connection_retry_on_startup=True,
+    # 0 = без heartbeat: в solo-пуле heartbeat во время задачи не отправляется,
+    # RabbitMQ закрыл бы соединение через 60-120 с и доставил задачу второму
+    # воркеру (см. BROKER_HEARTBEAT_SEC в .env.example).
+    broker_heartbeat=config.BROKER_HEARTBEAT_SEC,
     # Короткие таймауты отправки: при недоступном RabbitMQ запрос API не должен
     # висеть — диспетчер превращает сбой в DispatchError (503).
     broker_connection_timeout=3,

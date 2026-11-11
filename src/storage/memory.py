@@ -438,13 +438,24 @@ class MemoryJobStore:
             job.started_at = _utcnow()
             return copy.deepcopy(job)
 
-    def finish(self, job_id, result, error, conn=None):
+    def lock_owned(self, job_id, attempts, conn=None):
+        """Попытка `attempts` всё ещё владеет задачей (running)? Блокировок в памяти нет."""
+        if not _ID_RE.match(job_id or ""):
+            return False
+        with self._lock:
+            job = self._jobs.get(job_id)
+            return job is not None and job.status == STATUS_RUNNING and job.attempts == attempts
+
+    def finish(self, job_id, result, error, conn=None, attempts=None):
         if not _ID_RE.match(job_id or ""):
             return False
         with self._lock:
             job = self._jobs.get(job_id)
             if job is None or job.status not in (STATUS_QUEUED, STATUS_RUNNING):
                 return False
+            if attempts is not None and (job.status != STATUS_RUNNING
+                                         or job.attempts != attempts):
+                return False  # задачей владеет другая попытка
             job.status = STATUS_ERROR if error is not None else STATUS_DONE
             job.result = copy.deepcopy(result)
             job.error = error

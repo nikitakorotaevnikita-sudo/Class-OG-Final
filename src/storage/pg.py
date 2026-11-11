@@ -543,7 +543,25 @@ class PgJobStore(_PgBase):
             ).fetchone()
         return _job(row) if row else None
 
-    def finish(self, job_id, result, error, conn=None):
+    def lock_owned(self, job_id, attempts, conn=None):
+        """Попытка `attempts` всё ещё владеет задачей (running)? Строка блокируется.
+
+        FOR UPDATE держит блокировку до конца транзакции вызывающего: claim
+        повторной доставки ждёт commit и затем видит завершённую задачу.
+        """
+        if not _ID_RE.match(job_id or ""):
+            return False
+        with self._tx(conn) as c:
+            row = c.execute(
+                """SELECT 1 FROM jobs
+                   WHERE id = %s AND status = 'running' AND attempts = %s
+                   FOR UPDATE""",
+                (job_id, attempts),
+            ).fetchone()
+        return row is not None
+
+    def finish(self, job_id, result, error, conn=None, attempts=None):
+        """Завершить задачу. attempts задан → только если это всё ещё та попытка."""
         if not _ID_RE.match(job_id or ""):
             return False
         with self._tx(conn) as c:
@@ -551,9 +569,11 @@ class PgJobStore(_PgBase):
                 """UPDATE jobs SET status = %s, result = %s, error = %s,
                           finished_at = clock_timestamp()
                    WHERE id = %s AND status IN ('queued', 'running')
+                     AND (%s::int IS NULL OR (status = 'running' AND attempts = %s))
                    RETURNING id""",
                 ("error" if error is not None else "done",
-                 None if result is None else Jsonb(result), error, job_id),
+                 None if result is None else Jsonb(result), error, job_id,
+                 attempts, attempts),
             ).fetchone()
             if row is None:
                 return False

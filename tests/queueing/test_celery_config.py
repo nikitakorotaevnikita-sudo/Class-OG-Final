@@ -32,3 +32,11 @@ def test_short_broker_timeouts_for_publishing():
     assert app.conf.task_publish_retry_policy == {
         "max_retries": 2, "interval_start": 0, "interval_step": 0.5, "interval_max": 1,
     }
+
+
+def test_broker_heartbeat_from_config_default_disabled():
+    """solo-пул не шлёт heartbeat во время задачи — по умолчанию heartbeat выключен."""
+    import config
+
+    assert config.BROKER_HEARTBEAT_SEC == 0
+    assert app.conf.broker_heartbeat == config.BROKER_HEARTBEAT_SEC

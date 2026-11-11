@@ -90,6 +90,23 @@ def test_rabbitmq_service():
     assert "5672" in ports and "15672" in ports
 
 
+def test_rabbitmq_consumer_timeout_covers_long_tasks():
+    """acks_late + стандартные 30 мин consumer_timeout = повторная доставка дообучения."""
+    conf = ROOT / "deploy" / "rabbitmq" / "rabbitmq.conf"
+    lines = [ln.strip() for ln in conf.read_text(encoding="utf-8").splitlines()
+             if ln.strip() and not ln.strip().startswith("#")]
+    assert "consumer_timeout = 86400000" in lines
+    assert ("./deploy/rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/20-classifier.conf:ro"
+            in volumes_of("rabbitmq"))
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "consumer_timeout = 86400000" in readme
+
+
+def test_env_example_disables_broker_heartbeat():
+    text = (ROOT / ".env.example").read_text(encoding="utf-8")
+    assert re.search(r"^BROKER_HEARTBEAT_SEC=0\s*$", text, re.M)
+
+
 def test_migrate_runs_once_after_postgres():
     mig = services()["migrate"]
     assert mig["build"] == "."

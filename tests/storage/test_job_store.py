@@ -239,3 +239,55 @@ def test_elapsed_sec_rule():
     waiting = Job(**{**done.__dict__, "started_at": None, "finished_at": None,
                      "created_at": now - timedelta(seconds=5)})
     assert 4.9 <= waiting.elapsed_sec <= 6.0
+
+
+# ── Владение задачей (повторная доставка не перезаписывает результат) ──────
+
+def test_lock_owned_only_for_current_running_attempt(storage):
+    job = storage.jobs.create("classify", {})
+    assert storage.jobs.lock_owned(job.id, 0) is False  # ещё queued
+    first = storage.jobs.claim(job.id)
+    assert storage.jobs.lock_owned(job.id, first.attempts) is True
+    second = storage.jobs.claim(job.id)  # повторная доставка другому воркеру
+    assert storage.jobs.lock_owned(job.id, first.attempts) is False
+    assert storage.jobs.lock_owned(job.id, second.attempts) is True
+    assert storage.jobs.lock_owned("nope", 1) is False
+
+
+def test_finish_with_stale_attempts_does_not_transition(storage):
+    job = storage.jobs.create("classify", {})
+    first = storage.jobs.claim(job.id)
+    second = storage.jobs.claim(job.id)
+    assert storage.jobs.finish(job.id, {"by": "first"}, None, attempts=first.attempts) is False
+    got = storage.jobs.get(job.id)
+    assert got.status == STATUS_RUNNING and got.result is None
+    assert storage.jobs.finish(job.id, {"by": "second"}, None, attempts=second.attempts) is True
+    assert storage.jobs.get(job.id).result == {"by": "second"}
+
+
+@pytest.mark.db
+def test_lock_owned_holds_row_lock_until_commit(pg_conn):
+    """Пока транзакция владельца открыта, claim повторной доставки ждёт (не дублирует работу)."""
+    import psycopg
+    from psycopg import errors
+
+    from storage.pg import PgStorage
+
+    @contextmanager
+    def connect():
+        with pg_conn.transaction():
+            yield pg_conn
+
+    store = PgStorage(connect).jobs
+    job = store.create("classify", {})
+    claimed = store.claim(job.id)
+    search_path = pg_conn.execute("SHOW search_path").fetchone()[0]
+    with psycopg.connect(os.environ["TEST_DATABASE_URL"], autocommit=True) as other:
+        other.execute(f"SET search_path TO {search_path}")
+        other.execute("SET lock_timeout = '300ms'")
+        with pg_conn.transaction():
+            assert store.lock_owned(job.id, claimed.attempts, conn=pg_conn) is True
+            with pytest.raises(errors.LockNotAvailable):
+                other.execute("UPDATE jobs SET attempts = attempts + 1 WHERE id = %s",
+                              (job.id,))
+        other.execute("UPDATE jobs SET attempts = attempts + 1 WHERE id = %s", (job.id,))

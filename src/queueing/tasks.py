@@ -31,6 +31,7 @@ from kombu.exceptions import OperationalError as KombuOperationalError
 
 import config
 import responses
+from queueing import warmup  # noqa: F401 — подключает прогрев агента к сигналам воркера
 from queueing import webhook
 from queueing.celery_app import app
 from storage import get_storage
@@ -56,14 +57,16 @@ def _error_text(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {exc}"
 
 
-def _finish_error(storage, job_id: str, error: str) -> bool:
+def _finish_error(storage, job_id: str, error: str, attempts: Optional[int] = None) -> bool:
     """Завершить задачу с ошибкой в отдельной транзакции (прежняя откатилась).
 
+    attempts — попытка, которая ещё должна владеть задачей (иначе ничего не делаем).
     Сбой БД при этом — RetryableError: иначе задача навсегда осталась бы running.
     """
     try:
         with storage.transaction() as conn:
-            return storage.jobs.finish(job_id, result=None, error=error, conn=conn)
+            return storage.jobs.finish(job_id, result=None, error=error, conn=conn,
+                                       attempts=attempts)
     except INFRA_ERRORS as exc:
         raise RetryableError(_error_text(exc)) from exc
 
@@ -80,7 +83,8 @@ def _claim(storage, job_id: str):
         # Повторные доставки после падений воркера: работу больше не запускаем.
         log.error("Задача %s: превышено число попыток (%d)", job_id, job.attempts)
         transitioned = _finish_error(
-            storage, job_id, f"Превышено число попыток обработки ({job.attempts})")
+            storage, job_id, f"Превышено число попыток обработки ({job.attempts})",
+            attempts=job.attempts)
         _notify_webhook(storage, job, transitioned)
         return None
     return job
@@ -99,10 +103,20 @@ def _notify_webhook(storage, job, transitioned: bool) -> None:
         log.exception("webhook для задачи %s не отправлен", job.id)
 
 
+class _NotOwned(Exception):
+    """Задачей владеет другая попытка (повторная доставка) — результат отбрасывается."""
+
+
 def _run(msg: dict, storage, work) -> None:
     """Общий каркас: claim → work(job, conn) в транзакции → finish → webhook.
 
     `work` возвращает словарь результата либо бросает исключение.
+
+    Владение: транзакция работы начинается с jobs.lock_owned (строка задачи под
+    FOR UPDATE, только если она running с attempts этой попытки), а finish —
+    условный по attempts. Если сообщение тем временем доставлено другому
+    воркеру (обрыв соединения с RabbitMQ), устаревшая попытка откатывает свою
+    транзакцию и ничего не пишет: ни карточку, ни статус, ни webhook.
     """
     job_id = msg["job_id"]
     job = _claim(storage, job_id)
@@ -111,15 +125,24 @@ def _run(msg: dict, storage, work) -> None:
 
     try:
         with storage.transaction() as conn:
+            if not storage.jobs.lock_owned(job_id, job.attempts, conn=conn):
+                raise _NotOwned
             result = work(job, conn)
-            transitioned = storage.jobs.finish(job_id, result=result, error=None, conn=conn)
+            transitioned = storage.jobs.finish(job_id, result=result, error=None, conn=conn,
+                                               attempts=job.attempts)
+            if not transitioned:
+                raise _NotOwned  # откат карточки этой попытки
+    except _NotOwned:
+        log.warning("Задача %s: попытка %d больше не владеет задачей "
+                    "(повторная доставка); результат отброшен", job_id, job.attempts)
+        return
     except Exception as exc:  # noqa: BLE001
         if isinstance(exc, INFRA_ERRORS) and job.attempts < config.JOB_MAX_ATTEMPTS:
             log.warning("Задача %s: сбой инфраструктуры (попытка %d/%d): %s",
                         job_id, job.attempts, config.JOB_MAX_ATTEMPTS, exc)
             raise RetryableError(_error_text(exc)) from exc
         log.exception("Задача %s завершилась с ошибкой", job_id)
-        transitioned = _finish_error(storage, job_id, _error_text(exc))
+        transitioned = _finish_error(storage, job_id, _error_text(exc), attempts=job.attempts)
     _notify_webhook(storage, job, transitioned)
 
 
@@ -190,7 +213,7 @@ def run_finetune(msg: dict, storage) -> None:
                               force=payload.get("force", False))
     except Exception as exc:  # noqa: BLE001 — дообучение не повторяется автоматически
         log.exception("Дообучение (задача %s) упало", job_id)
-        transitioned = _finish_error(storage, job_id, _error_text(exc))
+        transitioned = _finish_error(storage, job_id, _error_text(exc), attempts=job.attempts)
     else:
         error: Optional[str] = None
         if isinstance(status, dict) and status.get("status") == "failed":
@@ -198,7 +221,7 @@ def run_finetune(msg: dict, storage) -> None:
         try:
             with storage.transaction() as conn:
                 transitioned = storage.jobs.finish(job_id, result=status, error=error,
-                                                   conn=conn)
+                                                   conn=conn, attempts=job.attempts)
         except INFRA_ERRORS as exc:
             raise RetryableError(_error_text(exc)) from exc
     _notify_webhook(storage, job, transitioned)
@@ -222,7 +245,7 @@ def fail_without_agent(msg: dict, storage, exc: BaseException) -> None:
     job = _claim(storage, msg["job_id"])
     if job is None:
         return
-    transitioned = _finish_error(storage, job.id, _error_text(exc))
+    transitioned = _finish_error(storage, job.id, _error_text(exc), attempts=job.attempts)
     _notify_webhook(storage, job, transitioned)
 
 
