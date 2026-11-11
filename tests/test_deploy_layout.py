@@ -157,8 +157,8 @@ def test_infra_ports_bound_to_loopback_by_default():
     pg = [str(p) for p in services()["postgres"]["ports"]]
     assert pg == ["${POSTGRES_BIND:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"]
     rmq = [str(p) for p in services()["rabbitmq"]["ports"]]
-    assert rmq and all(p.startswith("${RABBITMQ_BIND:-127.0.0.1}:") for p in rmq)
-    assert {p.rsplit(":", 1)[1] for p in rmq} == {"5672", "15672"}
+    assert rmq == ["${RABBITMQ_BIND:-127.0.0.1}:${RABBITMQ_PORT:-5672}:5672",
+                   "${RABBITMQ_BIND:-127.0.0.1}:${RABBITMQ_MGMT_PORT:-15672}:15672"]
 
 
 # ── Образ ───────────────────────────────────────────────────────────────────
@@ -250,7 +250,7 @@ def test_run_dir_is_ignored():
     "JOB_MAX_ATTEMPTS", "ENABLE_ANNOTATION_VECTORS", "WEBHOOK_ALLOWED_HOSTS",
     "WEBHOOK_SECRET", "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB",
     "POSTGRES_PORT", "RABBITMQ_DEFAULT_USER", "RABBITMQ_DEFAULT_PASS",
-    "POSTGRES_BIND", "RABBITMQ_BIND",
+    "POSTGRES_BIND", "RABBITMQ_BIND", "RABBITMQ_PORT", "RABBITMQ_MGMT_PORT",
 ])
 def test_env_example_declares_key_once(key):
     text = (ROOT / ".env.example").read_text(encoding="utf-8")

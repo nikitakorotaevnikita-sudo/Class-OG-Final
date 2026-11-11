@@ -48,11 +48,13 @@ services:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-classifier}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-classifier}
     ports:
+      # Порты на хосте — RABBITMQ_PORT / RABBITMQ_MGMT_PORT (сменить, если на
+      # машине уже работает свой RabbitMQ).
       # Только loopback по умолчанию (RABBITMQ_BIND); наружу — для нескольких
       # машин и только после смены RABBITMQ_DEFAULT_PASS.
-      - "${RABBITMQ_BIND:-127.0.0.1}:5672:5672"
+      - "${RABBITMQ_BIND:-127.0.0.1}:${RABBITMQ_PORT:-5672}:5672"
       # Веб-консоль управления очередями: http://localhost:15672
-      - "${RABBITMQ_BIND:-127.0.0.1}:15672:15672"
+      - "${RABBITMQ_BIND:-127.0.0.1}:${RABBITMQ_MGMT_PORT:-15672}:15672"
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s

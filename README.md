@@ -513,7 +513,7 @@ Directum RX / UI ──HTTP──► API (FastAPI, без модели)
 | Сервис | Что делает |
 |---|---|
 | `postgres` | `pgvector/pgvector:pg16`, данные в томе `pgdata`, схема из `deploy/db/init/` при первом создании тома. Порт на хосте — `127.0.0.1:POSTGRES_PORT` (5432) |
-| `rabbitmq` | `rabbitmq:3.13-management`, порты 5672 и 15672 (веб-консоль очередей), по умолчанию только на `127.0.0.1` |
+| `rabbitmq` | `rabbitmq:3.13-management`, порты `RABBITMQ_PORT` (5672) и `RABBITMQ_MGMT_PORT` (15672, веб-консоль очередей), по умолчанию только на `127.0.0.1` |
 | `migrate` | разовый: `init_db.py` (схема, идемпотентно) + `migrate_from_files.py` (импорт файлов). При расхождении сверки выходит с ошибкой, и API не стартует |
 | `api` | uvicorn, `HOST_PORT` (8010) → 8005. Без модели и без файлов с ПДн |
 | `worker-classify` | `-Q classify_sync,classify -c CLASSIFY_CONCURRENCY`; масштабируется `docker compose up -d --scale worker-classify=3` |
@@ -549,6 +549,7 @@ Directum RX / UI ──HTTP──► API (FastAPI, без модели)
 
 ### Эксплуатация
 
+- **Порты заняты родными PostgreSQL/RabbitMQ.** Если на хосте уже работают свои PostgreSQL (5432) или RabbitMQ (5672/15672), задать в `.env` другие `POSTGRES_PORT` / `RABBITMQ_PORT` / `RABBITMQ_MGMT_PORT` (например 5434 / 5673 / 15673) и те же порты в `DATABASE_URL` / `RABBITMQ_URL` — иначе локальный режим подключится к чужим серверам.
 - **`SYNC_WAIT_TIMEOUT_SEC`** (1800) — сколько синхронные эндпоинты ждут результат. По истечении
   отвечают `504`, задача при этом продолжает выполняться и её результат сохраняется в БД. Если БД
   или брокер недоступны — `503`.
