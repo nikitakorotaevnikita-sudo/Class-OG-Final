@@ -476,10 +476,46 @@ class MemoryJobStore:
                 self._store(copy.deepcopy(job))
 
 
+class MemoryHistoricalStore:
+    """Исторические размеченные обращения; ключ дедупа как у индекса hist_dedup."""
+
+    def __init__(self) -> None:
+        self._rows: list[dict] = []
+        self._keys: set[tuple] = set()
+        self._lock = threading.RLock()
+
+    def add(self, records, source_file):
+        inserted = 0
+        with self._lock:
+            for r in records:
+                text = r.get("appeal_text", "")
+                code = r.get("assigned_code", "")
+                date = r.get("date")
+                key = (source_file or "", text, code, date or "")
+                if key in self._keys:
+                    continue
+                self._keys.add(key)
+                self._rows.append({
+                    "appeal_text": text, "assigned_code": code,
+                    "specialist": r.get("specialist"), "registration_date": date,
+                    "source_file": source_file,
+                })
+                inserted += 1
+        return inserted
+
+    def count(self):
+        with self._lock:
+            return len(self._rows)
+
+    def all(self):
+        with self._lock:
+            return [dict(r) for r in self._rows]
+
+
 class MemoryStorage(Storage):
     def __init__(self) -> None:
         models = MemoryModelStore()
         super().__init__(
             classifier=MemoryClassifierStore(models), models=models,
-            appeals=MemoryAppealStore(), jobs=MemoryJobStore(),
+            appeals=MemoryAppealStore(), jobs=MemoryJobStore(), historical=MemoryHistoricalStore(),
         )

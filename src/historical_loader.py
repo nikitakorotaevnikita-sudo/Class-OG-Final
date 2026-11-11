@@ -134,28 +134,15 @@ def validate_codes(records: list[dict]) -> ValidationResult:
     return ValidationResult(valid_records, invalid_records, errors, stats)
 
 
-HISTORICAL_FILE = Path("data/historical_verified.jsonl")
-
-
-def save_to_historical_jsonl(records: list[dict], source_file: str) -> str:
+def save_to_historical_db(records: list[dict], source_file: str, storage=None) -> int:
     """
-    Сохраняет валидные записи в data/historical_verified.jsonl
+    Сохраняет валидные записи в БД (таблица historical_appeals).
+    Дубликаты пропускаются.
 
     Returns:
-        путь к файлу
+        количество реально добавленных записей
     """
-    HISTORICAL_FILE.parent.mkdir(parents=True, exist_ok=True)
-
-    with open(HISTORICAL_FILE, "a", encoding="utf-8") as f:
-        for record in records:
-            entry = {
-                "source": source_file,
-                "appeal_text": record.get("appeal_text", ""),
-                "assigned_code": record.get("assigned_code", ""),
-                "specialist": record.get("specialist"),
-                "date": record.get("date"),
-                "timestamp": pd.Timestamp.now().isoformat()
-            }
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-
-    return str(HISTORICAL_FILE)
+    if storage is None:
+        from storage import get_storage
+        storage = get_storage()
+    return storage.historical.add(records, source_file)

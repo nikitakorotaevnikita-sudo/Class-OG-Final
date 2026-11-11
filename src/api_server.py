@@ -628,9 +628,9 @@ async def confirm_historical(request: dict):
     if not preview:
         raise HTTPException(status_code=400, detail="Нет валидных записей для сохранения")
 
-    from historical_loader import save_to_historical_jsonl
+    from historical_loader import save_to_historical_db
     filename = _last_historical_upload.get("filename", "unknown")
-    save_to_historical_jsonl(preview, filename)
+    save_to_historical_db(preview, filename)
 
     _last_historical_upload = {}
     return {"status": "ok", "records_saved": len(preview)}

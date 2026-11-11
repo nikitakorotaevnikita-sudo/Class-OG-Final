@@ -1,7 +1,7 @@
 """auto_import_historical.py — Автоматический импорт исторических данных
 
 Сканирует папку data/historical/ на предмет новых файлов (.xlsx, .xls, .csv, .json),
-парсит и валидирует их, сохраняет валидные записи в historical_verified.jsonl,
+парсит и валидирует их, сохраняет валидные записи в базу данных (historical_appeals),
 перемещает обработанные файлы в processed/, а файлы с ошибками — в errors/.
 
 Usage:
@@ -19,7 +19,7 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from historical_loader import parse_file, validate_codes, save_to_historical_jsonl, ValidationResult
+from historical_loader import parse_file, validate_codes, save_to_historical_db, ValidationResult
 
 HISTORICAL_DIR = Path("data/historical")
 PROCESSED_DIR = HISTORICAL_DIR / "processed"
@@ -114,8 +114,8 @@ def process_file(file_path: Path) -> dict:
     result["stats"] = validation_result.stats
 
     if validation_result.valid_records > 0:
-        saved_to = save_to_historical_jsonl(validation_result.valid_records, file_path.name)
-        result["saved_to"] = saved_to
+        save_to_historical_db(validation_result.valid_records, file_path.name)
+        result["saved_to"] = "database"
         result["success"] = True
 
     if validation_result.errors > 0:

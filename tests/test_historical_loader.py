@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-from historical_loader import parse_file, validate_codes, save_to_historical_jsonl, ValidationResult
+from historical_loader import parse_file, validate_codes, save_to_historical_db, ValidationResult
 
 
 def test_parse_csv(tmp_path):
@@ -35,16 +35,18 @@ def test_validate_codes_invalid(tmp_path):
     assert len(result.errors) == 1
 
 
-def test_save_to_historical_jsonl(tmp_path, monkeypatch):
-    hist_file = tmp_path / "historical_verified.jsonl"
-    monkeypatch.setattr("historical_loader.HISTORICAL_FILE", hist_file)
+def test_save_to_historical_db():
+    from storage.memory import MemoryStorage
 
-    records = [{"appeal_text": "текст", "assigned_code": "0005.0005.0056.1160"}]
-    path = save_to_historical_jsonl(records, "test.csv")
+    st = MemoryStorage()
+    records = [{"appeal_text": "текст", "assigned_code": "0005.0005.0056.1160",
+                "specialist": "Иванов", "date": "2025-02-02"}]
+    assert save_to_historical_db(records, "test.csv", storage=st) == 1
+    assert save_to_historical_db(records, "test.csv", storage=st) == 0
 
-    assert hist_file.exists()
-    with open(hist_file, encoding="utf-8") as f:
-        line = f.readline()
-        data = json.loads(line)
-        assert data["appeal_text"] == "текст"
-        assert data["assigned_code"] == "0005.0005.0056.1160"
+    rows = st.historical.all()
+    assert len(rows) == 1
+    assert rows[0]["appeal_text"] == "текст"
+    assert rows[0]["assigned_code"] == "0005.0005.0056.1160"
+    assert rows[0]["registration_date"] == "2025-02-02"
+    assert rows[0]["source_file"] == "test.csv"

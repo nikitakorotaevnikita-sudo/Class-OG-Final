@@ -585,6 +585,39 @@ class PgJobStore(_PgBase):
             )
 
 
+class PgHistoricalStore(_PgBase):
+    def add(self, records, source_file, conn=None):
+        inserted = 0
+        with self._tx(conn) as c:
+            for r in records:
+                cur = c.execute(
+                    """INSERT INTO historical_appeals
+                           (source_file, appeal_text, assigned_code, specialist, registration_date)
+                       VALUES (%s,%s,%s,%s,%s)
+                       ON CONFLICT DO NOTHING""",
+                    (source_file, r.get("appeal_text", ""), r.get("assigned_code", ""),
+                     r.get("specialist"), r.get("date")),
+                )
+                inserted += cur.rowcount
+        return inserted
+
+    def count(self, conn=None):
+        with self._tx(conn) as c:
+            return c.execute("SELECT count(*) FROM historical_appeals").fetchone()[0]
+
+    def all(self, conn=None):
+        with self._tx(conn) as c:
+            rows = c.execute(
+                """SELECT appeal_text, assigned_code, specialist, registration_date, source_file
+                   FROM historical_appeals ORDER BY id"""
+            ).fetchall()
+        return [
+            {"appeal_text": r[0], "assigned_code": r[1], "specialist": r[2],
+             "registration_date": r[3], "source_file": r[4]}
+            for r in rows
+        ]
+
+
 class PgStorage(Storage):
     def __init__(self, connect: ConnectFn = db.transaction) -> None:
         super().__init__(
@@ -592,4 +625,5 @@ class PgStorage(Storage):
             models=PgModelStore(connect),
             appeals=PgAppealStore(connect),
             jobs=PgJobStore(connect),
+            historical=PgHistoricalStore(connect),
         )
