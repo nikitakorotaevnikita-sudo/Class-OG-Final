@@ -162,9 +162,10 @@ elif [ -f offline_bundle/vector_db_prebuilt/embeddings.npy ]; then
        offline_bundle/vector_db_prebuilt/metadata.json "$VDB/"
     ok "готовая база скопирована в $VDB"
 else
-    say "готовой базы нет — считаю локальной моделью, 10-15 минут"
-    "$VENV_PY" src/build_vectordb.py || die "не удалось собрать векторную базу"
+    warn "нет файлов векторов в $VDB — перенос в PostgreSQL (./start.sh migrate) не пройдёт"
 fi
+say "векторы переносятся в PostgreSQL командой ./start.sh migrate"
+say "(./start.sh local делает это сам; в Docker — сервис migrate)"
 
 "$VENV_PY" scripts/check_offline.py --stage post || {
     warn "проверка нашла проблемы — см. выше"

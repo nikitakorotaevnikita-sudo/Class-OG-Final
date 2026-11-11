@@ -5,7 +5,7 @@
 #   ./install.sh                    обычная установка (torch для CPU)
 #   ./install.sh --gpu              torch с CUDA (образ втрое тяжелее)
 #   ./install.sh --non-interactive  без вопросов: значения из окружения
-#   ./install.sh --systemd          дополнительно собрать unit-файл
+#   ./install.sh --systemd          не поддерживается (см. ./start.sh)
 #
 # Неинтерактивный режим читает те же имена, что и .env:
 #   LLM_PROVIDER, ARIO_API_KEY, ARIO_BASE_URL, CUSTOM_LLM_BASE_URL,
@@ -16,14 +16,17 @@ set -uo pipefail
 cd "$(dirname "$(readlink -f "$0")")"
 
 TORCH_FLAVOUR=cpu
-MAKE_SYSTEMD=0
 PORT="${PORT:-8010}"
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --gpu)             TORCH_FLAVOUR=cuda ;;
         --non-interactive) NONINTERACTIVE=1 ;;
-        --systemd)         MAKE_SYSTEMD=1 ;;
+        --systemd)
+            printf 'systemd-юниты для нового состава (API + воркеры + PostgreSQL + RabbitMQ)\n' >&2
+            printf 'не поддерживаются: unit запускал бы только API без воркеров.\n' >&2
+            printf 'Используйте docker compose (./start.sh) или ./start.sh local.\n' >&2
+            exit 1 ;;
         --port)            shift; PORT="${1:-8010}" ;;
         -h|--help)         sed -n '2,20p' "$0"; exit 0 ;;
         *)                 printf 'Неизвестный аргумент: %s\n' "$1" >&2; exit 2 ;;
@@ -137,7 +140,7 @@ fi
 chmod 600 "$ENV_FILE" 2>/dev/null && ok ".env закрыт правами 600 (в нём ключи)"
 
 # ── 5. Векторная база ─────────────────────────────────────────────────────────
-step "5/6" "Векторная база"
+step "5/6" "Векторы для переноса в PostgreSQL"
 VDB="$(vdb_dir)"
 if [ -f "$VDB/embeddings.npy" ]; then
     ok "база на месте: $VDB"
@@ -147,10 +150,10 @@ elif [ -f offline_bundle/vector_db_prebuilt/embeddings.npy ]; then
        offline_bundle/vector_db_prebuilt/metadata.json "$VDB/"
     ok "готовая база скопирована из комплекта в $VDB"
 else
-    say "базы нет — собираю локально, это 10-15 минут"
-    "$VENV_PY" src/build_vectordb.py || die "не удалось собрать векторную базу"
-    ok "база собрана"
+    warn "нет файлов векторов в $VDB — перенос в PostgreSQL (./start.sh migrate) не пройдёт"
 fi
+say "векторы переносятся в PostgreSQL командой ./start.sh migrate"
+say "(./start.sh local делает это сам; в Docker — сервис migrate)"
 
 # ── 6. Проверка ───────────────────────────────────────────────────────────────
 step "6/6" "Проверка установки"
@@ -158,21 +161,6 @@ step "6/6" "Проверка установки"
     warn "проверка нашла проблемы — см. выше"
     CHECK_FAILED=1
 }
-
-# ── systemd (по флагу) ────────────────────────────────────────────────────────
-if [ "$MAKE_SYSTEMD" = "1" ]; then
-    UNIT=deploy/classifier.service
-    mkdir -p deploy
-    sed -e "s|@WORKDIR@|$PWD|g" \
-        -e "s|@USER@|$(id -un)|g" \
-        -e "s|@PORT@|$PORT|g" \
-        deploy/classifier.service.template > "$UNIT"
-    ok "unit собран: $UNIT"
-    printf '\n   Установить сервис:\n'
-    printf '     sudo cp %s /etc/systemd/system/classifier.service\n' "$UNIT"
-    printf '     sudo systemctl daemon-reload\n'
-    printf '     sudo systemctl enable --now classifier\n'
-fi
 
 banner "Установка завершена"
 printf '   Запуск:      ./start.sh local --port %s  (или ./start.sh — весь стек в Docker)\n' "$PORT"

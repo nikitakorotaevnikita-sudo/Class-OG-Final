@@ -3,7 +3,7 @@
 # =============================================================================
 # Usage (from project root, in PowerShell):
 #   .\setup.ps1
-#   .\setup.ps1 -SkipVectorDB   # skip vector DB build if already exists
+#   .\setup.ps1 -SkipVectorDB   # accepted for compatibility, no effect
 # =============================================================================
 
 param(
@@ -188,27 +188,13 @@ $envContent | Set-Content ".env" -Encoding UTF8
 Write-Host "   OK: .env created with provider: $llmProvider" -ForegroundColor Green
 
 # =============================================================================
-# STEP 5: Build vector database
+# STEP 5: Vector database
 # =============================================================================
-if ($SkipVectorDB) {
-    Write-Host "`n[STEP 5] Skipped (-SkipVectorDB flag)" -ForegroundColor Yellow
-} else {
-    Write-Host "`n[STEP 5] Building vector database (5-15 min first time)..." -ForegroundColor Yellow
-
-    if (Test-Path "data\vector_db\embeddings.npy") {
-        Write-Host "   OK: Vector database already exists, skipping" -ForegroundColor Green
-    } else {
-        Write-Host "   Loading multilingual-e5-base (~435 MB) and vectorizing 2108 entries..." -ForegroundColor White
-        Write-Host "   This may take several minutes on first run." -ForegroundColor Gray
-        Write-Host ""
-        & $venvPython src/build_vectordb.py
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "ERROR: Failed to build vector database" -ForegroundColor Red
-            exit 1
-        }
-        Write-Host "   OK: Vector database built" -ForegroundColor Green
-    }
-}
+# Vectors live in PostgreSQL now. They are imported from the VECTOR_DB_DIR
+# files by "start.cmd migrate" (start.cmd local does it automatically).
+Write-Host "`n[STEP 5] Vector database" -ForegroundColor Yellow
+Write-Host "   Vectors are imported into PostgreSQL by 'start.cmd migrate'" -ForegroundColor White
+Write-Host "   (start.cmd local runs it automatically; Docker: compose service migrate)." -ForegroundColor Gray
 
 # =============================================================================
 # DONE

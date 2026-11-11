@@ -191,23 +191,13 @@ CUSTOM_LLM_MODEL=gpt-oss-20b \
 создавшему их интерпретатору, поэтому переносить каталог между машинами нельзя. Установщик
 проверяет окружение (`venv/bin/python -m pip --version`) и пересоздаёт его, если оно нерабочее.
 
-### Запуск через systemd
+### systemd — не поддерживается
 
-```bash
-./install.sh --systemd          # соберёт deploy/classifier.service с вашими путями
-sudo cp deploy/classifier.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now classifier
-journalctl -u classifier -f     # логи
-```
-
-В unit-файле намеренно **нет `EnvironmentFile`**: `.env` читает сам сервис через
-`python-dotenv`, а systemd разбирает такой файл по своим правилам и спотыкается на значениях
-с `#` и кавычками. `TimeoutStartSec=180` поставлен потому, что модель эмбеддингов грузится до
-минуты, и systemd не должен считать это зависанием.
-
-Правки `.env` из бэк-офиса применяются на лету — перезапуск нужен только после ручной правки
-файла: `sudo systemctl restart classifier`.
+Прежний unit-файл запускал только API. В новом составе (API + воркеры Celery + PostgreSQL +
+RabbitMQ) такой сервис без воркеров отвечал бы `504` на каждый синхронный вызов, поэтому шаблон
+удалён, а `./install.sh --systemd` завершается с ошибкой и подсказкой. Для постоянной работы
+используйте `docker compose` (`./start.sh`, контейнеры с `restart: unless-stopped`) или
+`./start.sh local` (API и воркеры из venv, PostgreSQL и RabbitMQ в Docker).
 
 ### Фоновая обработка задач
 

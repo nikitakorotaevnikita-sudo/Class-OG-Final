@@ -249,26 +249,14 @@ echo    OK: RX integration configured
 echo    OK: .env configured
 
 :: =============================================================
-:: STEP 5: Build vector database
+:: STEP 5: Vector database
 :: =============================================================
+:: Vectors live in PostgreSQL now. They are imported from the VECTOR_DB_DIR
+:: files (shipped in Git) by "start.cmd migrate" - nothing to build here.
 echo.
-echo [5/5] Building vector database (5-15 min first time)...
-
-if exist "data\vector_db\embeddings.npy" (
-    echo    OK: Vector database already exists, skipping
-) else (
-    echo    Loading multilingual-e5-base model and vectorizing 2108 entries...
-    echo    Please wait...
-    echo.
-    venv\Scripts\python.exe src/build_vectordb.py
-    if %errorlevel% neq 0 (
-        echo.
-        echo    ERROR: Vector DB build failed. Check output above.
-        pause
-        exit /b 1
-    )
-    echo    OK: Vector database built
-)
+echo [5/5] Vector database
+echo    Vectors are imported into PostgreSQL by "start.cmd migrate"
+echo    (start.cmd local does it automatically; Docker: compose service migrate).
 
 :: =============================================================
 :: DONE

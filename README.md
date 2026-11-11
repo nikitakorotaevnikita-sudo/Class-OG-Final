@@ -116,7 +116,8 @@
 
 ### Dense (семантический) поиск
 
-Перед первым запуском `build_vectordb.py` векторизует все 2108 записей классификатора:
+Каждая из 2108 записей классификатора хранится вектором (в PostgreSQL/pgvector; исходные
+векторы v0 переносятся из файлов `VECTOR_DB_DIR` шагом `migrate`):
 
 ```
 "Ремонт автомобильных дорог"  →  [0.12, -0.43, 0.87, ..., 0.21]  (768 чисел)
@@ -711,8 +712,13 @@ stop.cmd               :: остановить (том с данными сох�
 Разово — `launch.bat server 9100` (или `start.cmd local --port 9100`), постоянно — строкой
 `API_PORT=` в `.env`. В Docker-режиме порт на хосте задаёт `HOST_PORT`.
 
-На Linux то же самое: `./launch.sh` (меню), `./launch.sh server 9100`. Шаблон unit-файла systemd
-из [DEPLOY.md](docs/DEPLOY.md) запускает только API — для нового стека используйте `start.sh`.
+На Linux то же самое: `./launch.sh` (меню), `./launch.sh server 9100`. systemd-юниты для нового
+состава не поддерживаются (`./install.sh --systemd` завершается с ошибкой) — используйте
+`./start.sh` (docker compose) или `./start.sh local`.
+
+Установщики (`install.bat`, `setup.ps1`, `install.sh`, `install_offline.*`) векторную базу больше
+не строят: векторы переносятся в PostgreSQL из файлов `VECTOR_DB_DIR` командой `start.cmd migrate` /
+`./start.sh migrate` (`start.* local` делает это сам, в Docker — сервис `migrate`).
 
 ---
 

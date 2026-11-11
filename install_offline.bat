@@ -236,8 +236,8 @@ echo    OK: .env configured
 echo.
 echo [6/6] Vector database...
 
-:: The bundle ships a prebuilt DB. Recomputing 2108 vectors on the stand takes
-:: 10-15 minutes and is pure waste when the vectors are already here.
+:: The bundle ships the vector files. They are the source that "start.cmd migrate"
+:: imports into PostgreSQL; nothing is built on the stand.
 set "VDB_NAME=vector_db"
 for /f "tokens=2 delims==" %%a in ('findstr /R "^VECTOR_DB_DIR=" .env 2^>nul') do set "VDB_CFG=%%a"
 if defined VDB_CFG (
@@ -254,16 +254,11 @@ if exist "!VDB_DIR!\embeddings.npy" (
         copy "offline_bundle\vector_db_prebuilt\metadata.json" "!VDB_DIR!\" >nul
         echo    OK: prebuilt database copied to !VDB_DIR!
     ) else (
-        echo    No prebuilt database - building it locally (10-15 min)...
-        venv\Scripts\python.exe src\build_vectordb.py
-        if !errorlevel! neq 0 (
-            echo    ERROR: Vector DB build failed
-            pause
-            exit /b 1
-        )
-        echo    OK: Vector database built
+        echo    WARNING: no vector files in !VDB_DIR! - "start.cmd migrate" will fail
     )
 )
+echo    Vectors are imported into PostgreSQL by "start.cmd migrate"
+echo    (start.cmd local does it automatically; Docker: compose service migrate).
 
 echo.
 echo    Final check...

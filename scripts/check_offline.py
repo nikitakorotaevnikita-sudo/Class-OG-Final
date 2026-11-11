@@ -8,7 +8,11 @@
 `pre` запускается любым найденным интерпретатором и отвечает на вопрос
 «хватит ли того, что лежит в бандле, чтобы установка прошла без интернета».
 `post` запускается уже интерпретатором venv и проверяет, что сервис реально
-поднимется: импорты, локальная модель, векторная база, размерности.
+поднимется: импорты, локальная модель и (если есть) файлы векторов VECTOR_DB_DIR.
+
+Векторы сервис берёт из PostgreSQL. Файлы VECTOR_DB_DIR — лишь источник,
+из которого их переносит `start.cmd migrate` / `./start.sh migrate`
+(в Docker — сервис migrate); numpy-базу установка больше не строит.
 
 Код возврата: 0 — всё хорошо, 1 — есть блокирующие проблемы.
 """
@@ -134,18 +138,48 @@ def check_model() -> None:
         report(OK, f"модель эмбеддингов на месте (веса {size_mb} МБ)")
 
 
+MIGRATE_HINT = ("векторы переносятся в PostgreSQL командой start.cmd migrate / "
+                 "./start.sh migrate (в Docker — сервис migrate)")
+
+
+def _env_values() -> dict:
+    """Активные строки .env (без комментариев); нет файла — пусто."""
+    env = ROOT / ".env"
+    try:
+        text = env.read_bytes().decode("utf-8-sig", errors="replace")
+    except OSError:
+        return {}
+    active = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            k, v = line.split("=", 1)
+            active[k.strip()] = v.strip()
+    return active
+
+
+def _vdb_dir(active: dict) -> str:
+    return active.get("VECTOR_DB_DIR") or "data/vector_db"
+
+
+def _vdb_files_present(rel: str) -> bool:
+    base = ROOT / rel
+    return (base / "embeddings.npy").is_file() and (base / "metadata.json").is_file()
+
+
 def check_vector_db() -> None:
-    """Готовая база избавляет стенд от построения векторов (10-15 минут)."""
+    """Файлы VECTOR_DB_DIR — источник переноса векторов в PostgreSQL."""
     prebuilt = BUNDLE / "vector_db_prebuilt"
-    installed = [d for d in (ROOT / "data").glob("vector_db*") if (d / "embeddings.npy").is_file()]
-    if (prebuilt / "embeddings.npy").is_file():
+    vdb = _vdb_dir(_env_values())
+    if _vdb_files_present(vdb):
+        report(OK, f"файлы векторов для переноса на месте: {vdb}", MIGRATE_HINT)
+    elif (prebuilt / "embeddings.npy").is_file():
         size_mb = (prebuilt / "embeddings.npy").stat().st_size // (1024 * 1024)
-        report(OK, f"готовая векторная база в бандле ({size_mb} МБ)")
-    elif installed:
-        report(OK, f"векторная база уже установлена: {installed[0].name}")
+        report(OK, f"файлы векторов в бандле ({size_mb} МБ)",
+               f"установщик скопирует их в {vdb}; {MIGRATE_HINT}")
     else:
-        report(WARN, "нет готовой векторной базы",
-               "установщик соберёт её локальной моделью — это 10-15 минут")
+        report(WARN, f"нет файлов векторов в {vdb}",
+               f"без них перенос не пройдёт, если БД ещё пуста; {MIGRATE_HINT}")
 
 
 def check_env_file() -> None:
@@ -194,12 +228,12 @@ def check_env_file() -> None:
     else:
         report(OK, f"EMBEDDING_MODEL={model}")
 
-    vdb = active.get("VECTOR_DB_DIR", "data/vector_db")
-    if not (ROOT / vdb / "embeddings.npy").is_file():
-        report(FAIL, f"VECTOR_DB_DIR={vdb} — база не найдена",
-               "скопировать готовую базу из бандла или собрать её")
+    vdb = _vdb_dir(active)
+    if _vdb_files_present(vdb):
+        report(OK, f"VECTOR_DB_DIR={vdb} — источник переноса векторов на месте")
     else:
-        report(OK, f"VECTOR_DB_DIR={vdb}")
+        report(WARN, f"VECTOR_DB_DIR={vdb} — файлов векторов нет",
+               f"нужны только для первого переноса в пустую БД; {MIGRATE_HINT}")
 
     provider = active.get("LLM_PROVIDER", "")
     online_only = {"groq": "api.groq.com", "gemini": "Google AI", "ario": "llm.ario.directum360.ru"}
@@ -239,18 +273,22 @@ try:
     out["dim"] = int(model.get_sentence_embedding_dimension())
     out["model"] = config.EMBEDDING_MODEL
     db = config.VECTOR_DB_DIR
-    emb = np.load(os.path.join(db, "embeddings.npy"))
-    with open(os.path.join(db, "metadata.json"), encoding="utf-8") as fh:
-        meta = json.load(fh)
-    out["rows"], out["cols"], out["records"] = int(emb.shape[0]), int(emb.shape[1]), len(meta)
-    vec = model.encode("query: не вывозят мусор во дворе", normalize_embeddings=True)
-    norms = np.linalg.norm(emb, axis=1, keepdims=True)
-    sims = (emb / np.maximum(norms, 1e-9)) @ vec
-    top = int(sims.argmax())
-    out["top_sim"] = round(float(sims[top]), 3)
-    out["top_code"] = meta[top].get("code")
-    out["top_name"] = meta[top].get("name", "")[:45]
-    out["threshold"] = float(config.FULL_FALLBACK_SIM_THRESHOLD)
+    out["vdb"] = db
+    if os.path.isfile(os.path.join(db, "embeddings.npy")):
+        # Файлы VECTOR_DB_DIR — источник переноса в PostgreSQL: проверяем, что
+        # они согласованы с моделью. Нет файлов — не ошибка (векторы уже в БД).
+        emb = np.load(os.path.join(db, "embeddings.npy"))
+        with open(os.path.join(db, "metadata.json"), encoding="utf-8") as fh:
+            meta = json.load(fh)
+        out["rows"], out["cols"], out["records"] = int(emb.shape[0]), int(emb.shape[1]), len(meta)
+        vec = model.encode("query: не вывозят мусор во дворе", normalize_embeddings=True)
+        norms = np.linalg.norm(emb, axis=1, keepdims=True)
+        sims = (emb / np.maximum(norms, 1e-9)) @ vec
+        top = int(sims.argmax())
+        out["top_sim"] = round(float(sims[top]), 3)
+        out["top_code"] = meta[top].get("code")
+        out["top_name"] = meta[top].get("name", "")[:45]
+        out["threshold"] = float(config.FULL_FALLBACK_SIM_THRESHOLD)
 except Exception as exc:
     out["error"] = f"{type(exc).__name__}: {exc}"
 print("PROBE_JSON " + json.dumps(out, ensure_ascii=False))
@@ -297,13 +335,17 @@ def check_runtime() -> None:
 
     report(OK, f"модель загружена без сети, dim={data['dim']}")
 
+    if "cols" not in data:
+        report(WARN, f"файлов векторов в {data.get('vdb')} нет — проверка поиска пропущена",
+               MIGRATE_HINT)
+        return
     if data["cols"] != data["dim"]:
-        report(FAIL, f"размерность базы {data['cols']} != модели {data['dim']}",
-               "база собрана другой моделью — пересобрать: python src/build_vectordb.py")
+        report(FAIL, f"размерность векторов {data['cols']} != модели {data['dim']}",
+               "файлы VECTOR_DB_DIR посчитаны другой моделью — проверить EMBEDDING_MODEL")
     elif data["rows"] != data["records"]:
         report(FAIL, f"в базе {data['rows']} векторов, а в metadata.json {data['records']} записей")
     else:
-        report(OK, f"векторная база согласована: {data['rows']} записей x {data['cols']}")
+        report(OK, f"файлы векторов согласованы: {data['rows']} записей x {data['cols']}")
 
     sim, thr = data["top_sim"], data["threshold"]
     report(OK, f"поиск работает: top1={sim} {data['top_code']} {data['top_name']}")
