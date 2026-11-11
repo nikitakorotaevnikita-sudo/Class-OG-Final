@@ -31,6 +31,8 @@ from typing import Optional
 from dataclasses import asdict
 import classifier_agent as classifier_agent_module
 from classifier_agent import ClassifierAgent, ClassificationResult
+from responses import (ClassifyRequest, AlternativeItem, QuestionResult,  # noqa: F401
+                       ClassifyResponse, build_classify_response)
 from appeals_logger import AppealsLogger, get_logger
 from historical_loader import parse_file, validate_codes
 from integration_api import router as integration_router
@@ -124,49 +126,6 @@ async def startup():
     print("Агент классификации запущен и готов к работе.")
 
 
-# ── Схемы запросов/ответов ─────────────────────────────────────────────────────
-
-class ClassifyRequest(BaseModel):
-    appeal_text: Optional[str] = None
-    appeal_id: Optional[str] = None
-    llm_provider: Optional[str] = None
-    llm_model: Optional[str] = None
-
-
-
-
-class AlternativeItem(BaseModel):
-    code: str
-    name: str
-    full_path: str
-
-class QuestionResult(BaseModel):
-    question_text: str
-    code: str
-    name: str
-    level: int
-    full_path: str
-    predmet_vedeniya: str
-    confidence: float
-    reasoning: str
-    alternatives: list[AlternativeItem]
-
-class ClassifyResponse(BaseModel):
-    appeal_id: Optional[str]
-    log_id: Optional[str]            # Для последующего /verify
-    vid_obrascheniya: str
-    tip_obrascheniya: str
-    is_ustnoe: bool
-    questions: list[QuestionResult]
-    overall_confidence: float
-    needs_verification: bool
-    operator_card: str              # Текст карточки верификации для оператора
-    was_truncated: bool = False       # Был ли текст обрезан до 5000 символов
-    llm_provider: str = ""
-    llm_model: str = ""
-    full_fallback_used: bool = False  # Сработал ли full-classifier fallback (ретривер промахнулся)
-
-
 # ── Dependency injection (для тестируемости) ──────────────────────────────────
 
 def get_logger_dep() -> AppealsLogger:
@@ -209,36 +168,9 @@ def _build_classify_response(
     was_truncated: bool = False,
 ) -> ClassifyResponse:
     """Собирает ClassifyResponse из ClassificationResult."""
-    operator_card = agent.format_for_operator(result)
-    questions_out = [
-        QuestionResult(
-            question_text=q.question_text,
-            code=q.code,
-            name=q.name,
-            level=q.level,
-            full_path=q.full_path,
-            predmet_vedeniya=q.predmet_vedeniya,
-            confidence=q.confidence,
-            reasoning=q.reasoning,
-            alternatives=[AlternativeItem(**a) for a in q.alternatives],
-        )
-        for q in result.questions
-    ]
-    return ClassifyResponse(
-        appeal_id=appeal_id,
-        log_id=result.log_id,
-        vid_obrascheniya=result.vid_obrascheniya,
-        tip_obrascheniya=result.tip_obrascheniya,
-        is_ustnoe=result.is_ustное,
-        questions=questions_out,
-        overall_confidence=result.overall_confidence,
-        needs_verification=result.needs_verification,
-        operator_card=operator_card,
-        was_truncated=was_truncated,
-        llm_provider=result.llm_provider,
-        llm_model=result.llm_model,
-        full_fallback_used=result.full_fallback_used,
-    )
+    return build_classify_response(
+        result, agent.format_for_operator(result),
+        appeal_id=appeal_id, was_truncated=was_truncated)
 
 
 # ── Эндпоинты ──────────────────────────────────────────────────────────────────

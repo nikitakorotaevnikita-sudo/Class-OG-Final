@@ -11,61 +11,18 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from fastapi import APIRouter, HTTPException, Request, Response
-from pydantic import BaseModel
 from typing import Optional
 
 import config
 import rx_client
 import text_extractor
+from responses import (ClassifyDocumentRequest, RxQuestion, ClassifyDocumentResponse,  # noqa: F401
+                       AcceptedResponse, JobStatusResponse, REASONING_MAX_LEN,
+                       build_document_response, _unique_by_code, _build_reasoning,
+                       _clip_reasoning)
 from job_queue import JobQueue, QueueFull, STATUS_DONE, STATUS_ERROR
 
 router = APIRouter(prefix="/integration", tags=["Интеграция RX"])
-
-
-class ClassifyDocumentRequest(BaseModel):
-    # Текст обращения — основной способ: RX присылает его сразу
-    appeal_text: Optional[str] = None
-    # Идентификатор документа: возвращается в ответе как есть; если текста нет,
-    # используется для получения тела документа из RX по OData
-    document_id: Optional[int] = None
-
-
-REASONING_MAX_LEN = 1000  # Ограничение длины обоснования в ответе RX (символов)
-
-
-def _clip_reasoning(text: str) -> str:
-    text = text or ""
-    return text if len(text) <= REASONING_MAX_LEN else text[:REASONING_MAX_LEN - 1] + "…"
-
-
-class RxQuestion(BaseModel):
-    code: str
-    question: str
-
-
-class ClassifyDocumentResponse(BaseModel):
-    document_id: Optional[int]
-    applicant_fio: Optional[str]
-    applicant_email: Optional[str] = None
-    summary: str
-    reasoning: str = ""   # Обоснование модели по всем вопросам, сплошным текстом (<=1000 симв.)
-    questions: list[RxQuestion]
-
-
-def _build_reasoning(questions) -> str:
-    """Склеить обоснования по всем вопросам в один сплошной текст (<=1000 симв.).
-
-    При нескольких вопросах каждое обоснование префиксуется кодом, чтобы
-    было видно, к какому коду оно относится; всё соединяется пробелами.
-    """
-    parts = []
-    multi = len(questions) > 1
-    for q in questions:
-        r = (q.reasoning or "").strip()
-        if not r:
-            continue
-        parts.append(f"[{q.code}] {r}" if multi else r)
-    return _clip_reasoning(" ".join(parts))
 
 
 def _resolve_text(body: ClassifyDocumentRequest) -> str:
@@ -109,38 +66,9 @@ def _resolve_text(body: ClassifyDocumentRequest) -> str:
     raise HTTPException(status_code=400, detail="Нужен appeal_text либо document_id")
 
 
-def _unique_by_code(questions) -> list:
-    """Один код — один вопрос, в порядке первого появления.
-
-    Сегментатор делит обращение по смыслу, и несколько вопросов могут свестись
-    к одному коду: «свалка во дворе, мусор не вывозят, контейнер переполнен» —
-    три вопроса, один код. Для RX это один вопрос: иначе в карточке три
-    одинаковых строки, которые оператор вычищает руками.
-    """
-    seen: set[str] = set()
-    unique = []
-    for question in questions:
-        if question.code in seen:
-            continue
-        seen.add(question.code)
-        unique.append(question)
-    return unique
-
-
 def _build_response(agent, text: str, document_id: Optional[int]) -> ClassifyDocumentResponse:
     """Классификация и сборка ответа. Общая для синхронного и фонового путей."""
-    result = agent.classify(text)
-    questions = _unique_by_code(result.questions)
-    return ClassifyDocumentResponse(
-        document_id=document_id,
-        applicant_fio=result.applicant_fio,
-        applicant_email=result.applicant_email,
-        summary=result.summary,
-        # Обоснование склеивается по тем же вопросам: при повторе кода оператор
-        # иначе читает один и тот же текст несколько раз.
-        reasoning=_build_reasoning(questions),
-        questions=[RxQuestion(code=q.code, question=q.name) for q in questions],
-    )
+    return build_document_response(agent.classify(text), document_id)
 
 
 def _get_agent(request: Request):
@@ -179,23 +107,6 @@ def get_job_queue() -> JobQueue:
                          ttl_hours=config.JOB_TTL_HOURS,
                          max_queued=config.JOB_MAX_QUEUED)
     return _jobs
-
-
-class AcceptedResponse(BaseModel):
-    job_id: str
-    status: str
-    queue_position: Optional[int] = None
-    poll_url: str
-
-
-class JobStatusResponse(BaseModel):
-    job_id: str
-    status: str                                   # queued | running | done | error
-    queue_position: Optional[int] = None          # только пока задача ждёт
-    elapsed_sec: float = 0.0
-    document_id: Optional[int] = None
-    result: Optional[ClassifyDocumentResponse] = None
-    error: Optional[str] = None
 
 
 @router.post("/classify-document-async", response_model=AcceptedResponse, status_code=202)
