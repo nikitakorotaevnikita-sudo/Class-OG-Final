@@ -508,8 +508,9 @@ def test_run_finetune_completed_job_done(fake_training, no_webhook):
 
     job = storage.jobs.get(msg["job_id"])
     assert job.status == "done" and job.error is None
-    assert job.result["status"] == "completed" and job.result["activated"] is True
-    assert storage.models.active().version == 1
+    # база — v0 (адаптер): первая дообученная версия активируется только вручную
+    assert job.result["status"] == "completed" and job.result["activated"] is False
+    assert storage.models.get(1) is not None and storage.models.active().version == 0
 
 
 def test_run_finetune_failed_job_error(fake_training, no_webhook):

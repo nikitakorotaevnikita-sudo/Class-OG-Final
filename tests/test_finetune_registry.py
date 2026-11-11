@@ -44,14 +44,19 @@ def store(request):
     return PgStorage(connect)
 
 
-def test_improved_model_is_activated(store, tmp_path):
+def test_first_finetune_from_version_zero_is_never_auto_activated(store, tmp_path):
+    """v0 — векторы прода с адаптером, а recall_before мерится на «сыром» e5 без него:
+    сравнение нечестное, первую дообученную версию активируют вручную."""
     storage = seed(store)
     train = FakeTrain(before=0.4, after=0.6)
 
     result = finetune_model.run_training(storage, source="combined", train_fn=train)
 
     assert result["status"] == "completed", result
-    assert result["version"] == 1 and result["activated"] is True
+    assert result["version"] == 1 and result["activated"] is False
+    assert "вручную" in result["message"] and "бэк-офисе" in result["message"]
+    assert storage.models.active().version == 0
+    assert storage.models.get(1).is_active is False
     assert result["recall5_before"] == 0.4 and result["recall5_after"] == 0.6
     expected_path = str(Path(config.MODELS_DIR) / "e5-finetuned-v1")
     assert result["model_path"] == expected_path
@@ -60,9 +65,6 @@ def test_improved_model_is_activated(store, tmp_path):
     # обучение стартует с модели активной версии
     assert train.calls[0]["base"] == BASE_MODEL
     assert train.calls[0]["output"] == Path(expected_path)
-
-    active = storage.models.active()
-    assert active.version == 1 and active.model_path == expected_path
     mv = storage.models.get(1)
     assert mv.base_model_name == BASE_MODEL and mv.adapter is None
     assert mv.recall5_before == pytest.approx(0.4) and mv.recall5_after == pytest.approx(0.6)
@@ -71,6 +73,33 @@ def test_improved_model_is_activated(store, tmp_path):
     assert mv.report["recall5_after"] == 0.6 and mv.report["output_path"] == expected_path
     assert (Path(expected_path) / "training_report.json").exists()
     assert FakeSentenceTransformer.loaded == [expected_path]
+
+
+def test_improved_model_from_finetuned_base_is_activated(store, tmp_path):
+    storage = seed(store)
+    finetune_model.run_training(storage, train_fn=FakeTrain(before=0.4, after=0.6))
+    storage.models.activate(1)  # оператор проверил v1 и активировал её вручную
+    v1_path = storage.models.get(1).model_path
+    train = FakeTrain(before=0.6, after=0.7)
+
+    result = finetune_model.run_training(storage, source="combined", train_fn=train)
+
+    assert result["status"] == "completed", result
+    assert result["version"] == 2 and result["activated"] is True
+    assert train.calls[0]["base"] == v1_path
+    assert storage.models.active().version == 2
+
+
+def test_not_improved_model_from_finetuned_base_stays_inactive(store):
+    storage = seed(store)
+    finetune_model.run_training(storage, train_fn=FakeTrain(before=0.4, after=0.6))
+    storage.models.activate(1)
+
+    result = finetune_model.run_training(storage, train_fn=FakeTrain(before=0.7, after=0.7))
+
+    assert result["status"] == "completed" and result["activated"] is False
+    assert storage.models.active().version == 1
+    assert storage.models.get(2).is_active is False
 
 
 def test_not_improved_model_registered_inactive(store):

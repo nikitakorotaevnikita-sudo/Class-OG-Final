@@ -342,7 +342,16 @@ def _train(storage, source: str, force: bool, train_fn: TrainFn, result: dict, s
                 f"запуска не сохранён в реестре ({exc})") from exc
         n_vectors = storage.classifier.add_vectors(version, rows, **kw)
     say(f"  Версия v{version} зарегистрирована, векторов: {n_vectors}")
-    if improved:
+    if active.version == 0:
+        # v0 — продовые векторы с адаптером, а recall@5 «до» измерен на исходной
+        # модели без адаптера: сравнение нечестное, автоактивация могла бы
+        # заменить лучший поиск. Первую дообученную версию включает человек.
+        result["message"] = (f"Модель v{version} дообучена (recall@5 {recall_before:.3f} → "
+                             f"{recall_after:.3f}) и зарегистрирована неактивной: первую "
+                             f"дообученную версию нужно активировать вручную в бэк-офисе "
+                             f"после проверки качества — текущая v0 использует адаптер, "
+                             f"и автоматическое сравнение с ней некорректно")
+    elif improved:
         storage.models.activate(version)
         result["activated"] = True
         result["message"] = (f"Модель v{version} дообучена и активирована "
