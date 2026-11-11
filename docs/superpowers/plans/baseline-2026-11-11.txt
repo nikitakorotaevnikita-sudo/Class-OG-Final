@@ -1,0 +1,286 @@
+Failing tests at baseline:
+tests/test_api_endpoints.py::test_get_current_user_accepts_correct_credentials
+tests/test_candidate_rerank.py::test_rerank_promotes_lexical_overlap_when_dense_similarity_is_close
+tests/test_candidate_rerank.py::test_rerank_keeps_input_order_stable_when_query_has_no_tokens
+tests/test_candidate_rerank.py::test_rerank_returns_exact_top_k_size_when_enough_candidates_exist
+
+................F....................FFF................................ [ 15%]
+........................................................................ [ 31%]
+........................................................................ [ 46%]
+........................................................................ [ 62%]
+........................................................................ [ 78%]
+........................................................................ [ 93%]
+............................                                             [100%]
+================================== FAILURES ===================================
+______________ test_get_current_user_accepts_correct_credentials ______________
+
+    def test_get_current_user_accepts_correct_credentials():
+        """get_current_user returns username for correct credentials."""
+        from fastapi.security import HTTPBasicCredentials
+    
+>       result = get_current_user(
+            HTTPBasicCredentials(username="admin", password="password")
+        )
+
+tests\test_api_endpoints.py:333: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+credentials = HTTPBasicCredentials(username='admin', password='password')
+
+    def get_current_user(credentials: HTTPBasicCredentials = Depends(security)):
+        from config import BACKOFFICE_USER, BACKOFFICE_PASSWORD
+        if credentials.username != BACKOFFICE_USER or credentials.password != BACKOFFICE_PASSWORD:
+>           raise HTTPException(
+                status_code=HTTP_401_UNAUTHORIZED,
+                detail="Invalid credentials",
+                headers={"WWW-Authenticate": "Basic"},
+            )
+E           fastapi.exceptions.HTTPException: 401: Invalid credentials
+
+src\api_server.py:83: HTTPException
+_____ test_rerank_promotes_lexical_overlap_when_dense_similarity_is_close _____
+
+    def test_rerank_promotes_lexical_overlap_when_dense_similarity_is_close():
+        candidates = [
+            _candidate("dense-only", "street lighting maintenance", 0.902),
+            _candidate(
+                "lexical-match",
+                "apartment building roof leak repair",
+                0.900,
+                "housing / apartment building / roof leak repair",
+            ),
+            _candidate("weaker-dense", "parking lot snow removal", 0.897),
+        ]
+    
+>       result = _rerank(
+            "please repair the leaking roof in our apartment building",
+            candidates,
+            top_k=3,
+        )
+
+tests\test_candidate_rerank.py:123: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_candidate_rerank.py:108: in _rerank
+    return rerank(query_text, candidates, top_k=top_k)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <classifier_agent.ClassifierAgent object at 0x000002A8D0056510>
+query_text = 'please repair the leaking roof in our apartment building'
+candidates = [{'code': 'dense-only', 'name': 'street lighting maintenance', 'level': 4, 'full_path': 'street lighting maintenance',...{'code': 'weaker-dense', 'name': 'parking lot snow removal', 'level': 4, 'full_path': 'parking lot snow removal', ...}]
+top_k = 3
+
+    def _rerank_candidates(self, query_text: str, candidates: list, top_k: int = TOP_K_CANDIDATES) -> list:
+        """Compress wider pool with lexical + hierarchy signals before LLM."""
+        if not candidates:
+            return []
+    
+        # Optional L1-pruning: если 1-2 раздела доминируют Ч отсекаем другие.
+        # ƒолжно идти ƒќ boost-расчЄтов, чтобы branch_scores считались уже на отфильтрованном пуле.
+        working = candidates
+        if ENABLE_HIERARCHY_PRUNING:
+            dominant = dominant_l1_sections(candidates, threshold=HIERARCHY_PRUNE_THRESHOLD)
+            if dominant:
+                kept = [c for c in candidates if prefix_at_level(c["code"], 1) in dominant]
+                if len(kept) >= max(top_k, 5):  # не оставл€ем меньше top-k кандидатов
+                    working = kept
+    
+        query_tokens = self._query_tokens_for_rerank(query_text)
+        lexical_weight = float(os.getenv("LEXICAL_RERANK_WEIGHT", "0.12"))
+    
+        # Hierarchy scores (one pass over working)
+        branch_scores = branch_agreement_scores(working, level=2) if HIERARCHY_BRANCH_WEIGHT > 0 else {}
+        parent_boosts = parent_similarity_boost(working) if HIERARCHY_PARENT_WEIGHT > 0 else {}
+    
+        scored = []
+        for idx, candidate in enumerate(working):
+            dense_score = float(candidate.get("similarity", 0.0))
+            lexical_score = self._lexical_score(query_tokens, candidate)
+            level_bonus = 0.01 if int(candidate.get("level", 0) or 0) >= 4 else 0.0
+            branch_score = branch_scores.get(candidate["code"], 0.0)
+            parent_score = parent_boosts.get(candidate["code"], 0.0)
+    
+            combined_score = (
+                dense_score
+                + lexical_weight * lexical_score
+                + level_bonus
+                + HIERARCHY_BRANCH_WEIGHT * branch_score
+                + HIERARCHY_PARENT_WEIGHT * parent_score
+            )
+    
+            # LtR score Ч sklearn-LogReg обученный на ии25_train
+            ltr_score_val = 0.0
+>           if self.ltr_weights is not None:
+               ^^^^^^^^^^^^^^^^
+E           AttributeError: 'ClassifierAgent' object has no attribute 'ltr_weights'
+
+src\classifier_agent.py:963: AttributeError
+________ test_rerank_keeps_input_order_stable_when_query_has_no_tokens ________
+
+    def test_rerank_keeps_input_order_stable_when_query_has_no_tokens():
+        candidates = [
+            _candidate("first", "apartment building roof leak repair", 0.902),
+            _candidate("second", "street lighting maintenance", 0.901),
+            _candidate("third", "parking lot snow removal", 0.899),
+        ]
+    
+>       result = _rerank("!!! ... ???", candidates, top_k=3)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_candidate_rerank.py:140: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_candidate_rerank.py:108: in _rerank
+    return rerank(query_text, candidates, top_k=top_k)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <classifier_agent.ClassifierAgent object at 0x000002A8D010E490>
+query_text = '!!! ... ???'
+candidates = [{'code': 'first', 'name': 'apartment building roof leak repair', 'level': 4, 'full_path': 'apartment building roof le... ...}, {'code': 'third', 'name': 'parking lot snow removal', 'level': 4, 'full_path': 'parking lot snow removal', ...}]
+top_k = 3
+
+    def _rerank_candidates(self, query_text: str, candidates: list, top_k: int = TOP_K_CANDIDATES) -> list:
+        """Compress wider pool with lexical + hierarchy signals before LLM."""
+        if not candidates:
+            return []
+    
+        # Optional L1-pruning: если 1-2 раздела доминируют Ч отсекаем другие.
+        # ƒолжно идти ƒќ boost-расчЄтов, чтобы branch_scores считались уже на отфильтрованном пуле.
+        working = candidates
+        if ENABLE_HIERARCHY_PRUNING:
+            dominant = dominant_l1_sections(candidates, threshold=HIERARCHY_PRUNE_THRESHOLD)
+            if dominant:
+                kept = [c for c in candidates if prefix_at_level(c["code"], 1) in dominant]
+                if len(kept) >= max(top_k, 5):  # не оставл€ем меньше top-k кандидатов
+                    working = kept
+    
+        query_tokens = self._query_tokens_for_rerank(query_text)
+        lexical_weight = float(os.getenv("LEXICAL_RERANK_WEIGHT", "0.12"))
+    
+        # Hierarchy scores (one pass over working)
+        branch_scores = branch_agreement_scores(working, level=2) if HIERARCHY_BRANCH_WEIGHT > 0 else {}
+        parent_boosts = parent_similarity_boost(working) if HIERARCHY_PARENT_WEIGHT > 0 else {}
+    
+        scored = []
+        for idx, candidate in enumerate(working):
+            dense_score = float(candidate.get("similarity", 0.0))
+            lexical_score = self._lexical_score(query_tokens, candidate)
+            level_bonus = 0.01 if int(candidate.get("level", 0) or 0) >= 4 else 0.0
+            branch_score = branch_scores.get(candidate["code"], 0.0)
+            parent_score = parent_boosts.get(candidate["code"], 0.0)
+    
+            combined_score = (
+                dense_score
+                + lexical_weight * lexical_score
+                + level_bonus
+                + HIERARCHY_BRANCH_WEIGHT * branch_score
+                + HIERARCHY_PARENT_WEIGHT * parent_score
+            )
+    
+            # LtR score Ч sklearn-LogReg обученный на ии25_train
+            ltr_score_val = 0.0
+>           if self.ltr_weights is not None:
+               ^^^^^^^^^^^^^^^^
+E           AttributeError: 'ClassifierAgent' object has no attribute 'ltr_weights'
+
+src\classifier_agent.py:963: AttributeError
+______ test_rerank_returns_exact_top_k_size_when_enough_candidates_exist ______
+
+    def test_rerank_returns_exact_top_k_size_when_enough_candidates_exist():
+        candidates = [
+            _candidate("dense-only", "street lighting maintenance", 0.904),
+            _candidate("lexical-match", "roof leak repair", 0.903),
+            _candidate("related", "apartment building maintenance", 0.902),
+            _candidate("extra", "public transport timetable", 0.901),
+        ]
+    
+>       result = _rerank("roof leak repair apartment building", candidates, top_k=2)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_candidate_rerank.py:153: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_candidate_rerank.py:108: in _rerank
+    return rerank(query_text, candidates, top_k=top_k)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <classifier_agent.ClassifierAgent object at 0x000002A8D010ED50>
+query_text = 'roof leak repair apartment building'
+candidates = [{'code': 'dense-only', 'name': 'street lighting maintenance', 'level': 4, 'full_path': 'street lighting maintenance',...}, {'code': 'extra', 'name': 'public transport timetable', 'level': 4, 'full_path': 'public transport timetable', ...}]
+top_k = 2
+
+    def _rerank_candidates(self, query_text: str, candidates: list, top_k: int = TOP_K_CANDIDATES) -> list:
+        """Compress wider pool with lexical + hierarchy signals before LLM."""
+        if not candidates:
+            return []
+    
+        # Optional L1-pruning: если 1-2 раздела доминируют Ч отсекаем другие.
+        # ƒолжно идти ƒќ boost-расчЄтов, чтобы branch_scores считались уже на отфильтрованном пуле.
+        working = candidates
+        if ENABLE_HIERARCHY_PRUNING:
+            dominant = dominant_l1_sections(candidates, threshold=HIERARCHY_PRUNE_THRESHOLD)
+            if dominant:
+                kept = [c for c in candidates if prefix_at_level(c["code"], 1) in dominant]
+                if len(kept) >= max(top_k, 5):  # не оставл€ем меньше top-k кандидатов
+                    working = kept
+    
+        query_tokens = self._query_tokens_for_rerank(query_text)
+        lexical_weight = float(os.getenv("LEXICAL_RERANK_WEIGHT", "0.12"))
+    
+        # Hierarchy scores (one pass over working)
+        branch_scores = branch_agreement_scores(working, level=2) if HIERARCHY_BRANCH_WEIGHT > 0 else {}
+        parent_boosts = parent_similarity_boost(working) if HIERARCHY_PARENT_WEIGHT > 0 else {}
+    
+        scored = []
+        for idx, candidate in enumerate(working):
+            dense_score = float(candidate.get("similarity", 0.0))
+            lexical_score = self._lexical_score(query_tokens, candidate)
+            level_bonus = 0.01 if int(candidate.get("level", 0) or 0) >= 4 else 0.0
+            branch_score = branch_scores.get(candidate["code"], 0.0)
+            parent_score = parent_boosts.get(candidate["code"], 0.0)
+    
+            combined_score = (
+                dense_score
+                + lexical_weight * lexical_score
+                + level_bonus
+                + HIERARCHY_BRANCH_WEIGHT * branch_score
+                + HIERARCHY_PARENT_WEIGHT * parent_score
+            )
+    
+            # LtR score Ч sklearn-LogReg обученный на ии25_train
+            ltr_score_val = 0.0
+>           if self.ltr_weights is not None:
+               ^^^^^^^^^^^^^^^^
+E           AttributeError: 'ClassifierAgent' object has no attribute 'ltr_weights'
+
+src\classifier_agent.py:963: AttributeError
+============================== warnings summary ===============================
+src\api_server.py:119
+  d:\AIOG\Class-OG-Final\src\api_server.py:119: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @app.on_event("startup")
+
+venv\Lib\site-packages\fastapi\applications.py:4723
+  D:\AIOG\Class-OG-Final\venv\Lib\site-packages\fastapi\applications.py:4723: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    return self.router.on_event(event_type)  # ty: ignore[deprecated]
+
+venv\Lib\site-packages\fastapi\testclient.py:1
+  D:\AIOG\Class-OG-Final\venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_api_endpoints.py::test_get_current_user_accepts_correct_credentials
+FAILED tests/test_candidate_rerank.py::test_rerank_promotes_lexical_overlap_when_dense_similarity_is_close
+FAILED tests/test_candidate_rerank.py::test_rerank_keeps_input_order_stable_when_query_has_no_tokens
+FAILED tests/test_candidate_rerank.py::test_rerank_returns_exact_top_k_size_when_enough_candidates_exist
+4 failed, 456 passed, 3 warnings in 79.25s (0:01:19)
