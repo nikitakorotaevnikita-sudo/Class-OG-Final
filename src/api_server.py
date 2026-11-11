@@ -235,17 +235,13 @@ async def llm_options():
 
 
 async def _classify_via_job(text: str, req: Optional[Request], payload: dict) -> ClassifyResponse:
-    """Общий путь /classify и /classify/file: задача → очередь classify_sync → ответ."""
-    start_ts = time.time()
-    ip = _client_ip(req)
+    """Общий путь /classify и /classify/file: задача → очередь classify_sync → ответ.
+
+    ip запроса пишется в карточку при её создании; elapsed_seconds карточки —
+    время классификации, его записывает воркер (spec §7.1.5).
+    """
     sub = await job_api.run_sync_job("classify", "classify_appeal", payload,
-                                     appeal_text=text, ip=ip)
-    elapsed = time.time() - start_ts
-    try:
-        await asyncio.to_thread(get_storage().appeals.set_request_meta,
-                                sub.appeal_id, ip, round(elapsed, 3))
-    except Exception:  # noqa: BLE001 — метаданные запроса не должны ломать ответ
-        log.exception("Не удалось записать ip/время запроса для %s", sub.appeal_id)
+                                     appeal_text=text, ip=_client_ip(req))
     return ClassifyResponse(**sub.job.result)
 
 

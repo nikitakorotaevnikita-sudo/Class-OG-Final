@@ -131,6 +131,18 @@ def test_classify_sync_roundtrip(env, client):
     assert job.payload["queue"] == "classify_sync"
 
 
+def test_classify_card_keeps_request_ip_and_worker_elapsed(env, client):
+    """ip — из запроса (пишется при создании карточки); elapsed_seconds — время
+    классификации, записанное воркером (§7.1.5), а не время HTTP-запроса."""
+    env.agent.delay = 0.3  # запрос длится ≥0.3 с, воркер пишет elapsed_seconds=0.01
+    resp = client.post("/classify", json={"appeal_text": "Не вывозят мусор"})
+    assert resp.status_code == 200, resp.text
+    aid = resp.json()["log_id"]
+    assert env.storage.appeals.ip_addresses([aid]) == {aid: "192.168.1.10"}
+    card = env.storage.appeals._cards[aid]
+    assert card["elapsed_seconds"] == 0.01
+
+
 def test_classify_empty_text_400(client):
     resp = client.post("/classify", json={"appeal_text": "  "})
     assert resp.status_code == 400
