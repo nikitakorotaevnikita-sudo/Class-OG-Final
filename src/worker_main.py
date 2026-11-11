@@ -20,7 +20,6 @@ log = logging.getLogger(__name__)
 
 _lock = threading.RLock()
 _agent: Optional[ClassifierAgent] = None
-_env_mtime: Optional[int] = None
 
 
 def embed_pending_annotations(agent) -> int:
@@ -33,30 +32,38 @@ def embed_pending_annotations(agent) -> int:
     return len(pending)
 
 
-def refresh_settings_if_env_changed() -> bool:
-    """Если .env изменился — применить изменённые настройки в этом процессе."""
-    global _env_mtime
-    path = settings_store.ENV_PATH
+def _current_env_mtime() -> Optional[int]:
     try:
-        mtime = path.stat().st_mtime_ns
+        return settings_store.ENV_PATH.stat().st_mtime_ns
     except OSError:
-        return False
+        return None
+
+
+# Базовая отметка берётся при импорте, до создания агента: правки .env
+# во время долгой загрузки модели не теряются (config читался при старте).
+_env_mtime: Optional[int] = _current_env_mtime()
+
+
+def refresh_settings_if_env_changed() -> bool:
+    """Если .env изменился — применить изменённые настройки в этом процессе.
+
+    Отметка mtime сдвигается только после успешного применения, поэтому
+    при ошибке следующая попытка повторится.
+    """
+    global _env_mtime
+    mtime = _current_env_mtime()
     with _lock:
-        if _env_mtime is None:
-            _env_mtime = mtime
+        if mtime is None or mtime == _env_mtime:
             return False
-        if mtime == _env_mtime:
-            return False
-        _env_mtime = mtime
-        values = dotenv_values(path)
+        values = dotenv_values(settings_store.ENV_PATH)
         updates = {}
         for key, value in values.items():
-            if key in settings_store.FIELDS_BY_KEY and value is not None \
-                    and str(getattr(config, key, "")) != value:
+            if key in settings_store.FIELDS_BY_KEY and value is not None                     and str(getattr(config, key, "")) != value:
                 updates[key] = value
         if updates:
             settings_store.apply_runtime(updates, _agent)
             log.info("Настройки из .env применены: %s", ", ".join(sorted(updates)))
+        _env_mtime = mtime
         return True
 
 
@@ -71,7 +78,10 @@ def get_agent() -> ClassifierAgent:
                 log.exception("Не удалось досчитать аннотации")
         else:
             _agent.reload_model_if_changed()
-        refresh_settings_if_env_changed()
+        try:
+            refresh_settings_if_env_changed()
+        except Exception:
+            log.exception("Обновление настроек из .env не удалось; повтор при следующем вызове")
         return _agent
 
 
