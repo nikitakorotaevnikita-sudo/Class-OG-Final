@@ -1,0 +1,86 @@
+"""Процесс воркера: singleton ClassifierAgent с горячей перезагрузкой.
+
+Celery запускается как `celery -A queueing.celery_app worker ...` с `src`
+в PYTHONPATH. Агент создаётся лениво (get_agent) и прогревается сигналами
+worker_process_init (prefork) и worker_ready (solo-пул, например Windows).
+"""
+import logging
+import threading
+from typing import Optional
+
+from celery.signals import worker_process_init, worker_ready
+from dotenv import dotenv_values
+
+import config
+import settings_store
+from classifier_agent import ClassifierAgent
+from storage import get_storage
+
+log = logging.getLogger(__name__)
+
+_lock = threading.RLock()
+_agent: Optional[ClassifierAgent] = None
+_env_mtime: Optional[int] = None
+
+
+def embed_pending_annotations(agent) -> int:
+    """Досчитать векторы аннотаций для текущей версии модели агента."""
+    classifier = get_storage().classifier
+    pending = classifier.pending_annotations(agent.model_version)
+    for vector_id, text in pending:
+        classifier.set_embedding(vector_id, agent.embed_passage(text))
+    log.info("Аннотации: досчитано векторов %d (модель v%s)", len(pending), agent.model_version)
+    return len(pending)
+
+
+def refresh_settings_if_env_changed() -> bool:
+    """Если .env изменился — применить изменённые настройки в этом процессе."""
+    global _env_mtime
+    path = settings_store.ENV_PATH
+    try:
+        mtime = path.stat().st_mtime_ns
+    except OSError:
+        return False
+    with _lock:
+        if _env_mtime is None:
+            _env_mtime = mtime
+            return False
+        if mtime == _env_mtime:
+            return False
+        _env_mtime = mtime
+        values = dotenv_values(path)
+        updates = {}
+        for key, value in values.items():
+            if key in settings_store.FIELDS_BY_KEY and value is not None \
+                    and str(getattr(config, key, "")) != value:
+                updates[key] = value
+        if updates:
+            settings_store.apply_runtime(updates, _agent)
+            log.info("Настройки из .env применены: %s", ", ".join(sorted(updates)))
+        return True
+
+
+def get_agent() -> ClassifierAgent:
+    global _agent
+    with _lock:
+        if _agent is None:
+            _agent = ClassifierAgent(get_storage())
+            try:
+                embed_pending_annotations(_agent)
+            except Exception:
+                log.exception("Не удалось досчитать аннотации")
+        else:
+            _agent.reload_model_if_changed()
+        refresh_settings_if_env_changed()
+        return _agent
+
+
+def _warm(**_kwargs) -> None:
+    try:
+        get_agent()
+    except Exception:
+        log.exception("Прогрев агента не удался; повторится при первой задаче")
+
+
+worker_process_init.connect(_warm, weak=False)
+worker_ready.connect(_warm, weak=False)
