@@ -1,0 +1,1 @@
+{"timestamp": "2026-04-10T12:00:00", "base_model": "intfloat/multilingual-e5-base", "output_path": "models/e5-finetuned-v1", "train_size": 40, "val_size": 10, "recall5_before": 0.61, "recall5_after": 0.66, "improved": true}

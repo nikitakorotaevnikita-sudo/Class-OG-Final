@@ -409,15 +409,20 @@ class PgAppealStore(_PgBase):
         return ac.compute_backoffice_stats(rows, days)
 
     def log_llm_request(self, appeal_id, success, attempt, elapsed, confidence, error,
-                        candidates_count, conn=None):
+                        candidates_count, created_at=None, conn=None):
         with self._tx(conn) as c:
             c.execute(
                 """INSERT INTO llm_request_log
                    (appeal_id, success, attempt, elapsed_seconds, confidence,
-                    candidates_count, error) VALUES (%s,%s,%s,%s,%s,%s,%s)""",
+                    candidates_count, error, created_at)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s, coalesce(%s, now()))""",
                 (ac.norm_uuid(appeal_id), success, attempt, elapsed, confidence,
-                 candidates_count, error),
+                 candidates_count, error, ac.aware(created_at) if created_at else None),
             )
+
+    def llm_log_count(self, conn=None):
+        with self._tx(conn) as c:
+            return c.execute("SELECT count(*) FROM llm_request_log").fetchone()[0]
 
     def set_request_meta(self, appeal_id, ip_address, elapsed_seconds, conn=None):
         aid = ac.norm_uuid(appeal_id)

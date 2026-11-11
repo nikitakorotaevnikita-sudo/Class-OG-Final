@@ -70,7 +70,9 @@ class AppealStore(Protocol):
         confidence: Optional[float],
         error: Optional[str],
         candidates_count: int,
+        created_at: Optional[datetime] = None,
     ) -> None: ...
+    def llm_log_count(self) -> int: ...
     def set_request_meta(
         self, appeal_id: str, ip_address: Optional[str], elapsed_seconds: Optional[float]
     ) -> None: ...

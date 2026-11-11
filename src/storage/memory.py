@@ -303,13 +303,18 @@ class MemoryAppealStore:
             ]
         return ac.compute_backoffice_stats(cards, days)
 
+    def llm_log_count(self):
+        with self._lock:
+            return len(self._llm_log)
+
     def log_llm_request(self, appeal_id, success, attempt, elapsed, confidence, error,
-                        candidates_count):
+                        candidates_count, created_at=None):
         with self._lock:
             self._llm_log.append({
                 "appeal_id": appeal_id, "success": success, "attempt": attempt,
                 "elapsed_seconds": elapsed, "confidence": confidence, "error": error,
-                "candidates_count": candidates_count, "created_at": ac.now_aware(),
+                "candidates_count": candidates_count,
+                "created_at": ac.aware(created_at) if created_at else ac.now_aware(),
             })
 
     def set_request_meta(self, appeal_id, ip_address, elapsed_seconds):

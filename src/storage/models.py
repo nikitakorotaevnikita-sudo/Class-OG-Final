@@ -49,15 +49,16 @@ class AppealResult:
     summary: Optional[str]
     applicant_fio: Optional[str]
     applicant_email: Optional[str]
-    vid_obrascheniya: str
-    tip_obrascheniya: str
-    is_ustnoe: bool
+    # Optional: старые карточки из файлового лога этих полей не имели (NULL)
+    vid_obrascheniya: Optional[str]
+    tip_obrascheniya: Optional[str]
+    is_ustnoe: Optional[bool]
     overall_confidence: float
-    needs_verification: bool
-    full_fallback_used: bool
+    needs_verification: Optional[bool]
+    full_fallback_used: Optional[bool]
     candidates: list[dict]
-    llm_provider: str
-    llm_model: str
+    llm_provider: Optional[str]
+    llm_model: Optional[str]
     elapsed_seconds: Optional[float]
     questions: list[AppealQuestionRow]
 

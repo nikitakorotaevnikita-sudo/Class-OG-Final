@@ -286,3 +286,27 @@ def test_tx_with_caller_conn_does_not_commit(pg_conn):
     assert pg_conn.execute("SELECT count(*) FROM appeal_classifications").fetchone()[0] == 0
     assert pg_conn.execute("SELECT count(*) FROM appeal_questions").fetchone()[0] == 0
     assert pg_conn.execute("SELECT count(*) FROM appeal_verifications").fetchone()[0] == 0
+
+
+def test_save_result_accepts_legacy_null_fields(storage):
+    """Старые карточки: поля классификации отсутствуют -> NULL, не падаем."""
+    aid = storage.appeals.create("старое обращение")
+    legacy = AppealResult(
+        summary=None, applicant_fio=None, applicant_email=None,
+        vid_obrascheniya=None, tip_obrascheniya=None, is_ustnoe=None,
+        overall_confidence=0.7, needs_verification=None, full_fallback_used=None,
+        candidates=[], llm_provider=None, llm_model=None, elapsed_seconds=None,
+        questions=[q()],
+    )
+    storage.appeals.save_result(aid, legacy)
+    [e] = storage.appeals.as_log_entries()
+    assert e["overall_confidence"] == 0.7
+    assert len(e["agent_questions"]) == 1
+
+
+def test_llm_log_count_and_explicit_created_at(storage):
+    assert storage.appeals.llm_log_count() == 0
+    when = datetime(2026, 4, 22, 14, 0, 0)
+    storage.appeals.log_llm_request(None, True, 1, 1.0, 0.5, None, 3, created_at=when)
+    storage.appeals.log_llm_request(None, False, 2, None, None, "err", 3)
+    assert storage.appeals.llm_log_count() == 2
