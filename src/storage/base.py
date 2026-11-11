@@ -6,7 +6,9 @@ from typing import Optional, Protocol
 
 import numpy as np
 
-from .models import ClassifierEntry, ModelVersion
+from datetime import datetime
+
+from .models import AppealResult, ClassifierEntry, ModelVersion
 
 
 class ClassifierStore(Protocol):
@@ -34,3 +36,41 @@ class ModelStore(Protocol):
     def list(self) -> list[ModelVersion]: ...
     def activate(self, version: int) -> None: ...
     def next_version(self) -> int: ...
+
+
+class AppealStore(Protocol):
+    def create(
+        self,
+        appeal_text: str,
+        document_id: Optional[int] = None,
+        ip_address: Optional[str] = None,
+        appeal_id: Optional[str] = None,
+        created_at: Optional[datetime] = None,
+    ) -> str: ...
+    def save_result(self, appeal_id: str, result: AppealResult) -> None: ...
+    def get_text(self, appeal_id: str) -> Optional[str]: ...
+    def set_verification(
+        self,
+        appeal_id: str,
+        status: str,
+        operator_codes: Optional[list[str]],
+        comment: Optional[str],
+        verified_by: Optional[str] = None,
+        verified_at: Optional[datetime] = None,
+    ) -> bool: ...
+    def as_log_entries(self, statuses: Optional[tuple[str, ...]] = None) -> list[dict]: ...
+    def stats(self) -> dict: ...
+    def backoffice_stats(self, days: int = 30) -> dict: ...
+    def log_llm_request(
+        self,
+        appeal_id: Optional[str],
+        success: bool,
+        attempt: int,
+        elapsed: Optional[float],
+        confidence: Optional[float],
+        error: Optional[str],
+        candidates_count: int,
+    ) -> None: ...
+    def set_request_meta(
+        self, appeal_id: str, ip_address: Optional[str], elapsed_seconds: Optional[float]
+    ) -> None: ...

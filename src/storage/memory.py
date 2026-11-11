@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import threading
+import uuid
 
 import numpy as np
 
-from .models import ClassifierEntry, ModelVersion, Storage
+from . import appeal_common as ac
+from .models import AppealResult, ClassifierEntry, ModelVersion, Storage
 
 
 class MemoryModelStore:
@@ -17,6 +20,9 @@ class MemoryModelStore:
 
     def register(self, mv):
         with self._lock:
+            if mv.is_active:
+                for other in self._items.values():
+                    other.is_active = False
             self._items[mv.version] = dataclasses.replace(mv)
 
     def active(self):
@@ -112,7 +118,7 @@ class MemoryClassifierStore:
                 sim = float(e @ q) / den if den else 0.0
                 if v["code"] not in best or sim > best[v["code"]]:
                     best[v["code"]] = sim
-        return sorted(best.items(), key=lambda kv: -kv[1])[:top_k]
+        return sorted(best.items(), key=lambda kv: (-kv[1], kv[0]))[:top_k]
 
     def pending_annotations(self, version):
         with self._lock:
@@ -155,7 +161,164 @@ class MemoryClassifierStore:
             ]
 
 
+class MemoryAppealStore:
+    def __init__(self) -> None:
+        self._cards: dict[str, dict] = {}
+        self._llm_log: list[dict] = []
+        self._lock = threading.RLock()
+
+    def create(self, appeal_text, document_id=None, ip_address=None, appeal_id=None,
+               created_at=None):
+        aid = ac.norm_uuid(appeal_id) if appeal_id else str(uuid.uuid4())
+        if aid is None:
+            raise ValueError(f"appeal_id не UUID: {appeal_id!r}")
+        with self._lock:
+            if aid in self._cards:
+                raise ValueError(f"обращение {aid} уже существует")
+            self._cards[aid] = {
+                "id": aid,
+                "document_id": document_id,
+                "appeal_text": appeal_text,
+                "ip_address": ac.norm_ip(ip_address),
+                "created_at": ac.aware(created_at) if created_at else ac.now_aware(),
+                "result": None,
+                "elapsed_seconds": None,
+                "verification": {
+                    "status": "pending", "verified_at": None, "operator_codes": None,
+                    "comment": None, "verified_by": None,
+                },
+            }
+        return aid
+
+    def save_result(self, appeal_id, result: AppealResult):
+        with self._lock:
+            card = self._cards.get(ac.norm_uuid(appeal_id))
+            if card is None:
+                raise KeyError(appeal_id)
+            card["result"] = copy.deepcopy(result)
+            if result.elapsed_seconds is not None:
+                card["elapsed_seconds"] = result.elapsed_seconds
+
+    def get_text(self, appeal_id):
+        with self._lock:
+            card = self._cards.get(ac.norm_uuid(appeal_id))
+            return card["appeal_text"] if card else None
+
+    def set_verification(self, appeal_id, status, operator_codes, comment,
+                         verified_by=None, verified_at=None):
+        if status not in ac.STATUSES:
+            raise ValueError(f"неизвестный статус верификации: {status!r}")
+        with self._lock:
+            card = self._cards.get(ac.norm_uuid(appeal_id))
+            if card is None:
+                return False
+            if status == "pending":
+                verified_at = None
+            else:
+                verified_at = ac.aware(verified_at) if verified_at else ac.now_aware()
+            card["verification"] = {
+                "status": status,
+                "verified_at": verified_at,
+                "operator_codes": None if operator_codes is None else list(operator_codes),
+                "comment": comment,
+                "verified_by": verified_by,
+            }
+            return True
+
+    def as_log_entries(self, statuses=None):
+        with self._lock:
+            cards = sorted(self._cards.values(), key=lambda c: c["created_at"])
+            out = []
+            for c in cards:
+                v = c["verification"]
+                if statuses is not None and v["status"] not in statuses:
+                    continue
+                r = c["result"]
+                questions = []
+                if r:
+                    for q in sorted(r.questions, key=lambda q: q.ordinal):
+                        questions.append({
+                            "question_text": q.question_text,
+                            "selected_code": q.selected_code,
+                            "confidence": q.confidence,
+                            "alternative_codes": list(q.alternative_codes),
+                        })
+                out.append({
+                    "id": c["id"],
+                    "timestamp": ac.local_iso(c["created_at"]),
+                    "appeal_text": c["appeal_text"],
+                    "candidates": copy.deepcopy(r.candidates) if r else [],
+                    "agent_questions": questions,
+                    "overall_confidence": (r.overall_confidence if r else None) or 0.0,
+                    "verification": {
+                        "status": v["status"],
+                        "verified_at": ac.local_iso(v["verified_at"]),
+                        "operator_codes": None if v["operator_codes"] is None
+                        else list(v["operator_codes"]),
+                        "comment": v["comment"],
+                    },
+                })
+            return out
+
+    def stats(self):
+        with self._lock:
+            counts = {s: 0 for s in ac.STATUSES}
+            for c in self._cards.values():
+                counts[c["verification"]["status"]] += 1
+            return {
+                "total": len(self._cards),
+                "verified": counts["confirmed"] + counts["corrected"],
+                "pending": counts["pending"],
+                "confirmed": counts["confirmed"],
+                "corrected": counts["corrected"],
+                "rejected": counts["rejected"],
+            }
+
+    def backoffice_stats(self, days=30):
+        """Агрегаты для бэк-офиса.
+
+        Карточки с NULL overall_confidence (ещё не классифицированы) входят в
+        total_classifications и в статусы, но не в гистограмму и не в avg_confidence.
+        top_codes считаются только по confirmed/corrected; ip_stats - только по
+        карточкам с известным ip.
+        """
+        with self._lock:
+            cards = [
+                (
+                    c["created_at"],
+                    c["result"].overall_confidence if c["result"] else None,
+                    c["verification"]["status"],
+                    c["ip_address"],
+                    [q.selected_code for q in c["result"].questions] if c["result"] else [],
+                )
+                for c in self._cards.values()
+            ]
+        return ac.compute_backoffice_stats(cards, days)
+
+    def log_llm_request(self, appeal_id, success, attempt, elapsed, confidence, error,
+                        candidates_count):
+        with self._lock:
+            self._llm_log.append({
+                "appeal_id": appeal_id, "success": success, "attempt": attempt,
+                "elapsed_seconds": elapsed, "confidence": confidence, "error": error,
+                "candidates_count": candidates_count, "created_at": ac.now_aware(),
+            })
+
+    def set_request_meta(self, appeal_id, ip_address, elapsed_seconds):
+        with self._lock:
+            card = self._cards.get(ac.norm_uuid(appeal_id))
+            if card is None:
+                return
+            ip = ac.norm_ip(ip_address)
+            if ip is not None:
+                card["ip_address"] = ip
+            if elapsed_seconds is not None:
+                card["elapsed_seconds"] = elapsed_seconds
+
+
 class MemoryStorage(Storage):
     def __init__(self) -> None:
         models = MemoryModelStore()
-        super().__init__(classifier=MemoryClassifierStore(models), models=models)
+        super().__init__(
+            classifier=MemoryClassifierStore(models), models=models, appeals=MemoryAppealStore()
+        )

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Optional
 
@@ -30,6 +30,36 @@ class ModelVersion:
     trained_at: Optional[datetime] = None
     report: Optional[dict] = None
     adapter: Optional[dict] = None
+
+
+@dataclass
+class AppealQuestionRow:
+    ordinal: int
+    question_text: str
+    selected_code: str
+    confidence: float
+    alternative_codes: list[str]
+    predmet_vedeniya: str = ""
+    reasoning: str = ""
+    verification_reasons: list[str] = field(default_factory=list)
+
+
+@dataclass
+class AppealResult:
+    summary: Optional[str]
+    applicant_fio: Optional[str]
+    applicant_email: Optional[str]
+    vid_obrascheniya: str
+    tip_obrascheniya: str
+    is_ustnoe: bool
+    overall_confidence: float
+    needs_verification: bool
+    full_fallback_used: bool
+    candidates: list[dict]
+    llm_provider: str
+    llm_model: str
+    elapsed_seconds: Optional[float]
+    questions: list[AppealQuestionRow]
 
 
 @dataclass

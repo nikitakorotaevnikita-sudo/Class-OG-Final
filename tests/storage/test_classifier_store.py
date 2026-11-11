@@ -5,6 +5,7 @@ from storage.models import ClassifierEntry, ModelVersion
 
 A = "0001.0000.0000.0000"
 B = "0002.0000.0000.0000"
+A1 = "0001.0001.0000.0000"
 
 
 def vec(i):
@@ -99,3 +100,31 @@ def test_add_annotation_then_pending_then_set_embedding(storage):
     storage.classifier.set_embedding(vid, vec(3))
     assert storage.classifier.pending_annotations(0) == []
     assert storage.classifier.vectors_for_version(0) == [(A, "annotation", "note")]
+
+
+def test_search_ties_broken_by_code(storage):
+    storage.classifier.upsert_entries(entries())
+    setup_versions(storage)
+    # одинаковые векторы -> равная similarity; порядок задаёт код
+    storage.classifier.add_vectors(
+        0,
+        [
+            (B, "base", "b", vec(3)),
+            (A, "base", "a", vec(3)),
+            (A1, "base", "c", vec(3)),
+        ],
+    )
+    for _ in range(3):
+        r = storage.classifier.search(vec(3), 0, 10, False)
+        assert [c for c, _ in r] == [A, A1, B]
+    assert [c for c, _ in storage.classifier.search(vec(3), 0, 2, False)] == [A, A1]
+
+
+def test_register_active_deactivates_others(storage):
+    storage.models.register(ModelVersion(0, "base", "m0", True))
+    storage.models.register(ModelVersion(1, "base", "m1", True))
+    assert storage.models.active().version == 1
+    assert [m.is_active for m in storage.models.list()] == [False, True]
+    # регистрация неактивной версии не трогает активную
+    storage.models.register(ModelVersion(2, "base", "m2", False))
+    assert storage.models.active().version == 1

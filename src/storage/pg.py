@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from contextlib import contextmanager
 from typing import Callable, ContextManager, Iterator, Optional
 
@@ -9,6 +10,7 @@ import numpy as np
 import psycopg
 from psycopg.types.json import Jsonb
 
+from . import appeal_common as ac
 from . import db
 from .models import ClassifierEntry, ModelVersion, Storage
 
@@ -94,7 +96,7 @@ class PgClassifierStore(_PgBase):
                        FROM classifier_vectors
                        WHERE model_version = %s AND embedding IS NOT NULL
                          AND (source_type = 'base' OR %s)
-                       GROUP BY code ORDER BY similarity DESC LIMIT %s""",
+                       GROUP BY code ORDER BY similarity DESC, code LIMIT %s""",
                     (_f32(query), version, include_annotations, top_k),
                 )
                 return [(code, float(sim)) for code, sim in cur.fetchall()]
@@ -168,6 +170,12 @@ def _mv(r) -> ModelVersion:
 class PgModelStore(_PgBase):
     def register(self, mv, conn=None):
         with self._tx(conn) as c:
+            if mv.is_active:
+                # как в MemoryModelStore: активна только одна версия (уникальный индекс)
+                c.execute(
+                    "UPDATE ml_model_registry SET is_active = false WHERE is_active AND version <> %s",
+                    (mv.version,),
+                )
             c.execute(
                 f"""INSERT INTO ml_model_registry ({_MODEL_COLS})
                     VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
@@ -223,6 +231,209 @@ class PgModelStore(_PgBase):
             ).fetchone()[0]
 
 
+class PgAppealStore(_PgBase):
+    def create(self, appeal_text, document_id=None, ip_address=None, appeal_id=None,
+               created_at=None, conn=None):
+        if appeal_id:
+            aid = ac.norm_uuid(appeal_id)
+            if aid is None:
+                raise ValueError(f"appeal_id не UUID: {appeal_id!r}")
+        else:
+            aid = str(uuid.uuid4())
+        created = ac.aware(created_at) if created_at else ac.now_aware()
+        with self._tx(conn) as c:
+            c.execute(
+                """INSERT INTO appeal_classifications
+                   (id, document_id, appeal_text, ip_address, created_at)
+                   VALUES (%s, %s, %s, %s::inet, %s)""",
+                (aid, document_id, appeal_text, ac.norm_ip(ip_address), created),
+            )
+            c.execute(
+                "INSERT INTO appeal_verifications (appeal_id, status) VALUES (%s, 'pending')",
+                (aid,),
+            )
+        return aid
+
+    def save_result(self, appeal_id, result, conn=None):
+        aid = ac.norm_uuid(appeal_id)
+        if aid is None:
+            raise KeyError(appeal_id)
+        with self._tx(conn) as c:
+            cur = c.execute(
+                """UPDATE appeal_classifications SET summary=%s, applicant_fio=%s,
+                     applicant_email=%s, vid_obrascheniya=%s, tip_obrascheniya=%s,
+                     is_ustnoe=%s, overall_confidence=%s, needs_verification=%s,
+                     full_fallback_used=%s, candidates=%s, llm_provider=%s, llm_model=%s,
+                     elapsed_seconds=coalesce(%s, elapsed_seconds)
+                   WHERE id=%s""",
+                (
+                    result.summary, result.applicant_fio, result.applicant_email,
+                    result.vid_obrascheniya, result.tip_obrascheniya, result.is_ustnoe,
+                    result.overall_confidence, result.needs_verification,
+                    result.full_fallback_used, Jsonb(result.candidates),
+                    result.llm_provider, result.llm_model, result.elapsed_seconds, aid,
+                ),
+            )
+            if cur.rowcount == 0:
+                raise KeyError(appeal_id)
+            c.execute("DELETE FROM appeal_questions WHERE appeal_id = %s", (aid,))
+            with c.cursor() as cur2:
+                cur2.executemany(
+                    """INSERT INTO appeal_questions
+                       (appeal_id, ordinal, question_text, selected_code, predmet_vedeniya,
+                        confidence, reasoning, alternative_codes, verification_reasons)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    [
+                        (
+                            aid, q.ordinal, q.question_text, q.selected_code,
+                            q.predmet_vedeniya, q.confidence, q.reasoning,
+                            Jsonb(list(q.alternative_codes)), Jsonb(list(q.verification_reasons)),
+                        )
+                        for q in result.questions
+                    ],
+                )
+
+    def get_text(self, appeal_id, conn=None):
+        aid = ac.norm_uuid(appeal_id)
+        if aid is None:
+            return None
+        with self._tx(conn) as c:
+            r = c.execute(
+                "SELECT appeal_text FROM appeal_classifications WHERE id = %s", (aid,)
+            ).fetchone()
+        return r[0] if r else None
+
+    def set_verification(self, appeal_id, status, operator_codes, comment,
+                         verified_by=None, verified_at=None, conn=None):
+        if status not in ac.STATUSES:
+            raise ValueError(f"неизвестный статус верификации: {status!r}")
+        aid = ac.norm_uuid(appeal_id)
+        if aid is None:
+            return False
+        if status == "pending":
+            verified_at = None
+        else:
+            verified_at = ac.aware(verified_at) if verified_at else ac.now_aware()
+        with self._tx(conn) as c:
+            cur = c.execute(
+                """UPDATE appeal_verifications SET status=%s, operator_codes=%s, comment=%s,
+                     verified_at=%s, verified_by=%s WHERE appeal_id=%s""",
+                (
+                    status,
+                    None if operator_codes is None else Jsonb(list(operator_codes)),
+                    comment, verified_at, verified_by, aid,
+                ),
+            )
+            return cur.rowcount > 0
+
+    def as_log_entries(self, statuses=None, conn=None):
+        with self._tx(conn) as c:
+            sql = """SELECT a.id, a.created_at, a.appeal_text, a.candidates,
+                            a.overall_confidence, v.status, v.verified_at,
+                            v.operator_codes, v.comment
+                     FROM appeal_classifications a
+                     JOIN appeal_verifications v ON v.appeal_id = a.id"""
+            params: tuple = ()
+            if statuses is not None:
+                sql += " WHERE v.status = ANY(%s)"
+                params = (list(statuses),)
+            rows = c.execute(sql + " ORDER BY a.created_at, a.id", params).fetchall()
+            qrows = c.execute(
+                """SELECT q.appeal_id, q.question_text, q.selected_code, q.confidence,
+                          q.alternative_codes
+                   FROM appeal_questions q ORDER BY q.appeal_id, q.ordinal"""
+            ).fetchall() if rows else []
+        by_appeal: dict[str, list] = {}
+        for aid, text, code, conf, alts in qrows:
+            by_appeal.setdefault(str(aid), []).append({
+                "question_text": text,
+                "selected_code": code,
+                "confidence": conf,
+                "alternative_codes": alts or [],
+            })
+        out = []
+        for aid, created, text, cands, conf, status, vat, ops, comment in rows:
+            out.append({
+                "id": str(aid),
+                "timestamp": ac.local_iso(created),
+                "appeal_text": text,
+                "candidates": cands or [],
+                "agent_questions": by_appeal.get(str(aid), []),
+                "overall_confidence": conf or 0.0,
+                "verification": {
+                    "status": status,
+                    "verified_at": ac.local_iso(vat),
+                    "operator_codes": ops,
+                    "comment": comment,
+                },
+            })
+        return out
+
+    def stats(self, conn=None):
+        with self._tx(conn) as c:
+            rows = c.execute(
+                "SELECT status, count(*) FROM appeal_verifications GROUP BY status"
+            ).fetchall()
+        counts = {s: 0 for s in ac.STATUSES}
+        counts.update({s: n for s, n in rows})
+        return {
+            "total": sum(counts.values()),
+            "verified": counts["confirmed"] + counts["corrected"],
+            "pending": counts["pending"],
+            "confirmed": counts["confirmed"],
+            "corrected": counts["corrected"],
+            "rejected": counts["rejected"],
+        }
+
+    def backoffice_stats(self, days=30, conn=None):
+        """Агрегаты для бэк-офиса.
+
+        Карточки с NULL overall_confidence (ещё не классифицированы) входят в
+        total_classifications и в статусы, но не в гистограмму и не в avg_confidence.
+        top_codes считаются только по confirmed/corrected; ip_stats - только по
+        карточкам с известным ip (NULL исключается).
+        """
+        with self._tx(conn) as c:
+            rows = c.execute(
+                """SELECT a.created_at, a.overall_confidence, v.status, host(a.ip_address),
+                          coalesce(array_agg(q.selected_code)
+                                   FILTER (WHERE q.selected_code IS NOT NULL), '{}')
+                   FROM appeal_classifications a
+                   JOIN appeal_verifications v ON v.appeal_id = a.id
+                   LEFT JOIN appeal_questions q ON q.appeal_id = a.id
+                   GROUP BY a.id, v.status"""
+            ).fetchall()
+        return ac.compute_backoffice_stats(rows, days)
+
+    def log_llm_request(self, appeal_id, success, attempt, elapsed, confidence, error,
+                        candidates_count, conn=None):
+        with self._tx(conn) as c:
+            c.execute(
+                """INSERT INTO llm_request_log
+                   (appeal_id, success, attempt, elapsed_seconds, confidence,
+                    candidates_count, error) VALUES (%s,%s,%s,%s,%s,%s,%s)""",
+                (ac.norm_uuid(appeal_id), success, attempt, elapsed, confidence,
+                 candidates_count, error),
+            )
+
+    def set_request_meta(self, appeal_id, ip_address, elapsed_seconds, conn=None):
+        aid = ac.norm_uuid(appeal_id)
+        if aid is None:
+            return
+        with self._tx(conn) as c:
+            c.execute(
+                """UPDATE appeal_classifications
+                   SET ip_address = coalesce(%s::inet, ip_address),
+                       elapsed_seconds = coalesce(%s, elapsed_seconds)
+                   WHERE id = %s""",
+                (ac.norm_ip(ip_address), elapsed_seconds, aid),
+            )
+
+
 class PgStorage(Storage):
     def __init__(self, connect: ConnectFn = db.transaction) -> None:
-        super().__init__(classifier=PgClassifierStore(connect), models=PgModelStore(connect))
+        super().__init__(
+            classifier=PgClassifierStore(connect),
+            models=PgModelStore(connect),
+            appeals=PgAppealStore(connect),
+        )
