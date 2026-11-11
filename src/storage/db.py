@@ -39,8 +39,9 @@ def get_pool() -> ConnectionPool:
                     min_size=1,
                     max_size=config.DB_POOL_MAX,
                     configure=_configure,
-                    open=True,
+                    open=False,
                 )
+                _pool.open()
     return _pool
 
 
