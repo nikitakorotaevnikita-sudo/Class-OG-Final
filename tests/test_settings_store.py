@@ -42,6 +42,13 @@ def test_newline_rejected():
         settings_store.normalize_updates({"RX_USER": "admin\nGROQ_API_KEY=stolen"})
 
 
+@pytest.mark.parametrize("value", ["٣٠", "²", "５"])
+def test_positive_int_rejects_non_ascii_digits(value):
+    """isdigit() принимает «цифры» Unicode, а int() на части из них падает → 500."""
+    with pytest.raises(settings_store.SettingsError):
+        settings_store.normalize_updates({"SYNC_WAIT_TIMEOUT_SEC": value})
+
+
 def test_non_secret_cannot_be_empty():
     with pytest.raises(settings_store.SettingsError):
         settings_store.normalize_updates({"RX_USER": "  "})

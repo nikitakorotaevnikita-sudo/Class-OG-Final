@@ -35,6 +35,14 @@ def is_allowed(url: str) -> bool:
     return host in allowed
 
 
+def _host(url: str) -> str:
+    """Хост для журнала: путь и query webhook могут содержать токены."""
+    try:
+        return urlparse(url).hostname or "?"
+    except ValueError:
+        return "?"
+
+
 def sign(body: bytes) -> Optional[str]:
     secret = config.WEBHOOK_SECRET
     if not secret:
@@ -47,7 +55,7 @@ def deliver(url: str, payload: dict, transport: Optional[httpx.BaseTransport] = 
     """POST payload на url. Возвращает True при 2xx. Не бросает исключений."""
     try:
         if not is_allowed(url):
-            log.warning("webhook отклонён: хост не в белом списке (%s)", url)
+            log.warning("webhook отклонён: хост не в белом списке (%s)", _host(url))
             return False
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         headers = {"Content-Type": "application/json"}
@@ -61,9 +69,11 @@ def deliver(url: str, payload: dict, transport: Optional[httpx.BaseTransport] = 
                     resp = client.post(url, content=body, headers=headers)
                     if 200 <= resp.status_code < 300:
                         return True
-                    log.warning("webhook %s: HTTP %s (попытка %d)", url, resp.status_code, attempt + 1)
+                    log.warning("webhook %s: HTTP %s (попытка %d)", _host(url), resp.status_code,
+                                attempt + 1)
                 except httpx.HTTPError as exc:
-                    log.warning("webhook %s: %s (попытка %d)", url, exc, attempt + 1)
+                    log.warning("webhook %s: %s (попытка %d)", _host(url), type(exc).__name__,
+                                attempt + 1)
                 if attempt < ATTEMPTS - 1:
                     _sleep(BACKOFF[attempt])
         return False

@@ -156,7 +156,8 @@ def _validate(key: str, value: str) -> str:
         raise SettingsError(f"{field['label']}: значение не может быть пустым")
 
     if field.get("validate") == "positive_int":
-        if not value.isdigit() or int(value) <= 0:
+        # isascii: isdigit() принимает и «цифры» Unicode (², ٣), на которых int() падает
+        if not (value.isascii() and value.isdigit()) or int(value) <= 0:
             raise SettingsError(f"{field['label']}: нужно целое положительное число")
         value = str(int(value))
 

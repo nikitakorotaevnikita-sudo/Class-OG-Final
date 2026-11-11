@@ -60,3 +60,21 @@ def test_deliver_success_and_refusal(monkeypatch):
     t = httpx.MockTransport(lambda r: httpx.Response(204))
     assert webhook.deliver("https://rx.local/h", {}, transport=t) is True
     assert webhook.deliver("https://other/h", {}, transport=t) is False
+
+
+def test_logs_show_host_only_not_full_url(monkeypatch, caplog):
+    """URL webhook может содержать токены — в журнал попадает только хост."""
+    import logging
+
+    monkeypatch.setattr(config, "WEBHOOK_ALLOWED_HOSTS", ["rx.local"])
+    monkeypatch.setattr(config, "WEBHOOK_SECRET", "")
+    monkeypatch.setattr(webhook, "_sleep", lambda s: None)
+    caplog.set_level(logging.WARNING, logger=webhook.log.name)
+    secret_url = "https://evil.example/hook?token=SECRET123"
+    assert webhook.deliver(secret_url, {}) is False
+    t = httpx.MockTransport(lambda r: httpx.Response(500))
+    assert webhook.deliver("https://rx.local/h?token=SECRET456", {}, transport=t) is False
+    text = caplog.text
+    assert "evil.example" in text and "rx.local" in text
+    assert "SECRET123" not in text and "SECRET456" not in text
+    assert "/hook" not in text
