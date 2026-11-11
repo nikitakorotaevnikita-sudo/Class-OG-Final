@@ -1,7 +1,7 @@
 """Тесты эндпоинтов: /verify, /examples, /api/backoffice/stats.
 
-Используем прямой async-вызов функций эндпоинтов — это избегает
-запуска startup-event'а (который грузит ML-модель и требует GROQ_API_KEY).
+Используем прямой async-вызов функций эндпоинтов (без lifespan): хранилище —
+MemoryStorage, классификатор не загружается.
 """
 
 import asyncio
@@ -15,22 +15,15 @@ from fastapi import HTTPException
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from api_server import verify, get_examples, VerifyRequest, backoffice_stats, log_request, get_current_user
+from api_server import verify, get_examples, VerifyRequest, backoffice_stats, get_current_user
 from appeals_logger import AppealsLogger
 from storage.memory import MemoryStorage
 
 
 @pytest.fixture
-def backoffice_logger(tmp_path):
-    """Logger on an in-memory storage, and patch _REQUEST_LOG for log_request tests."""
-    logger = AppealsLogger(MemoryStorage())
-
-    # Patch the module-level _REQUEST_LOG so log_request writes to temp dir
-    import api_server as api_mod
-    orig_log = api_mod._REQUEST_LOG
-    api_mod._REQUEST_LOG = tmp_path / "request_log.jsonl"
-    yield logger
-    api_mod._REQUEST_LOG = orig_log
+def backoffice_logger():
+    """Logger on an in-memory storage (ip/время запроса — в карточках обращений)."""
+    return AppealsLogger(MemoryStorage())
 
 
 @pytest.fixture
@@ -279,37 +272,56 @@ def test_backoffice_stats_empty_log(tmp_path):
     assert result["confidence_histogram"]["0.0-0.1"] == 0
 
 
-# ── tests for IP logging ────────────────────────────────────────────────────────
+# ── tests for request meta (ip / время запроса на карточке) ─────────────────────
 
-def test_log_request_appends_to_file(backoffice_logger):
-    """log_request appends a JSON line to request_log.jsonl."""
-    # backoffice_logger patches _REQUEST_LOG to point to tmp dir
-    import api_server as api_mod
-    log_path = api_mod._REQUEST_LOG
-    log_request("192.168.1.10", "/classify", 1.5, "abc-123")
-    log_request("192.168.1.11", "/classify/file", 2.0, "def-456")
+def test_request_meta_written_to_card_and_counted_in_ip_stats(backoffice_logger):
+    """set_request_meta пишет ip и время на карточку; ip_stats считается по карточкам."""
+    appeals = backoffice_logger.storage.appeals
+    a1 = appeals.create("текст 1")
+    a2 = appeals.create("текст 2")
+    a3 = appeals.create("текст 3")
+    appeals.set_request_meta(a1, "192.168.1.10", 1.5)
+    appeals.set_request_meta(a2, "192.168.1.11", 2.0)
+    appeals.set_request_meta(a3, "192.168.1.10", 0.7)
 
-    assert log_path.exists()
-    lines = log_path.read_text(encoding="utf-8").strip().split("\n")
-    assert len(lines) == 2
+    assert appeals.ip_addresses([a1, a2]) == {a1: "192.168.1.10", a2: "192.168.1.11"}
 
-    rec1 = json.loads(lines[0])
-    assert rec1["ip"] == "192.168.1.10"
-    assert rec1["endpoint"] == "/classify"
-    assert abs(rec1["elapsed_seconds"] - 1.5) < 0.01
-    assert rec1["log_id"] == "abc-123"
-    assert "timestamp" in rec1
+    result = asyncio.run(backoffice_stats(_username="admin", logger=backoffice_logger))
+    assert result["ip_stats"] == [
+        {"ip": "192.168.1.10", "count": 2},
+        {"ip": "192.168.1.11", "count": 1},
+    ]
 
 
-def test_log_request_handles_none_log_id(backoffice_logger):
-    """log_request handles None log_id gracefully."""
-    import api_server as api_mod
-    log_path = api_mod._REQUEST_LOG
-    log_request("10.0.0.1", "/classify", 0.5, None)
+def test_request_meta_handles_missing_ip(backoffice_logger):
+    """ip None / 'unknown' не попадает в ip_stats и не ломает запись."""
+    appeals = backoffice_logger.storage.appeals
+    a1 = appeals.create("текст")
+    appeals.set_request_meta(a1, None, 0.5)
+    a2 = appeals.create("текст 2")
+    appeals.set_request_meta(a2, "unknown", 0.5)
 
-    lines = log_path.read_text(encoding="utf-8").strip().split("\n")
-    rec = json.loads(lines[0])
-    assert rec["log_id"] == ""
+    assert appeals.ip_addresses([a1, a2]) == {a1: None, a2: None}
+    result = asyncio.run(backoffice_stats(_username="admin", logger=backoffice_logger))
+    assert result["ip_stats"] == []
+
+
+def test_backoffice_top_codes_include_names(isolated_logger):
+    """top_codes сохраняют прежний формат {code, name, count}; name — из классификатора."""
+    from storage.models import ClassifierEntry
+    isolated_logger.storage.classifier.upsert_entries([ClassifierEntry(
+        code="0001.0001.0001.0001", name="Конституция", level=4,
+        parent_code=None, full_path="Конституция", children_count=0)])
+    lid = isolated_logger.log(
+        appeal_text="текст", candidates=[],
+        agent_questions=[{"selected_code": "0001.0001.0001.0001", "confidence": 0.9}],
+        overall_confidence=0.9,
+    )
+    isolated_logger.confirm(lid)
+
+    result = asyncio.run(backoffice_stats(_username="admin", logger=isolated_logger))
+    assert result["top_codes"] == [
+        {"code": "0001.0001.0001.0001", "name": "Конституция", "count": 1}]
 
 
 def test_get_current_user_rejects_wrong_password():

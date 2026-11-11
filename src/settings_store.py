@@ -74,6 +74,16 @@ SETTINGS_SPEC: list[dict] = [
             {"key": "RX_PASSWORD", "label": "Пароль", "kind": "secret"},
         ],
     },
+    {
+        "group": "queue",
+        "group_label": "Очередь",
+        "fields": [
+            {"key": "SYNC_WAIT_TIMEOUT_SEC", "label": "Ожидание синхронного ответа, с",
+             "kind": "text", "validate": "positive_int",
+             "hint": "Сколько секунд синхронные запросы ждут результат классификации; "
+                     "по истечении — ответ 504, задача продолжает выполняться"},
+        ],
+    },
 ]
 
 FIELDS_BY_KEY: dict[str, dict] = {
@@ -144,6 +154,11 @@ def _validate(key: str, value: str) -> str:
 
     if field["kind"] != "secret" and not value:
         raise SettingsError(f"{field['label']}: значение не может быть пустым")
+
+    if field.get("validate") == "positive_int":
+        if not value.isdigit() or int(value) <= 0:
+            raise SettingsError(f"{field['label']}: нужно целое положительное число")
+        value = str(int(value))
 
     return value
 
@@ -242,6 +257,14 @@ def _project_modules():
             continue
 
 
+def _typed(key: str, value: str):
+    """Значение для config: числовые настройки — числом, как при импорте config."""
+    field = FIELDS_BY_KEY.get(key)
+    if field is not None and field.get("validate") == "positive_int":
+        return int(value)
+    return value
+
+
 def apply_runtime(updates: dict, agent=None) -> list[str]:
     """Применить значения в текущем процессе. Возвращает список применённых ключей.
 
@@ -255,14 +278,14 @@ def apply_runtime(updates: dict, agent=None) -> list[str]:
 
     for key, value in updates.items():
         os.environ[key] = value
-        setattr(config, key, value)
+        setattr(config, key, _typed(key, value))
 
     for module in _project_modules():
         if module is config:
             continue
         for key, value in updates.items():
             if hasattr(module, key):
-                setattr(module, key, value)
+                setattr(module, key, _typed(key, value))
 
     if agent is not None:
         refresh_agent_llm(agent, updates)

@@ -2,6 +2,12 @@
 FastAPI-сервер для агента классификации обращений граждан.
 Предоставляет REST API для интеграции с Directum RX и другими системами.
 
+Тонкий API: процесс не загружает классификатор (torch, sentence-transformers).
+Классификация и поиск по классификатору выполняются воркерами: API создаёт
+задачу в PostgreSQL, отправляет её в RabbitMQ и ждёт результата по
+LISTEN/NOTIFY (src/job_api.py). Статистика, верификация, исторические данные,
+дообучение и реестр моделей — через слой хранения (src/storage).
+
 Запуск:
     uvicorn src.api_server:app --host 0.0.0.0 --port 8000 --reload
 
@@ -9,17 +15,14 @@ FastAPI-сервер для агента классификации обраще
     http://localhost:8000/docs
 """
 
+import asyncio
 import sys
 import json
-import os
-import subprocess
-import threading
+import logging
 import time
-import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
-from datetime import datetime, timedelta
-from collections import Counter
-from typing import Literal
+from typing import Literal, Optional
 sys.path.insert(0, str(Path(__file__).parent))
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Request, Form
 from fastapi.staticfiles import StaticFiles
@@ -27,53 +30,60 @@ from fastapi.responses import FileResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from starlette.status import HTTP_401_UNAUTHORIZED
 from pydantic import BaseModel
-from typing import Optional
-from dataclasses import asdict
-import classifier_agent as classifier_agent_module
-from classifier_agent import ClassifierAgent, ClassificationResult
+import psycopg
+
+import config
+import job_api
 from responses import (ClassifyRequest, AlternativeItem, QuestionResult,  # noqa: F401
-                       ClassifyResponse, build_classify_response)
+                       ClassifyResponse)
 from appeals_logger import AppealsLogger, get_logger
 from historical_loader import parse_file, validate_codes
 from integration_api import router as integration_router
+from queueing import waiter as waiter_mod
+from storage import get_storage
+from storage.models import STATUS_DONE, STATUS_ERROR, STATUS_QUEUED, STATUS_RUNNING
 from text_extractor import (
     extract_text,
     TextExtractionError,
     ScanNotSupportedError,
     validate_file_size,
-    MAX_TEXT_LENGTH,
+    MAX_TEXT_LENGTH,  # noqa: F401
 )
+
+log = logging.getLogger(__name__)
 
 # Модуль-level хранилище для последнего аплоада исторических данных
 _last_historical_upload: dict = {}
-_finetune_lock = threading.Lock()
-_finetune_job: dict = {
-    "job_id": None,
-    "status": "idle",
-    "source": None,
-    "force": False,
-    "started_at": None,
-    "finished_at": None,
-    "message": "Дообучение не запускалось",
-    "model_path": None,
-    "returncode": None,
-    "log_tail": "",
-}
+
+SEARCH_WAIT_TIMEOUT_SEC = 60
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    get_storage()
+    waiter = waiter_mod.get_waiter()
+    await waiter.start()
+    print("API запущен: классификация выполняется воркерами через очередь.")
+    try:
+        yield
+    finally:
+        await waiter.stop()
+        if config.STORAGE_BACKEND == "postgres":
+            from storage import db
+            db.close_pool()
+
 
 app = FastAPI(
     title="Агент классификации обращений граждан",
     description="Автоматическая классификация по 59-ФЗ и классификатору обращений граждан РФ",
     version="1.0.0",
+    lifespan=lifespan,
 )
 app.include_router(integration_router)
 
 # Статика и главная страница
 _STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
-
-# Путь к логу IP-запросов
-_REQUEST_LOG = Path(__file__).parent.parent / "data" / "request_log.jsonl"
-_REQUEST_LOG.parent.mkdir(parents=True, exist_ok=True)
 
 # HTTP Basic Auth для бэк-офиса
 security = HTTPBasic()
@@ -100,32 +110,6 @@ async def backoffice_page():
     return FileResponse(_STATIC_DIR / "backoffice.html")
 
 
-# ── IP-логирование запросов к /classify ───────────────────────────────────────
-
-def log_request(ip: str, endpoint: str, elapsed_seconds: float, log_id: str | None):
-    """Appends an entry to data/request_log.jsonl."""
-    entry = {
-        "timestamp": datetime.now().isoformat(timespec="seconds"),
-        "ip": ip,
-        "endpoint": endpoint,
-        "elapsed_seconds": round(elapsed_seconds, 3),
-        "log_id": log_id or "",
-    }
-    with open(_REQUEST_LOG, "a", encoding="utf-8") as f:
-        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-
-
-# Инициализация агента при старте сервера
-agent: Optional[ClassifierAgent] = None
-
-@app.on_event("startup")
-async def startup():
-    global agent
-    agent = ClassifierAgent()
-    app.state.agent = agent
-    print("Агент классификации запущен и готов к работе.")
-
-
 # ── Dependency injection (для тестируемости) ──────────────────────────────────
 
 def get_logger_dep() -> AppealsLogger:
@@ -136,6 +120,10 @@ def get_logger_dep() -> AppealsLogger:
 def get_examples_path() -> Path:
     """FastAPI-зависимость для пути к test_appeals.json. В тестах подменяется."""
     return Path(__file__).parent.parent / "data" / "test_appeals.json"
+
+
+def _client_ip(req: Optional[Request]) -> Optional[str]:
+    return req.client.host if req is not None and req.client else None
 
 
 # ── Схема /verify ─────────────────────────────────────────────────────────────
@@ -160,29 +148,50 @@ class FineTuneRequest(BaseModel):
     force: bool = False
 
 
-# ── Вспомогательная функция сборки ответа ─────────────────────────────────────
-
-def _build_classify_response(
-    result: ClassificationResult,
-    appeal_id: Optional[str] = None,
-    was_truncated: bool = False,
-) -> ClassifyResponse:
-    """Собирает ClassifyResponse из ClassificationResult."""
-    return build_classify_response(
-        result, agent.format_for_operator(result),
-        appeal_id=appeal_id, was_truncated=was_truncated)
-
-
 # ── Эндпоинты ──────────────────────────────────────────────────────────────────
+
+_PING_CACHE_SEC = 10.0
+_ping_cache: dict = {"at": None, "agent_ready": False, "broker": False}
+
+
+def _ping_workers() -> tuple[bool, bool]:
+    """(agent_ready, broker): ответил ли хотя бы один воркер на ping за 1 с."""
+    try:
+        from queueing.celery_app import app as celery_app
+        replies = celery_app.control.ping(timeout=1)
+        return bool(replies), True
+    except Exception as exc:  # noqa: BLE001 — /health не должен падать
+        log.warning("Celery ping не удался: %s", exc)
+        return False, False
+
+
+async def _worker_status() -> tuple[bool, bool]:
+    if config.STORAGE_BACKEND == "memory":
+        return True, True  # LocalDispatcher: задачи выполняются в процессе API
+    now = time.monotonic()
+    at = _ping_cache["at"]
+    if at is None or now - at >= _PING_CACHE_SEC:
+        agent_ready, broker = await asyncio.to_thread(_ping_workers)
+        _ping_cache.update(at=time.monotonic(), agent_ready=agent_ready, broker=broker)
+    return _ping_cache["agent_ready"], _ping_cache["broker"]
+
 
 @app.get("/health")
 async def health_check():
-    """Проверка работоспособности сервера"""
-    entries_count = len(agent.metadata) if agent else 0
+    """Проверка работоспособности: БД, брокер и воркеры классификации."""
+    try:
+        entries_count = await asyncio.to_thread(get_storage().classifier.count_entries)
+        db_ok = True
+    except Exception as exc:  # noqa: BLE001 — /health не должен падать
+        log.warning("/health: БД недоступна: %s", exc)
+        entries_count, db_ok = 0, False
+    agent_ready, broker = await _worker_status()
     return {
         "status": "ok",
-        "agent_ready": agent is not None,
+        "agent_ready": agent_ready,
         "classifier_entries": entries_count,
+        "db": db_ok,
+        "broker": broker,
     }
 
 
@@ -225,6 +234,21 @@ async def llm_options():
     }
 
 
+async def _classify_via_job(text: str, req: Optional[Request], payload: dict) -> ClassifyResponse:
+    """Общий путь /classify и /classify/file: задача → очередь classify_sync → ответ."""
+    start_ts = time.time()
+    ip = _client_ip(req)
+    sub = await job_api.run_sync_job("classify", "classify_appeal", payload,
+                                     appeal_text=text, ip=ip)
+    elapsed = time.time() - start_ts
+    try:
+        await asyncio.to_thread(get_storage().appeals.set_request_meta,
+                                sub.appeal_id, ip, round(elapsed, 3))
+    except Exception:  # noqa: BLE001 — метаданные запроса не должны ломать ответ
+        log.exception("Не удалось записать ip/время запроса для %s", sub.appeal_id)
+    return ClassifyResponse(**sub.job.result)
+
+
 @app.post(
     "/classify",
     response_model=ClassifyResponse,
@@ -234,27 +258,16 @@ async def llm_options():
 )
 async def classify_appeal_json(request: ClassifyRequest, req: Request) -> ClassifyResponse:
     """Классифицирует обращение — JSON тело"""
-    if not agent:
-        raise HTTPException(status_code=503, detail="Агент не инициализирован")
     if not request.appeal_text or not request.appeal_text.strip():
         raise HTTPException(status_code=400, detail="Текст обращения пустой")
 
-    start_ts = time.time()
-    try:
-        result = agent.classify(
-            request.appeal_text,
-            llm_provider=request.llm_provider,
-            llm_model=request.llm_model,
-        )
-        resp = _build_classify_response(result, appeal_id=request.appeal_id)
-        return resp
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ошибка классификации: {str(e)}")
-    finally:
-        elapsed = time.time() - start_ts
-        ip = req.client.host if req.client else "unknown"
-        log_id = result.log_id if "result" in dir() else None
-        log_request(ip, "/classify", elapsed, log_id)
+    return await _classify_via_job(request.appeal_text, req, {
+        "llm_provider": request.llm_provider,
+        "llm_model": request.llm_model,
+        "response_kind": "classify",
+        "was_truncated": False,
+        "client_appeal_id": request.appeal_id,
+    })
 
 
 @app.post(
@@ -271,9 +284,6 @@ async def classify_appeal_file(
     req: Request = None,
 ) -> ClassifyResponse:
     """Классифицирует обращение из загруженного файла TXT или PDF."""
-    if not agent:
-        raise HTTPException(status_code=503, detail="Агент не инициализирован")
-
     content = await file.read()
 
     try:
@@ -294,17 +304,13 @@ async def classify_appeal_file(
     if not text.strip():
         raise HTTPException(status_code=400, detail="Файл не содержит текста")
 
-    start_ts = time.time()
-    try:
-        result = agent.classify(text, llm_provider=llm_provider, llm_model=llm_model)
-        return _build_classify_response(result, was_truncated=truncated)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ошибка классификации: {str(e)}")
-    finally:
-        elapsed = time.time() - start_ts
-        ip = req.client.host if req and req.client else "unknown"
-        log_id = result.log_id if "result" in dir() else None
-        log_request(ip, "/classify/file", elapsed, log_id)
+    return await _classify_via_job(text, req, {
+        "llm_provider": llm_provider,
+        "llm_model": llm_model,
+        "response_kind": "classify",
+        "was_truncated": bool(truncated),
+        "client_appeal_id": None,
+    })
 
 
 @app.get("/classifier/search")
@@ -313,14 +319,41 @@ async def search_classifier(q: str, top_k: int = 5):
     Поиск по классификатору (для отладки и ручного поиска).
     Пример: /classifier/search?q=вывоз мусора&top_k=5
     """
-    if not agent:
-        raise HTTPException(status_code=503, detail="Агент не инициализирован")
-
-    candidates = agent._search_candidates(q)
-    return {"query": q, "results": candidates[:top_k]}
+    sub = await job_api.run_sync_job(
+        "search", "search_classifier", {"q": q, "top_k": top_k},
+        timeout=SEARCH_WAIT_TIMEOUT_SEC,
+        timeout_text="Поиск по классификатору не завершился",
+        error_prefix="Ошибка поиска")
+    return sub.job.result
 
 
 # ── Новые эндпоинты для MVP-демо ───────────────────────────────────────────────
+
+def _new_annotation_ids(storage, apply) -> list[int]:
+    """Выполнить apply() и вернуть id появившихся строк аннотаций без эмбеддинга."""
+    active = storage.models.active()
+    if active is None:
+        apply()
+        return []
+    before = {vid for vid, _ in storage.classifier.pending_annotations(active.version)}
+    apply()
+    return [vid for vid, _ in storage.classifier.pending_annotations(active.version)
+            if vid not in before]
+
+
+async def _dispatch_embeddings(storage, vector_ids: list[int]) -> None:
+    """Эмбеддинг новых аннотаций — задачей embed_annotation (очередь classify).
+
+    Сбой не ломает верификацию: строка остаётся без эмбеддинга, воркер досчитает
+    её при старте (embed_pending_annotations).
+    """
+    for vid in vector_ids:
+        try:
+            await job_api.submit_job("embed_annotation", "embed_annotation", "classify",
+                                     {"vector_id": vid})
+        except HTTPException as exc:
+            log.warning("Эмбеддинг аннотации %s не поставлен в очередь: %s", vid, exc.detail)
+
 
 @app.post("/verify")
 async def verify(
@@ -332,31 +365,41 @@ async def verify(
     Действия: confirm | correct | reject.
     Для action="correct" обязательно передать operator_codes — список правильных
     кодов классификатора (формата XXXX.XXXX.XXXX.XXXX).
-    annotation — пояснение оператора (сохраняется в classifier_annotations.json).
+    annotation — пояснение оператора (сохраняется как аннотация кода в БД,
+    эмбеддинг считает воркер).
     """
     annotation_count = None
+    storage = logger.storage
 
     if request.action == "confirm":
-        logger.confirm(request.log_id)
+        await asyncio.to_thread(logger.confirm, request.log_id)
     elif request.action == "correct":
         if not request.operator_codes:
             raise HTTPException(
                 status_code=400,
                 detail="operator_codes обязательно для action='correct'",
             )
-        logger.correct(request.log_id, operator_codes=request.operator_codes, comment=request.annotation)
 
-        # Получаем количество аннотаций для первого кода
+        def apply():
+            logger.correct(request.log_id, operator_codes=request.operator_codes,
+                           comment=request.annotation)
+
+        if request.annotation:
+            new_ids = await asyncio.to_thread(_new_annotation_ids, storage, apply)
+            await _dispatch_embeddings(storage, new_ids)
+        else:
+            await asyncio.to_thread(apply)
+
+        # Количество аннотаций для первого кода
         try:
-            from annotations_storage import get_annotations
-            if request.operator_codes:
-                anns = get_annotations(request.operator_codes[0])
-                annotation_count = len(anns)
-        except Exception:
+            anns = await asyncio.to_thread(storage.classifier.annotations_for,
+                                           request.operator_codes[0])
+            annotation_count = len(anns)
+        except Exception:  # noqa: BLE001
             annotation_count = None
 
     elif request.action == "reject":
-        logger.reject(request.log_id)
+        await asyncio.to_thread(logger.reject, request.log_id)
 
     return {
         "status": "ok",
@@ -387,16 +430,16 @@ async def get_stats(
     """
     Возвращает статистику верификаций для отображения на фронтенде.
     """
-    stats = logger.stats()
-    from config import FINETUNE_THRESHOLD
+    stats = await asyncio.to_thread(logger.stats)
+    threshold = int(config.FINETUNE_THRESHOLD)
     return {
         "verified": stats["verified"],
         "confirmed": stats["confirmed"],
         "corrected": stats["corrected"],
         "rejected": stats["rejected"],
         "pending": stats["pending"],
-        "threshold": FINETUNE_THRESHOLD,
-        "progress_percent": min(100, int(stats["verified"] / FINETUNE_THRESHOLD * 100)),
+        "threshold": threshold,
+        "progress_percent": min(100, int(stats["verified"] / threshold * 100)),
     }
 
 
@@ -447,7 +490,7 @@ async def save_settings(request: SettingsSaveRequest):
     """Записать настройки в .env и применить их без перезапуска сервиса."""
     import settings_store
     try:
-        result = settings_store.save_settings(request.values, agent=agent)
+        result = settings_store.save_settings(request.values)
     except settings_store.SettingsError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except OSError as e:
@@ -562,7 +605,10 @@ async def confirm_historical(request: dict):
 
     from historical_loader import save_to_historical_db
     filename = _last_historical_upload.get("filename", "unknown")
-    save_to_historical_db(preview, filename)
+    try:
+        await asyncio.to_thread(save_to_historical_db, preview, filename, get_storage())
+    except psycopg.Error as exc:
+        raise HTTPException(status_code=503, detail=job_api.DB_UNAVAILABLE) from exc
 
     _last_historical_upload = {}
     return {"status": "ok", "records_saved": len(preview)}
@@ -570,153 +616,148 @@ async def confirm_historical(request: dict):
 
 @app.get("/api/historical-count")
 async def get_historical_count():
-    """Возвращает количество записей в historical_verified.jsonl"""
-    hist_file = Path("data/historical_verified.jsonl")
-    if not hist_file.exists():
+    """Количество исторических размеченных обращений в БД."""
+    count = await asyncio.to_thread(get_storage().historical.count)
+    if not count:
         return {"count": 0, "status": "no_data"}
-    with open(hist_file, encoding="utf-8") as f:
-        count = sum(1 for _ in f)
     return {"count": count, "status": "ok"}
 
 
-def _job_snapshot() -> dict:
-    with _finetune_lock:
-        return dict(_finetune_job)
+# ── Дообучение (задача finetune в очереди training) ──────────────────────────
+
+def _iso(dt) -> Optional[str]:
+    return dt.astimezone().isoformat(timespec="seconds") if dt is not None else None
 
 
-def _update_finetune_job(**kwargs):
-    with _finetune_lock:
-        _finetune_job.update(kwargs)
-
-
-def _tail(text: str, limit: int = 6000) -> str:
-    if len(text) <= limit:
-        return text
-    return text[-limit:]
-
-
-def _latest_finetuned_model() -> Path | None:
-    from config import MODELS_DIR
-    models_dir = Path(MODELS_DIR)
-    candidates = [p for p in models_dir.glob("e5-finetuned-v*") if p.is_dir()]
-    if not candidates:
-        return None
-
-    def version(path: Path) -> int:
-        try:
-            return int(path.name.split("-v")[-1])
-        except ValueError:
-            return -1
-
-    return sorted(candidates, key=version)[-1]
-
-
-def _run_checked(command: list[str], env: dict | None = None) -> subprocess.CompletedProcess:
-    result = subprocess.run(
-        command,
-        cwd=Path(__file__).parent.parent,
-        env=env,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        capture_output=True,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"Команда завершилась с кодом {result.returncode}: {' '.join(command)}\n"
-            f"{_tail(result.stdout + result.stderr)}"
-        )
-    return result
-
-
-def _reload_agent_with_model(model_path: Path):
-    """Switch the running API process to the newly trained embedding model."""
-    global agent
-    model_value = str(model_path)
-    os.environ["EMBEDDING_MODEL"] = model_value
-
-    import config as config_module
-    config_module.EMBEDDING_MODEL = model_value
-    classifier_agent_module.EMBEDDING_MODEL = model_value
-
-    agent = ClassifierAgent()
-
-
-def _finetune_worker(job_id: str, source: str, force: bool):
-    _update_finetune_job(
-        status="running",
-        message="Дообучение модели запущено",
-        log_tail="",
-    )
-
-    try:
-        command = [sys.executable, "src/finetune_model.py", "--source", source]
-        if force or source in ("historical", "combined"):
-            command.append("--force")
-
-        train_result = _run_checked(command)
-        latest_model = _latest_finetuned_model()
-        if latest_model is None:
-            raise RuntimeError("Дообученная модель не найдена в models/e5-finetuned-v*")
-
-        env = os.environ.copy()
-        env["EMBEDDING_MODEL"] = str(latest_model)
-        build_result = _run_checked([sys.executable, "src/build_vectordb.py"], env=env)
-
-        _reload_agent_with_model(latest_model)
-
-        _update_finetune_job(
-            status="completed",
-            finished_at=datetime.now().isoformat(timespec="seconds"),
-            message="Модель дообучена, vector_db перестроена, агент перезагружен",
-            model_path=str(latest_model),
-            returncode=0,
-            log_tail=_tail(train_result.stdout + train_result.stderr + "\n" + build_result.stdout + build_result.stderr),
-        )
-    except Exception as exc:
-        _update_finetune_job(
-            status="failed",
-            finished_at=datetime.now().isoformat(timespec="seconds"),
-            message=str(exc),
-            returncode=1,
-            log_tail=_tail(str(exc)),
-        )
+def _finetune_snapshot(job) -> dict:
+    """Задача finetune → прежний формат статуса (/api/finetune/status)."""
+    if job is None:
+        return {
+            "job_id": None,
+            "status": "idle",
+            "source": None,
+            "force": False,
+            "started_at": None,
+            "finished_at": None,
+            "message": "Дообучение не запускалось",
+            "model_path": None,
+            "returncode": None,
+            "log_tail": "",
+        }
+    payload = job.payload or {}
+    result = job.result if isinstance(job.result, dict) else {}
+    returncode = None
+    if job.status == STATUS_QUEUED:
+        status, message = "queued", "Дообучение поставлено в очередь"
+    elif job.status == STATUS_RUNNING:
+        status, message = "running", "Дообучение модели запущено"
+    elif job.status == STATUS_DONE and result.get("status") == "completed":
+        status, returncode = "completed", 0
+        message = result.get("message") or "Модель дообучена"
+    else:
+        status, returncode = "failed", 1
+        message = job.error or result.get("message") or "Дообучение не выполнено"
+    log_tail = result.get("log_tail") or (job.error if job.status == STATUS_ERROR else "") or ""
+    return {
+        "job_id": job.id,
+        "status": status,
+        "source": payload.get("source"),
+        "force": bool(payload.get("force", False)),
+        "started_at": _iso(job.started_at or job.created_at),
+        "finished_at": _iso(job.finished_at),
+        "message": message,
+        "model_path": result.get("model_path"),
+        "returncode": returncode,
+        "log_tail": log_tail,
+    }
 
 
 @app.post("/api/finetune")
 async def start_finetune(request: FineTuneRequest):
-    """Запускает fine-tuning в фоне и после успеха перезагружает агента."""
-    current = _job_snapshot()
-    if current["status"] == "running":
+    """Ставит дообучение в очередь training (выполняет воркер дообучения)."""
+    storage = get_storage()
+    try:
+        active = await asyncio.to_thread(storage.jobs.has_active, "finetune")
+    except psycopg.Error as exc:
+        raise HTTPException(status_code=503, detail=job_api.DB_UNAVAILABLE) from exc
+    if active:
         raise HTTPException(status_code=409, detail="Дообучение уже выполняется")
 
-    job_id = str(uuid.uuid4())
-    _update_finetune_job(
-        job_id=job_id,
-        status="queued",
-        source=request.source,
-        force=request.force,
-        started_at=datetime.now().isoformat(timespec="seconds"),
-        finished_at=None,
-        message="Дообучение поставлено в очередь",
-        model_path=None,
-        returncode=None,
-        log_tail="",
-    )
-
-    thread = threading.Thread(
-        target=_finetune_worker,
-        args=(job_id, request.source, request.force),
-        daemon=True,
-    )
-    thread.start()
-    return _job_snapshot()
+    # Как и прежний запуск finetune_model.py: для historical/combined порог
+    # верифицированных записей не проверяется (--force).
+    force = request.force or request.source in ("historical", "combined")
+    sub = await job_api.submit_job("finetune", "finetune", "training",
+                                   {"source": request.source, "force": force})
+    job = await asyncio.to_thread(storage.jobs.get, sub.job.id)
+    return _finetune_snapshot(job or sub.job)
 
 
 @app.get("/api/finetune/status")
 async def finetune_status():
-    """Текущий статус фонового fine-tuning."""
-    return _job_snapshot()
+    """Статус последнего дообучения (последняя задача finetune)."""
+    try:
+        job = await asyncio.to_thread(get_storage().jobs.latest, "finetune")
+    except psycopg.Error as exc:
+        raise HTTPException(status_code=503, detail=job_api.DB_UNAVAILABLE) from exc
+    return _finetune_snapshot(job)
+
+
+# ── Реестр моделей ───────────────────────────────────────────────────────────
+
+def _model_item(mv) -> dict:
+    return {
+        "version": mv.version,
+        "base_model_name": mv.base_model_name,
+        "model_path": mv.model_path,
+        "is_active": mv.is_active,
+        "recall5_before": mv.recall5_before,
+        "recall5_after": mv.recall5_after,
+        "training_samples_count": mv.training_samples_count,
+        "trained_at": mv.trained_at.isoformat() if mv.trained_at is not None else None,
+    }
+
+
+@app.get("/api/models", tags=["Бэк-офис"])
+async def list_models():
+    """Версии модели эмбеддингов (ml_model_registry)."""
+    models = await asyncio.to_thread(get_storage().models.list)
+    return [_model_item(mv) for mv in models]
+
+
+@app.post("/api/models/{version}/activate", tags=["Бэк-офис"])
+async def activate_model(version: int, _username: str = Depends(get_current_user)):
+    """Сделать версию активной (ручная активация и откат). Воркеры подхватят её
+    перед следующей задачей (NOTIFY model_changed)."""
+    storage = get_storage()
+    try:
+        await asyncio.to_thread(storage.models.activate, version)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Версия модели {version} не найдена")
+    mv = await asyncio.to_thread(storage.models.get, version)
+    return {"status": "ok", "model": _model_item(mv) if mv else None}
+
+
+# ── Бэк-офис ─────────────────────────────────────────────────────────────────
+
+_code_names: dict = {"storage": None, "names": {}}
+
+
+def _load_code_names(storage) -> dict[str, str]:
+    """code → name из classifier_entries (кэш процесса на хранилище)."""
+    if _code_names["storage"] is not storage or not _code_names["names"]:
+        _code_names["names"] = {e.code: e.name for e in storage.classifier.load_entries()}
+        _code_names["storage"] = storage
+    return _code_names["names"]
+
+
+def _backoffice_stats(storage) -> dict:
+    stats = storage.appeals.backoffice_stats(days=30)
+    names = _load_code_names(storage) if stats["top_codes"] else {}
+    stats["top_codes"] = [
+        {"code": c["code"], "name": names.get(c["code"], ""), "count": c["count"]}
+        for c in stats["top_codes"]
+    ]
+    return stats
 
 
 @app.get("/api/backoffice/stats", tags=["Бэк-офис"])
@@ -726,97 +767,6 @@ async def backoffice_stats(
 ):
     """
     Возвращает агрегированную статистику для страницы бэк-офиса.
-    Требует HTTP Basic Auth (BACKOFFICE_USER / BACKOFFICE_PASSWORD).
+    Агрегаты считает хранилище (PostgreSQL); ip_stats — по ip карточек обращений.
     """
-    all_entries = logger.read_all()
-
-    # ── Appeals log stats ─────────────────────────────────────────────────────
-    status_counts = Counter()
-    code_counter = Counter()
-    confidence_sum = 0.0
-    confidence_histogram = {
-        "0.0-0.1": 0, "0.1-0.2": 0, "0.2-0.3": 0, "0.3-0.4": 0, "0.4-0.5": 0,
-        "0.5-0.6": 0, "0.6-0.7": 0, "0.7-0.8": 0, "0.8-0.9": 0, "0.9-1.0": 0,
-    }
-
-    # Build lookup: code → name from agent metadata
-    code_names = {}
-    if agent and agent.metadata:
-        for m in agent.metadata:
-            code_names[m.get("code", "")] = m.get("name", "")
-
-    date_counts = Counter()
-
-    for entry in all_entries:
-        status_counts[entry["verification"]["status"]] += 1
-
-        conf = entry.get("overall_confidence", 0.0)
-        confidence_sum += conf
-
-        # Histogram bin (0.0-0.1, 0.1-0.2, ..., 0.9-1.0)
-        bin_idx = min(int(conf * 10), 9)
-        bin_key = f"{bin_idx * 0.1:.1f}-{bin_idx * 0.1 + 0.1:.1f}"
-        confidence_histogram[bin_key] += 1
-
-        # Selected codes from verified entries only
-        if entry["verification"]["status"] in ("confirmed", "corrected"):
-            for q in entry.get("agent_questions", []):
-                sel = q.get("selected_code", "")
-                if sel:
-                    code_counter[sel] += 1
-
-        # Date for daily usage
-        ts = entry.get("timestamp", "")
-        if ts:
-            date = ts[:10]  # YYYY-MM-DD
-            date_counts[date] += 1
-
-    total = len(all_entries)
-    verified = status_counts["confirmed"] + status_counts["corrected"]
-    avg_conf = (confidence_sum / total) if total > 0 else 0.0
-
-    # Top-10 codes
-    top_codes = [
-        {"code": code, "name": code_names.get(code, ""), "count": cnt}
-        for code, cnt in code_counter.most_common(10)
-    ]
-
-    # Last 30 days daily usage
-    today = datetime.now().date()
-    daily_usage = []
-    for i in range(29, -1, -1):
-        day_obj = today - timedelta(days=i)
-        day_str = day_obj.isoformat()
-        daily_usage.append({"date": day_str, "count": date_counts.get(day_str, 0)})
-
-    # ── IP stats from request log ─────────────────────────────────────────────
-    ip_counter = Counter()
-    if _REQUEST_LOG.exists():
-        with open(_REQUEST_LOG, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    try:
-                        rec = json.loads(line)
-                        ip_counter[rec.get("ip", "unknown")] += 1
-                    except json.JSONDecodeError:
-                        continue
-
-    ip_stats = [
-        {"ip": ip, "count": cnt}
-        for ip, cnt in ip_counter.most_common()
-    ]
-
-    return {
-        "total_classifications": total,
-        "total_verifications": verified,
-        "confirmed": status_counts["confirmed"],
-        "corrected": status_counts["corrected"],
-        "rejected": status_counts["rejected"],
-        "pending": status_counts["pending"],
-        "avg_confidence": round(avg_conf, 2),
-        "confidence_histogram": confidence_histogram,
-        "top_codes": top_codes,
-        "daily_usage": daily_usage,
-        "ip_stats": ip_stats,
-    }
+    return await asyncio.to_thread(_backoffice_stats, logger.storage)
