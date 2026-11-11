@@ -116,6 +116,13 @@ class PgClassifierStore(_PgBase):
             ).fetchall()
         return [(r[0], r[1]) for r in rows]
 
+    def vector_text(self, vector_id, conn=None):
+        with self._tx(conn) as c:
+            row = c.execute(
+                "SELECT search_text FROM classifier_vectors WHERE id = %s", (vector_id,)
+            ).fetchone()
+        return row[0] if row else None
+
     def set_embedding(self, vector_id, embedding, conn=None):
         with self._tx(conn) as c:
             c.execute(

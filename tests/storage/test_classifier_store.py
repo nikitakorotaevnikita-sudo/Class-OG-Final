@@ -151,3 +151,11 @@ def test_load_entries_preserves_given_order(storage):
     storage.classifier.upsert_entries(given)
     assert [e.code for e in storage.classifier.load_entries()] == [e.code for e in given]
     assert [e.sort_order for e in storage.classifier.load_entries()] == [0, 1, 2]
+
+
+def test_vector_text_returns_text_or_none(storage):
+    storage.classifier.upsert_entries(entries())
+    setup_versions(storage)
+    vid = storage.classifier.add_annotation(A, "пояснение", 0)
+    assert storage.classifier.vector_text(vid) == "пояснение"
+    assert storage.classifier.vector_text(vid + 1000) is None

@@ -84,3 +84,28 @@ def test_responses_module_has_no_heavy_imports():
             "assert 'torch' not in sys.modules; "
             "assert 'classifier_agent' not in sys.modules")
     subprocess.run([sys.executable, "-c", code], check=True)
+
+
+def test_job_status_payload_shape():
+    from datetime import datetime, timedelta, timezone
+
+    from storage.models import Job
+
+    now = datetime.now(timezone.utc)
+    base = dict(id="a" * 32, job_type="classify", appeal_id=None, document_id=5,
+                webhook_url=None, payload={}, attempts=1,
+                created_at=now - timedelta(seconds=3), started_at=now - timedelta(seconds=2),
+                finished_at=now)
+    done = Job(status="done", result={"x": 1}, error="stale", **base)
+    err = Job(status="error", result={"x": 1}, error="RuntimeError: boom", **base)
+    keys = {"job_id", "status", "queue_position", "elapsed_sec", "document_id", "result", "error"}
+
+    p = responses.job_status_payload(done)
+    assert set(p) == keys
+    assert (p["status"], p["result"], p["error"], p["document_id"]) == ("done", {"x": 1}, None, 5)
+    assert p["elapsed_sec"] == 2.0
+    p = responses.job_status_payload(err, queue_position=None)
+    assert (p["result"], p["error"]) == (None, "RuntimeError: boom")
+    queued = Job(status="queued", result=None, error=None,
+                 **{**base, "started_at": None, "finished_at": None})
+    assert responses.job_status_payload(queued, queue_position=3)["queue_position"] == 3

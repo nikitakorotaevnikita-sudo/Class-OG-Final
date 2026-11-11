@@ -140,6 +140,11 @@ class MemoryClassifierStore:
                 and v["embedding"] is None
             ]
 
+    def vector_text(self, vector_id):
+        with self._lock:
+            v = self._vectors.get(vector_id)
+            return v["search_text"] if v else None
+
     def set_embedding(self, vector_id, embedding):
         with self._lock:
             self._vectors[vector_id]["embedding"] = np.asarray(embedding, dtype=np.float32)

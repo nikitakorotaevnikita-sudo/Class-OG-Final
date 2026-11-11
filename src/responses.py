@@ -191,3 +191,22 @@ class JobStatusResponse(BaseModel):
     document_id: Optional[int] = None
     result: Optional[ClassifyDocumentResponse] = None
     error: Optional[str] = None
+
+
+def job_status_payload(job, queue_position: Optional[int] = None) -> dict:
+    """JSON статуса задачи: тело GET /integration/jobs/{id} и webhook.
+
+    `job` — storage.models.Job. `result` — только у `done`, `error` — только у `error`.
+    `result` уже сохранён воркером как JSON готового ответа и вставляется как есть
+    (без повторной валидации: у задач не-RX-типов он другой формы).
+    """
+    payload = JobStatusResponse(
+        job_id=job.id,
+        status=job.status,
+        queue_position=queue_position,
+        elapsed_sec=job.elapsed_sec,
+        document_id=job.document_id,
+        error=job.error if job.status == "error" else None,
+    ).model_dump(mode="json")
+    payload["result"] = job.result if job.status == "done" else None
+    return payload

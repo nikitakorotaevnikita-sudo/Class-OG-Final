@@ -7,10 +7,9 @@
 Подключения при импорте нет — брокер нужен только при отправке/приёме задач.
 
 Задачи (`classify_appeal`, `search_classifier`, `embed_annotation`, `finetune`)
-регистрирует Task 7 в модуле `queueing.tasks` с `name=`; `include` здесь
-намеренно не задан — модуль подключит сам воркер (Task 7 добавит его в
-`include`/`imports`). Маршруты работают по строковым именам и не требуют
-импорта модуля задач.
+объявлены в модуле `queueing.tasks` с `name=`; воркер импортирует его через
+`include`. Отправителю (API) импорт модуля задач не нужен: маршруты работают
+по строковым именам.
 """
 from celery import Celery
 from kombu import Queue
@@ -24,7 +23,7 @@ def _quorum(name: str) -> Queue:
     return Queue(name, routing_key=name, queue_arguments={"x-queue-type": "quorum"})
 
 
-app = Celery("classifier", broker=config.RABBITMQ_URL)
+app = Celery("classifier", broker=config.RABBITMQ_URL, include=["queueing.tasks"])
 
 app.conf.update(
     task_queues=[_quorum(n) for n in QUEUE_NAMES],
