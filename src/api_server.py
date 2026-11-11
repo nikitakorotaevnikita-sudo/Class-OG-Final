@@ -34,8 +34,7 @@ import psycopg
 
 import config
 import job_api
-from responses import (ClassifyRequest, AlternativeItem, QuestionResult,  # noqa: F401
-                       ClassifyResponse)
+from responses import ClassifyRequest, ClassifyResponse
 from appeals_logger import AppealsLogger, get_logger
 from historical_loader import parse_file, validate_codes
 from integration_api import router as integration_router
@@ -48,7 +47,6 @@ from text_extractor import (
     TextExtractionError,
     ScanNotSupportedError,
     validate_file_size,
-    MAX_TEXT_LENGTH,  # noqa: F401
 )
 
 log = logging.getLogger(__name__)

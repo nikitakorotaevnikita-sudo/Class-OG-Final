@@ -7,7 +7,6 @@
 """
 
 import sys
-import io
 # Fix UTF-8 output on Windows cp1251 console. В Celery-воркере потоки подменены
 # на LoggingProxy без reconfigure() — там перенастраивать нечего.
 for _stream in (sys.stdout, sys.stderr):
@@ -46,8 +45,8 @@ from typing import Optional
 from config import (
     LLM_TIMEOUT_SEC, LLM_MAX_RETRIES,
     GROQ_API_KEY, GROQ_MODEL,
-    VECTOR_DB_DIR, EMBEDDING_MODEL,
-    TOP_K_CANDIDATES, TOP_K_RESULT, MIN_CONFIDENCE, RETRIEVAL_POOL_SIZE, LEXICAL_POOL_SIZE,
+    EMBEDDING_MODEL,  # тесты подменяют его, проверяя, что префикс запроса от него не зависит
+    TOP_K_CANDIDATES, MIN_CONFIDENCE, RETRIEVAL_POOL_SIZE, LEXICAL_POOL_SIZE,
     LLM_PROVIDER, GEMINI_API_KEY,
     OLLAMA_MODEL, OLLAMA_BASE_URL,
     ARIO_API_KEY, ARIO_BASE_URL, ARIO_MODEL,
@@ -84,7 +83,7 @@ from build_vectordb import passage_text
 from storage import get_storage
 from storage.models import AppealQuestionRow, AppealResult
 from email_extractor import extract_applicant_email
-from fio_extractor import extract_applicant_fio, normalize_fio
+from fio_extractor import extract_applicant_fio
 
 
 _WORD_RE = re.compile(r"[a-zа-яё0-9]{3,}", re.IGNORECASE)

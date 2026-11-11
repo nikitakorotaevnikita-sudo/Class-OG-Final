@@ -20,10 +20,8 @@ import config
 import job_api
 import rx_client
 import text_extractor
-from responses import (ClassifyDocumentRequest, RxQuestion, ClassifyDocumentResponse,  # noqa: F401
-                       AcceptedResponse, JobStatusResponse, REASONING_MAX_LEN,
-                       build_document_response, job_status_payload, _unique_by_code,
-                       _build_reasoning, _clip_reasoning)
+from responses import (ClassifyDocumentRequest, ClassifyDocumentResponse, AcceptedResponse,
+                       JobStatusResponse, job_status_payload)
 from queueing import webhook
 from storage import get_storage
 from storage.models import QueueFull
