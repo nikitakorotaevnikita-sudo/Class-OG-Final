@@ -480,6 +480,117 @@ endpoint нужен `ENABLE_FULL_CLASSIFIER_FALLBACK=false`.
 
 ---
 
+## Архитектура развёртывания: PostgreSQL + RabbitMQ + воркеры
+
+С ноября 2026 сервис разделён на процессы. Всё состояние (классификатор и его векторы,
+карточки обращений, верификации, фоновые задачи, реестр моделей, журналы) хранится в
+**PostgreSQL 16 + pgvector**; классификацию выполняют **Celery-воркеры** через очередь
+**RabbitMQ**. API модель эмбеддингов не загружает.
+
+```
+Directum RX / UI ──HTTP──► API (FastAPI, без модели)
+                            │  1. карточка обращения + задача (jobs) в БД
+                            │  2. задача → RabbitMQ
+                            │  3. синхронный вызов ждёт LISTEN job_done
+                            ▼
+                     RabbitMQ (очереди classify_sync, classify, training)
+                            │
+             ┌──────────────┴───────────────┐
+             ▼                              ▼
+  worker-classify (Celery)           worker-training (Celery, 1 процесс)
+  - агент загружается один раз       - дообучение по данным из БД
+  - результат + jobs=done в БД       - векторы новой версии модели
+    + NOTIFY job_done                - реестр моделей + NOTIFY model_changed
+  - webhook (если задан)
+             │                              │
+             └──────────────┬───────────────┘
+                            ▼
+                PostgreSQL 16 + pgvector (том pgdata)
+```
+
+Сервисы `docker-compose.yml`:
+
+| Сервис | Что делает |
+|---|---|
+| `postgres` | `pgvector/pgvector:pg16`, данные в томе `pgdata`, схема из `deploy/db/init/` при первом создании тома. Порт на хосте — `POSTGRES_PORT` (5432) |
+| `rabbitmq` | `rabbitmq:3.13-management`, порты 5672 и 15672 (веб-консоль очередей) |
+| `migrate` | разовый: `init_db.py` (схема, идемпотентно) + `migrate_from_files.py` (импорт файлов). При расхождении сверки выходит с ошибкой, и API не стартует |
+| `api` | uvicorn, `HOST_PORT` (8010) → 8005. Без модели и без файлов с ПДн |
+| `worker-classify` | `-Q classify_sync,classify -c CLASSIFY_CONCURRENCY`; масштабируется `docker compose up -d --scale worker-classify=3` |
+| `worker-training` | `-Q training -c 1`, только с профилем `training`; GPU-блок в compose закомментирован |
+
+### Запуск: `start.cmd` / `start.sh`
+
+| Команда | Что происходит |
+|---|---|
+| `start.cmd` / `./start.sh` | весь стек в Docker: `docker compose up -d --build`, затем ожидание `GET /health` (до 2 минут) |
+| `start.cmd --training` | то же + воркер дообучения |
+| `start.cmd local` / `./start.sh local` | PostgreSQL и RabbitMQ в Docker, миграция, затем API и воркеры из `venv`. Windows: отдельные окна `classifier-api`, `classifier-worker-N` (пул `solo`, `CLASSIFY_WORKERS` процессов). Linux: фоновые процессы, pid и логи в `run/` |
+| `start.cmd local --port 9100` | локальный режим на другом порту (иначе `API_PORT` из `.env`) |
+| `start.cmd migrate` | только схема + импорт файлов (БД должна быть запущена) |
+| `stop.cmd` / `./stop.sh` | `docker compose down` — контейнеры удаляются, **том `pgdata` остаётся** |
+| `stop.cmd local` / `./stop.sh local` | закрыть окна `classifier-*` / процессы из `run/*.pid`, остановить PostgreSQL и RabbitMQ |
+
+Если `.env` нет, скрипт создаёт его из `.env.example` и предупреждает: заполнить ключи LLM и
+пароли до первого запуска (пароль PostgreSQL запоминается томом при его создании).
+`launch.bat server` / `./launch.sh server` теперь вызывают `start.* local`.
+
+**Скрипты остановки никогда не удаляют том `pgdata`** (в нём тексты обращений — персональные
+данные по 59-ФЗ). Удалить его можно только вручную (`docker volume rm`) и только после выгрузки данных.
+
+### Перенос данных из файлов
+
+`scripts/db/migrate_from_files.py` переносит в БД `classifier_flat.json`, векторы из
+`VECTOR_DB_DIR` (как версию модели v0, без пересчёта), аннотации, `appeals_log.jsonl`,
+`request_log.jsonl`, `historical_verified.jsonl` и отчёты дообученных моделей. Исходные файлы не
+меняются; повторный запуск безопасен (уже перенесённое пропускается). В конце печатается сверка
+«файл → БД» по каждому источнику, при расхождении — код выхода 1. В Docker это делает сервис
+`migrate` при каждом `up`; локально — `start.* local` или `start.* migrate`.
+
+### Эксплуатация
+
+- **`SYNC_WAIT_TIMEOUT_SEC`** (1800) — сколько синхронные эндпоинты ждут результат. По истечении
+  отвечают `504`, задача при этом продолжает выполняться и её результат сохраняется в БД. Если БД
+  или брокер недоступны — `503`.
+- **Зависшие задачи.** Автоматической «уборки» нет: если PostgreSQL или RabbitMQ лежали дольше
+  ~8 минут, часть задач может навсегда остаться в `queued`/`running`. Найти и закрыть их:
+
+  ```sql
+  SELECT id, job_type, status, created_at FROM jobs
+   WHERE status IN ('queued','running') AND created_at < now() - interval '1 hour';
+
+  UPDATE jobs SET status='error', error='прервана сбоем инфраструктуры', finished_at=now()
+   WHERE status IN ('queued','running') AND created_at < now() - interval '1 hour';
+  ```
+
+  (`docker compose exec postgres psql -U classifier classifier`.) RX по такой задаче получит
+  `status=error` и сможет отправить документ повторно.
+- **Webhook.** Если вызывающий передал `webhook_url`, воркер после записи результата отправляет
+  его POST-запросом. Разрешены только хосты из `WEBHOOK_ALLOWED_HOSTS`: точные имена через запятую,
+  без портов, схем и масок. Пусто — webhook отключены. С `WEBHOOK_SECRET` тело подписывается
+  заголовком `X-Signature: sha256=<HMAC>`.
+- **Настройки из бэк-офиса.** Бэк-офис пишет в `.env`, воркеры перечитывают его перед задачей.
+  Поэтому у API и воркеров должен быть **один и тот же файл**: в compose он смонтирован во все
+  сервисы (`./.env:/app/.env`), локально все процессы работают из одного каталога.
+  `DATABASE_URL`/`RABBITMQ_URL` в compose переопределяются адресами сервисов, `.env` их не меняет.
+- **Дообучение.** Порог `FINETUNE_THRESHOLD` проверяется для любого источника данных (в том числе
+  исторических и комбинированных); обойти его можно только `--force`
+  (`python src/auto_finetune.py --force`). Задача уходит в очередь `training` — нужен запущенный
+  `worker-training` (`start.* --training`).
+
+### Несколько машин (только описано, не проверялось)
+
+Текущая версия собрана и проверена на одной машине. Для разнесения воркеров по нескольким хостам:
+
+- PostgreSQL и RabbitMQ остаются общими (одна машина или отдельные серверы);
+- на каждом хосте воркера — свой `.env`, в котором `DATABASE_URL` и `RABBITMQ_URL` указывают на
+  общие сервисы (не на `localhost`);
+- каталог `models/` — общая сетевая папка (NFS/SMB), смонтированная на всех хостах по одному
+  пути: модели между машинами не передаются ни через БД, ни через брокер;
+- настройки из бэк-офиса меняют `.env` только на хосте API — на остальных хостах их правят вручную.
+
+---
+
 ## Быстрый старт
 
 ### Шаг 1 — Выбрать, какая модель будет отвечать
@@ -533,10 +644,28 @@ endpoint нужен `ENABLE_FULL_CLASSIFIER_FALLBACK=false`.
 
 ### Шаг 3 — Запуск
 
-Двойной клик по **`launch.bat`** → выбрать режим:
+Нужен Docker (Docker Desktop на Windows): в нём работают PostgreSQL и RabbitMQ.
+
+```bat
+start.cmd              :: весь стек в Docker, сервис на http://localhost:8010
+start.cmd local        :: БД и брокер в Docker, API и воркеры из venv (отдельные окна)
+start.cmd --training   :: плюс воркер дообучения
+stop.cmd               :: остановить (том с данными сохраняется)
+```
+
+```bash
+./start.sh             # весь стек в Docker
+./start.sh local       # БД и брокер в Docker, API и воркеры из venv (логи в run/)
+./stop.sh local
+```
+
+Первый запуск сам переносит в БД данные из файлов (`data/*.jsonl`, аннотации, векторную базу) —
+см. «Перенос данных из файлов» выше.
+
+Меню **`launch.bat`** по-прежнему доступно:
 
 ```
-[1] Start API server           — REST API на порту 8010
+[1] Start API server           — локальный стек через start.cmd local, порт 8010
 [2] Start API server on another port
 [3] Verify the installation    — проверка, что всё на месте
 [4] Run tests
@@ -545,12 +674,12 @@ endpoint нужен `ENABLE_FULL_CLASSIFIER_FALLBACK=false`.
 [7] Select LLM provider        — ario / custom / ollama / groq / gemini
 ```
 
-Порт берётся в таком порядке: **аргумент запуска → `API_PORT` в `.env` → 8010**. Разово —
-`launch.bat server 9100`, постоянно — строкой `API_PORT=` в `.env`. Если в меню виден старый
-порт, значение осталось в `.env` от прежней версии.
+Порт локального режима берётся в таком порядке: **аргумент запуска → `API_PORT` в `.env` → 8010**.
+Разово — `launch.bat server 9100` (или `start.cmd local --port 9100`), постоянно — строкой
+`API_PORT=` в `.env`. В Docker-режиме порт на хосте задаёт `HOST_PORT`.
 
-На Linux то же самое: `./launch.sh` (меню), `./launch.sh server 9100`, плюс шаблон unit-файла
-systemd — см. [DEPLOY.md](docs/DEPLOY.md).
+На Linux то же самое: `./launch.sh` (меню), `./launch.sh server 9100`. Шаблон unit-файла systemd
+из [DEPLOY.md](docs/DEPLOY.md) запускает только API — для нового стека используйте `start.sh`.
 
 ---
 
@@ -603,14 +732,15 @@ numpy>=2.1.0;       python_version >= "3.12"
 | Языковая модель (основная) | **Ario** — `Qwen/Qwen3.6-35B-A3B` (MoE, 128K контекст, ~3.8x быстрее Qwen3-32B) |
 | Языковая модель (альтернативы) | **Groq** `llama-3.3-70b-versatile`, **Gemini** `gemini-2.5-flash`, **Ollama** `qwen2.5-14b` |
 | Эмбеддинги | `intfloat/multilingual-e5-base` + `adapter_v3` (domain-tuned линейный адаптер 768d) |
-| Векторное хранилище | numpy cosine similarity (`data/vector_db_adapted_v3/`) |
+| Хранилище и векторный поиск | PostgreSQL 16 + pgvector (векторы импортированы из `data/vector_db_adapted_v3/`) |
+| Очереди и воркеры | RabbitMQ 3.13 (quorum-очереди) + Celery |
 | Lexical поиск | Token overlap с нормализацией русских суффиксов |
 | Reranker | Heuristic: lexical + level + hierarchy boosts (branch agreement + parent similarity) |
 | L1-diversity guard | Anti-cascade-error: впрыск кандидатов из других L1-разделов при монотонном пуле |
 | Dynamic candidate cap | `per_q_cap = max(8, min(TOP_K, 400 // n_q))` — защита от overflow 128K контекста |
 | Alternatives | LLM возвращает топ-3 альтернативных кода с confidence для каждого вопроса |
 | Сегментация | Детерминистические regex-маркеры (`1.`, «во-первых», абзацы) |
-| API | FastAPI + uvicorn |
+| API | FastAPI + uvicorn (без модели; ожидание результата — PostgreSQL LISTEN/NOTIFY) |
 | Текст из PDF | PyMuPDF |
 | Дообучение | sentence-transformers, MultipleNegativesRankingLoss |
 
@@ -729,14 +859,14 @@ RX_PASSWORD=<пароль>
 ### Шаг 2 — Поднять сервис на 8010
 
 ```bash
-docker compose build classifier
-docker compose up -d classifier
+./start.sh            # или start.cmd на Windows; то же, что docker compose up -d --build
 curl http://localhost:8010/health
-# {"status":"ok","agent_ready":true,"classifier_entries":2108}
+# {"status":"ok","agent_ready":true,"classifier_entries":2108,"db":true,"broker":true}
 ```
 
 `/health` — то, что RX стоит опрашивать перед отправкой документов: `agent_ready: false` означает,
-что модель ещё загружается (первый старт — до минуты).
+что ни один воркер классификации ещё не ответил (модель загружается — первый старт до минуты),
+`db: false` / `broker: false` — недоступны PostgreSQL / RabbitMQ.
 
 ### Шаг 3 — Вызвать классификацию
 
@@ -1039,6 +1169,14 @@ curl http://localhost:8010/health
 ---
 
 ## Тесты
+
+Тесты по умолчанию работают с хранилищем в памяти. Тесты с маркером `db` идут против живого
+PostgreSQL + pgvector из `TEST_DATABASE_URL` (если не задан — из `DATABASE_URL`), каждый во
+временной схеме, которая удаляется после теста; при недоступной БД они пропускаются:
+
+```bash
+TEST_DATABASE_URL=postgresql://classifier:classifier@localhost:5433/classifier python -m pytest tests/ --ignore=tests/e2e
+```
 
 ```bash
 # Все unit-тесты

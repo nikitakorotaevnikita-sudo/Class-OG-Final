@@ -11,26 +11,37 @@ AI agent that classifies Russian citizen appeals (обращения гражд�
 All commands run from the **project root**, not from `src/`.
 
 ```bash
-# First-time setup: build the vector database (one-time, ~5-15 min)
-python src/build_vectordb.py
+# Whole stack in Docker (postgres+pgvector, rabbitmq, migrate, api, classify workers)
+./start.sh                      # Windows: start.cmd      (+ --training for the fine-tuning worker)
+./stop.sh                       # Windows: stop.cmd       (docker compose down, never -v)
 
-# Run classifier data integrity tests
-python -m pytest tests/
+# Local: postgres + rabbitmq in Docker, API and Celery workers from venv
+./start.sh local [--port N]     # Windows: start.cmd local (one window per process)
+./stop.sh local                 # Windows: stop.cmd local
 
-# Run a single test
+# Schema + one-shot, idempotent import of file storage into PostgreSQL
+python scripts/db/init_db.py
+python scripts/db/migrate_from_files.py         # exit 1 on reconciliation mismatch
+python scripts/db/verify_search_parity.py --queries data/ii25_test.jsonl --extra 20
+
+# Tests (db-marked tests use TEST_DATABASE_URL, skip if PostgreSQL is unreachable)
+TEST_DATABASE_URL=postgresql://classifier:classifier@localhost:5433/classifier \
+    python -m pytest tests/ -q --ignore=tests/e2e
 python -m pytest tests/test_search.py::test_flat_entries_count
 
-# Run 4 built-in classification test appeals
+# Run 4 built-in classification test appeals (needs a reachable DB, no broker)
 python src/test_agent.py
 
 # Interactive operator mode (verification + fine-tuning trigger)
 python src/operator_cli.py
 
-# Fine-tune embedding model on verified data
-python src/finetune_model.py
+# Queue a fine-tuning job (threshold applies to every source unless --force)
+python src/auto_finetune.py [--force]
 
-# Start API server
-uvicorn src.api_server:app --host 0.0.0.0 --port 8000 --reload
+# Processes by hand (PYTHONPATH=src: modules are imported top-level)
+uvicorn src.api_server:app --host 0.0.0.0 --port 8010
+PYTHONPATH=src celery -A queueing.celery_app worker -Q classify_sync,classify -c 2 --loglevel=INFO
+PYTHONPATH=src celery -A queueing.celery_app worker -Q training -c 1      # Windows: --pool=solo
 ```
 
 **Python version: 3.11 (prod) or 3.13.** Prod runs 3.11; 3.13.2 is verified — full test
@@ -55,16 +66,40 @@ docker build --build-arg PYTHON_VERSION=3.13.2 -t classifier-py313 .
 
 ## Architecture
 
-### Two-stage classification pipeline
+### Process layout
+
+```
+Directum RX / UI ─HTTP─► API (FastAPI, no model; never imports classifier_agent/torch)
+                           │ appeal card + jobs row in PostgreSQL → send_task → RabbitMQ
+                           │ sync endpoints wait on LISTEN job_done (SYNC_WAIT_TIMEOUT_SEC → 504)
+                           ▼
+                RabbitMQ quorum queues: classify_sync, classify, training
+                           │
+          ┌────────────────┴────────────────┐
+          ▼                                 ▼
+ classify worker (Celery)            training worker (Celery, concurrency 1)
+ ClassifierAgent loaded once,        fine-tunes, builds vectors for the new
+ results + jobs=done + NOTIFY        model version, registers it, NOTIFY
+ job_done, optional webhook          model_changed
+          └────────────────┬────────────────┘
+                           ▼
+                PostgreSQL 16 + pgvector
+```
+
+Compose services: `postgres`, `rabbitmq`, `migrate` (one-shot `init_db.py && migrate_from_files.py`),
+`api`, `worker-classify`, `worker-training` (profile `training`). Workers hot-reload `.env`
+(the back office writes it), so API and workers must share one `.env` file.
+
+### Two-stage classification pipeline (inside the classify worker)
 
 ```
 Appeal text
     │
     ▼
-[Stage 1] Semantic vector search (numpy)
-    - multilingual-e5-base encodes query as 768-dim vector
-    - Cosine similarity: embeddings_matrix @ query_vector
-    - Returns top-10 candidates from 2108 classifier entries
+[Stage 1] Dense search in SQL (pgvector)
+    - multilingual-e5-base (active model version) encodes the query, 768-dim
+    - cosine top-K over classifier_vectors of the active model_version
+      (parity with the former numpy search is a hard requirement)
     │
     ▼
 [Stage 2] LLM reasoning (OpenAI-compatible endpoint)
@@ -75,38 +110,44 @@ Appeal text
     - Returns strict JSON with confidence scores and reasoning
     │
     ▼
-ClassificationResult → operator card + log entry
+ClassificationResult → appeal card / questions in PostgreSQL
 ```
 
 ### Key files
 
-- **`src/config.py`** — all constants from `.env`. Single source of truth for paths and model names.
-- **`src/classifier_agent.py`** — `ClassifierAgent` class with `classify(text) → ClassificationResult`. The `ClassificationResult` dataclass includes `log_id` for linking to the verification log.
-- **`src/appeals_logger.py`** — append-only JSONL log (`data/appeals_log.jsonl`). Each entry stores appeal text, top-10 candidates with similarity scores, agent's chosen codes, and verification status (`pending/confirmed/corrected/rejected`).
-- **`src/operator_cli.py`** — interactive CLI loop: classify → show result → operator picks [1/2/3] → log verification → check fine-tuning threshold.
-- **`src/finetune_model.py`** — reads verified log entries, builds `(appeal_text, classifier_entry_name)` pairs, fine-tunes with `MultipleNegativesRankingLoss`, evaluates recall@5, saves to `models/e5-finetuned-vN/`.
-- **`src/build_vectordb.py`** — one-time script. Reads `data/classifier_flat.json`, vectorizes all 2108 entries with `passage:` prefix (e5 convention), saves `data/vector_db/embeddings.npy` + `data/vector_db/metadata.json`.
-- **`src/api_server.py`** — FastAPI REST API. `/health` returns agent status and classifier entry count. `/classify` — main classification endpoint.
+- **`src/config.py`** — all constants from `.env`. Single source of truth for paths, model names, `DATABASE_URL`, `RABBITMQ_URL`.
+- **`src/storage/`** — persistence layer: `db.py` (psycopg pool, pgvector), `schema.sql` (canonical DDL, byte-identical copy in `deploy/db/init/002_schema.sql`), repos for classifier/vectors, appeals, jobs, historical, models; `memory.py` in-memory twins for tests; `get_storage()` picks by `STORAGE_BACKEND`.
+- **`src/queueing/`** — `celery_app.py` (broker, quorum queues, acks_late), `tasks.py` (classify, search, annotation embedding, finetune), `dispatcher.py` + `waiter.py` (API side: send_task, LISTEN job_done), `webhook.py`.
+- **`src/worker_main.py`** — worker bootstrap: one `ClassifierAgent` per process, model-change and `.env` hot reload.
+- **`src/classifier_agent.py`** — `ClassifierAgent.classify(text, appeal_id=None) → ClassificationResult`; metadata and dense search from the DB.
+- **`src/appeals_logger.py`** — same public API as before, backed by the appeals repo (cards, questions, verifications `pending/confirmed/corrected/rejected`).
+- **`src/api_server.py`** / **`src/integration_api.py`** — thin FastAPI over storage + dispatcher + waiter. `/health` reports DB, broker and worker readiness. RX contract unchanged.
+- **`src/finetune_model.py`** — reads verified + historical data from the DB, fine-tunes with `MultipleNegativesRankingLoss`, saves `models/e5-finetuned-vN/`, builds vectors for version N, registers it in `ml_model_registry` (activates only if recall@5 improved).
+- **`src/build_vectordb.py`** — fills `classifier_vectors` for a model version (called by fine-tuning).
+- **`scripts/db/`** — `init_db.py`, `migrate_from_files.py`, `verify_search_parity.py`.
+- **`docker-compose.yml`, `start.*`, `stop.*`, `deploy/db/init/`** — deployment.
 
-### Vector DB storage
+### Vector storage
 
-ChromaDB was rejected due to Windows/Python 3.11 incompatibility. The DB is two plain files:
-- `embeddings.npy` — shape (2108, 768), float32
-- `metadata.json` — list of `{code, name, level, parent_code, full_path, search_text}`
-
-**Rebuild required** when `EMBEDDING_MODEL` changes or classifier data updates.
+Vectors live in PostgreSQL table `classifier_vectors` (pgvector, dimension fixed at 768), one set
+per `model_version`; the active version comes from `ml_model_registry`. Version 0 is the former
+prod file DB `VECTOR_DB_DIR` (`data/vector_db_adapted_v3`: `embeddings.npy` + `metadata.json`),
+imported as-is by `migrate_from_files.py` — never re-embedded. A new model version gets its own
+vectors from fine-tuning; no manual rebuild of files is needed.
 
 ### Classifier data structure
 
-`data/classifier_flat.json` — 2108 entries, 4-level hierarchy with codes like `XXXX.XXXX.XXXX.XXXX`. Level 4 entries are the classification targets. `search_text` field is what gets embedded (combines name + path context).
+`data/classifier_flat.json` — 2108 entries, 4-level hierarchy with codes like `XXXX.XXXX.XXXX.XXXX`. Level 4 entries are the classification targets. `search_text` field is what gets embedded (combines name + path context). Imported into `classifier_entries`.
 
 ### Fine-tuning loop
 
-Operator verifications in `data/appeals_log.jsonl` accumulate training signal:
+Operator verifications (DB) accumulate training signal:
 - `confirmed` → positive pair: `(appeal, agent_code_name)`
 - `corrected` → positive: `(appeal, operator_code_name)` + negative: `(appeal, agent_code_name)`
 
-Trigger threshold: `FINETUNE_THRESHOLD` (default 50, set in `.env`). After fine-tuning, update `EMBEDDING_MODEL` in `.env` to the output path and re-run `build_vectordb.py`.
+Trigger threshold: `FINETUNE_THRESHOLD` (default 50) — applies to every source (verified,
+historical, combined) unless `force`. Jobs go to the `training` queue; the training worker
+registers the new version and classify workers switch to it without restart (`NOTIFY model_changed`).
 
 ## Configuration (`.env`)
 
@@ -117,7 +158,16 @@ EMBEDDING_MODEL=intfloat/multilingual-e5-base   # or path to fine-tuned model
 TOP_K_CANDIDATES=10
 MIN_CONFIDENCE=0.65      # below this → needs_verification=True
 FINETUNE_THRESHOLD=50    # verified entries needed to trigger fine-tuning
+STORAGE_BACKEND=postgres # memory in tests
+DATABASE_URL=postgresql://classifier:classifier@localhost:5432/classifier
+RABBITMQ_URL=amqp://classifier:classifier@localhost:5672//
+CLASSIFY_CONCURRENCY=2   # per worker; CLASSIFY_WORKERS=2 processes for start.cmd local
+SYNC_WAIT_TIMEOUT_SEC=1800
+WEBHOOK_ALLOWED_HOSTS=   # exact hostnames, comma-separated; empty = webhooks off
 ```
+
+In compose, `DATABASE_URL`/`RABBITMQ_URL` are overridden to the service hostnames
+(`postgres`, `rabbitmq`). Full list with comments: `.env.example`.
 
 ## Important constraints
 
@@ -125,11 +175,16 @@ FINETUNE_THRESHOLD=50    # verified entries needed to trigger fine-tuning
 - `numpy` major is chosen by environment marker: `<2.0` below Python 3.12 (the version prod
   is verified on), `>=2.1` from 3.12 up (numpy 1.26 has no cp313 wheels). Project code uses
   no aliases removed in numpy 2.0, so the bump needs no source changes.
-- `data/vector_db/` and `models/` are excluded from Git (see `.gitignore`). The
-  production DB is `data/vector_db_adapted_v3` — it **is** in Git and needs no rebuild
-  (`VECTOR_DB_DIR` in `.env` points at it).
-- `data/appeals_log.jsonl` and `data/request_log.jsonl` stay local: they hold appeal
-  texts (personal data under 59-FZ). `data/jobs/` is excluded for the same reason.
+- Every process needs `src` on `PYTHONPATH` (modules are imported top-level: `import config`,
+  `queueing.celery_app`); the image sets `PYTHONPATH=/app/src`.
+- `data/vector_db/` and `models/` are excluded from Git (see `.gitignore`). The former
+  production file DB `data/vector_db_adapted_v3` **is** in Git: it is the source of model
+  version 0 for `migrate_from_files.py` (`VECTOR_DB_DIR` points at it).
+- Personal data (appeal texts, 59-FZ) never goes to Git: the `pgdata` volume, `run/`
+  (local process logs), migration output, `data/appeals_log.jsonl`, `data/request_log.jsonl`,
+  `data/jobs/`. `stop.*` never runs `docker compose down -v`.
+- The API process must never import `classifier_agent`, `sentence_transformers` or `torch`.
+- `.cmd` files: executable lines ASCII-only, CRLF. `.sh` files: LF, `set -euo pipefail`.
 - `setup.ps1` is ASCII-only — Cyrillic strings cause PowerShell parse errors on Windows with CP1251 encoding.
 
 ## GitHub
