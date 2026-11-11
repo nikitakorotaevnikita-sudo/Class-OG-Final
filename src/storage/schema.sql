@@ -117,6 +117,9 @@ CREATE TABLE IF NOT EXISTS jobs (
   finished_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS jobs_status ON jobs(job_type, status, created_at);
+-- Не больше одного активного дообучения: двойной запуск получает 409 (ActiveJobExists).
+CREATE UNIQUE INDEX IF NOT EXISTS one_active_finetune ON jobs ((job_type))
+  WHERE job_type = 'finetune' AND status IN ('queued','running');
 
 CREATE TABLE IF NOT EXISTS llm_request_log (
   id BIGSERIAL PRIMARY KEY,
@@ -128,4 +131,12 @@ CREATE TABLE IF NOT EXISTS llm_request_log (
   candidates_count INT,
   error TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Служебные отметки. files_migrated — время полного успешного переноса файлового
+-- хранилища (scripts/db/migrate_from_files.py); повторный импорт только с --force.
+CREATE TABLE IF NOT EXISTS schema_meta (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

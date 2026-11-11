@@ -29,6 +29,7 @@ from storage.models import (  # noqa: E402
 ROOT_PARENT = "0000.0000.0000.0000"
 RESTART_ERROR = "Сервис переведён на новую очередь, отправьте обращение заново"
 HIST_SOURCE = "historical_verified.jsonl"
+MIGRATED_KEY = "files_migrated"  # schema_meta: отметка полного успешного переноса
 _MODEL_DIR_RE = re.compile(r"^e5-finetuned-v(\d+)$")
 
 
@@ -402,10 +403,20 @@ def main(argv: Optional[list[str]] = None) -> int:
     p.add_argument("--data-dir", default="data")
     p.add_argument("--vector-db-dir", default=config.VECTOR_DB_DIR)
     p.add_argument("--models-dir", default=config.MODELS_DIR)
+    p.add_argument("--force", action="store_true",
+                   help="повторить импорт, даже если перенос уже выполнен")
     args = p.parse_args(argv)
 
+    storage = _get_storage()
+    done_at = storage.meta.get(MIGRATED_KEY)
+    if done_at and not args.force:
+        # Повторный импорт после живой работы (перепроверка карточки, удалённая
+        # аннотация) дал бы расхождение сверки или вернул бы удалённое.
+        _say(f"Данные из файлов уже перенесены {done_at}; повторный импорт: --force")
+        return 0
+
     rec = migrate(
-        _get_storage(), Path(args.data_dir), Path(args.vector_db_dir), Path(args.models_dir),
+        storage, Path(args.data_dir), Path(args.vector_db_dir), Path(args.models_dir),
         config.EMBEDDING_MODEL,
     )
     _say("\nСверка (источник: в файлах / в БД):")
@@ -418,7 +429,10 @@ def main(argv: Optional[list[str]] = None) -> int:
              + (" OK" if note else ""))
     _say(f"  {'warnings':<20} {rec.warnings:>8}")
     _say("Готово." if not bad else f"Расхождений: {bad}")
-    return 1 if bad else 0
+    if bad:
+        return 1
+    storage.meta.set(MIGRATED_KEY, datetime.now(timezone.utc).isoformat(timespec="seconds"))
+    return 0
 
 
 if __name__ == "__main__":

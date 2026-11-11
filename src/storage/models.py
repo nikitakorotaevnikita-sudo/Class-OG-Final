@@ -75,6 +75,10 @@ class QueueFull(RuntimeError):
     """Очередь заполнена — вызывающей стороне нужно повторить позже."""
 
 
+class ActiveJobExists(RuntimeError):
+    """Активная задача этого типа уже есть (одно дообучение одновременно)."""
+
+
 class ModelVersionExists(RuntimeError):
     """Версия модели с таким номером уже есть в реестре (register_new)."""
 
@@ -111,6 +115,7 @@ class Storage:
     appeals: Any = None
     jobs: Any = None
     historical: Any = None
+    meta: Any = None  # служебные отметки (schema_meta)
 
     @contextmanager
     def transaction(self):

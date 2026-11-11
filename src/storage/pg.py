@@ -13,7 +13,8 @@ from psycopg.types.json import Jsonb
 
 from . import appeal_common as ac
 from . import db
-from .models import ClassifierEntry, Job, ModelVersion, ModelVersionExists, QueueFull, Storage
+from .models import (ActiveJobExists, ClassifierEntry, Job, ModelVersion, ModelVersionExists,
+                     QueueFull, Storage)
 
 _ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
@@ -513,14 +514,21 @@ class PgJobStore(_PgBase):
                 ).fetchone()[0]
                 if queued >= max_queued:
                     raise QueueFull(f"в очереди уже {queued} задач, лимит {max_queued}")
-            row = c.execute(
-                f"""INSERT INTO jobs (id, job_type, status, appeal_id, document_id, webhook_url,
-                                      payload, created_at)
-                    VALUES (%s, %s, 'queued', %s, %s, %s, %s, clock_timestamp())
-                    RETURNING {_JOB_COLS}""",
-                (job_id, job_type, aid, document_id, webhook_url,
-                 Jsonb({**payload, "queue": queue_class})),
-            ).fetchone()
+            try:
+                # Точка сохранения: нарушение индекса не обрывает внешнюю транзакцию.
+                with c.transaction():
+                    row = c.execute(
+                        f"""INSERT INTO jobs (id, job_type, status, appeal_id, document_id,
+                                              webhook_url, payload, created_at)
+                            VALUES (%s, %s, 'queued', %s, %s, %s, %s, clock_timestamp())
+                            RETURNING {_JOB_COLS}""",
+                        (job_id, job_type, aid, document_id, webhook_url,
+                         Jsonb({**payload, "queue": queue_class})),
+                    ).fetchone()
+            except psycopg.errors.UniqueViolation as exc:
+                if exc.diag.constraint_name == "one_active_finetune":
+                    raise ActiveJobExists("дообучение уже в очереди или выполняется") from exc
+                raise
         return _job(row)
 
     def get(self, job_id, conn=None):
@@ -684,6 +692,23 @@ class PgHistoricalStore(_PgBase):
         ]
 
 
+class PgMetaStore(_PgBase):
+    """Служебные отметки (таблица schema_meta)."""
+
+    def get(self, key, conn=None):
+        with self._tx(conn) as c:
+            row = c.execute("SELECT value FROM schema_meta WHERE key = %s", (key,)).fetchone()
+        return row[0] if row else None
+
+    def set(self, key, value, conn=None):
+        with self._tx(conn) as c:
+            c.execute(
+                """INSERT INTO schema_meta (key, value) VALUES (%s, %s)
+                   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()""",
+                (key, value),
+            )
+
+
 class PgStorage(Storage):
     def __init__(self, connect: ConnectFn = db.transaction) -> None:
         self._connect = connect
@@ -693,6 +718,7 @@ class PgStorage(Storage):
             appeals=PgAppealStore(connect),
             jobs=PgJobStore(connect),
             historical=PgHistoricalStore(connect),
+            meta=PgMetaStore(connect),
         )
 
     def transaction(self):

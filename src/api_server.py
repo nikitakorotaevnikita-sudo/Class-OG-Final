@@ -41,7 +41,8 @@ from historical_loader import parse_file, validate_codes
 from integration_api import router as integration_router
 from queueing import waiter as waiter_mod
 from storage import get_storage
-from storage.models import STATUS_DONE, STATUS_ERROR, STATUS_QUEUED, STATUS_RUNNING
+from storage.models import (STATUS_DONE, STATUS_ERROR, STATUS_QUEUED, STATUS_RUNNING,
+                            ActiveJobExists)
 from text_extractor import (
     extract_text,
     TextExtractionError,
@@ -682,8 +683,11 @@ async def start_finetune(request: FineTuneRequest):
     # Как и прежний запуск finetune_model.py: для historical/combined порог
     # верифицированных записей не проверяется (--force).
     force = request.force or request.source in ("historical", "combined")
-    sub = await job_api.submit_job("finetune", "finetune", "training",
-                                   {"source": request.source, "force": force})
+    try:
+        sub = await job_api.submit_job("finetune", "finetune", "training",
+                                       {"source": request.source, "force": force})
+    except ActiveJobExists as exc:  # параллельный запрос успел создать задачу
+        raise HTTPException(status_code=409, detail="Дообучение уже выполняется") from exc
     job = await asyncio.to_thread(storage.jobs.get, sub.job.id)
     return _finetune_snapshot(job or sub.job)
 

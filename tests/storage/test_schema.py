@@ -10,7 +10,7 @@ DEPLOY = ROOT / "deploy" / "db" / "init" / "002_schema.sql"
 TABLES = [
     "classifier_entries", "classifier_vectors", "appeal_classifications",
     "appeal_questions", "appeal_verifications", "historical_appeals",
-    "ml_model_registry", "jobs", "llm_request_log",
+    "ml_model_registry", "jobs", "llm_request_log", "schema_meta",
 ]
 
 
@@ -33,7 +33,7 @@ def test_apply_schema_twice_is_idempotent(pg_conn):
     count = pg_conn.execute(
         "SELECT count(*) FROM information_schema.tables WHERE table_schema = current_schema()"
     ).fetchone()[0]
-    assert count == 9
+    assert count == 10
 
 
 def test_config_defaults(monkeypatch):

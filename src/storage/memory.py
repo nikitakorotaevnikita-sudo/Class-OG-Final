@@ -14,8 +14,8 @@ import numpy as np
 
 from . import appeal_common as ac
 from .models import (STATUS_DONE, STATUS_ERROR, STATUS_QUEUED, STATUS_RUNNING,
-                     AppealResult, ClassifierEntry, Job, ModelVersion, ModelVersionExists,
-                     QueueFull, Storage)
+                     ActiveJobExists, AppealResult, ClassifierEntry, Job, ModelVersion,
+                     ModelVersionExists, QueueFull, Storage)
 
 logger = logging.getLogger(__name__)
 
@@ -409,6 +409,11 @@ class MemoryJobStore:
                 )
                 if queued >= max_queued:
                     raise QueueFull(f"в очереди уже {queued} задач, лимит {max_queued}")
+            if job_type == "finetune" and any(
+                j.job_type == "finetune" and j.status in (STATUS_QUEUED, STATUS_RUNNING)
+                for j in self._jobs.values()
+            ):  # как частичный уникальный индекс one_active_finetune в PostgreSQL
+                raise ActiveJobExists("дообучение уже в очереди или выполняется")
             job = Job(
                 id=uuid.uuid4().hex, job_type=job_type, status=STATUS_QUEUED,
                 appeal_id=ac.norm_uuid(appeal_id) if appeal_id else None,
@@ -563,10 +568,24 @@ class MemoryHistoricalStore:
             return [dict(r) for r in self._rows]
 
 
+class MemoryMetaStore:
+    """Служебные отметки (аналог таблицы schema_meta)."""
+
+    def __init__(self) -> None:
+        self._values: dict[str, str] = {}
+
+    def get(self, key):
+        return self._values.get(key)
+
+    def set(self, key, value):
+        self._values[key] = value
+
+
 class MemoryStorage(Storage):
     def __init__(self) -> None:
         models = MemoryModelStore()
         super().__init__(
             classifier=MemoryClassifierStore(models), models=models,
             appeals=MemoryAppealStore(), jobs=MemoryJobStore(), historical=MemoryHistoricalStore(),
+            meta=MemoryMetaStore(),
         )

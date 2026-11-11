@@ -291,3 +291,41 @@ def test_lock_owned_holds_row_lock_until_commit(pg_conn):
                 other.execute("UPDATE jobs SET attempts = attempts + 1 WHERE id = %s",
                               (job.id,))
         other.execute("UPDATE jobs SET attempts = attempts + 1 WHERE id = %s", (job.id,))
+
+
+# ── Одно активное дообучение (уникальный частичный индекс) ──────────────────
+
+def test_only_one_active_finetune(storage):
+    from storage.models import ActiveJobExists
+
+    first = storage.jobs.create("finetune", {}, queue_class="training")
+    with pytest.raises(ActiveJobExists):
+        storage.jobs.create("finetune", {}, queue_class="training")
+    storage.jobs.claim(first.id)
+    with pytest.raises(ActiveJobExists):
+        storage.jobs.create("finetune", {}, queue_class="training")
+    # другие типы задач не ограничены
+    storage.jobs.create("classify", {})
+    storage.jobs.create("classify", {})
+    storage.jobs.finish(first.id, {"status": "completed"}, None)
+    again = storage.jobs.create("finetune", {}, queue_class="training")
+    assert again.status == STATUS_QUEUED
+
+
+@pytest.mark.db
+def test_active_finetune_violation_keeps_outer_transaction_usable(pg_conn):
+    from storage.models import ActiveJobExists
+    from storage.pg import PgStorage
+
+    @contextmanager
+    def connect():
+        with pg_conn.transaction():
+            yield pg_conn
+
+    st = PgStorage(connect)
+    st.jobs.create("finetune", {}, queue_class="training")
+    with st.transaction() as conn:
+        with pytest.raises(ActiveJobExists):
+            st.jobs.create("finetune", {}, queue_class="training", conn=conn)
+        st.jobs.create("classify", {}, conn=conn)  # транзакция не прервана
+    assert st.jobs.stats()["queued"] == 2

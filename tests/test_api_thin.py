@@ -361,3 +361,15 @@ def test_settings_sync_wait_timeout_applied_at_runtime(monkeypatch, tmp_path):
     monkeypatch.setenv("SYNC_WAIT_TIMEOUT_SEC", "1800")
     settings_store.save_settings({"SYNC_WAIT_TIMEOUT_SEC": "600"})
     assert config.SYNC_WAIT_TIMEOUT_SEC == 600
+
+
+def test_finetune_double_submit_race_is_409(env, client, monkeypatch):
+    """Проверка has_active прошла у обоих запросов — второй ловит уникальный индекс."""
+    monkeypatch.setattr(dispatcher_mod, "_dispatcher",
+                        SimpleNamespace(send=lambda *a, **k: None))
+    env.storage.jobs.create("finetune", {"source": "combined", "force": False},
+                            queue_class="training")
+    monkeypatch.setattr(env.storage.jobs, "has_active", lambda job_type: False)
+    resp = client.post("/api/finetune", json={"source": "combined"})
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "Дообучение уже выполняется"

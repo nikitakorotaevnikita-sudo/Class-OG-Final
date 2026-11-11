@@ -206,10 +206,71 @@ def test_rerun_after_live_activity_still_exits_zero(monkeypatch, tmp_path, capsy
     mem.appeals.log_llm_request(live, True, 1, 1.0, 0.9, None, 5)
     capsys.readouterr()
 
-    assert mig.main(_cli(data)) == 0
+    assert mig.main(_cli(data) + ["--force"]) == 0
     out = capsys.readouterr().out
     assert "MISMATCH" not in out
     assert "skipped (table not empty)" in out
+
+
+# --- Отметка о выполненном переносе (schema_meta.files_migrated) ---------------------
+
+def test_successful_run_writes_marker_and_rerun_is_noop(monkeypatch, tmp_path, capsys):
+    data = _copy_data(tmp_path)
+    mem = MemoryStorage()
+    monkeypatch.setattr(mig, "_get_storage", lambda: mem)
+    assert mig.main(_cli(data)) == 0
+    marker = mem.meta.get("files_migrated")
+    assert marker
+
+    # оператор перепроверил перенесённую карточку, аннотация удалена
+    mem.appeals.set_verification(CARD_A, "rejected", None, "ошибка")
+    before = snapshot(mem)
+    called = []
+    monkeypatch.setattr(mig, "migrate", lambda *a, **k: called.append(a))
+    capsys.readouterr()
+
+    assert mig.main(_cli(data)) == 0
+    out = capsys.readouterr().out
+    assert called == []
+    assert f"Данные из файлов уже перенесены {marker}" in out
+    assert "--force" in out
+    assert snapshot(mem) == before
+    assert mem.meta.get("files_migrated") == marker
+
+
+def test_force_reimports_despite_marker(monkeypatch, tmp_path):
+    data = _copy_data(tmp_path)
+    mem = MemoryStorage()
+    monkeypatch.setattr(mig, "_get_storage", lambda: mem)
+    assert mig.main(_cli(data)) == 0
+    real = mig.migrate
+    called = []
+
+    def spy(*a, **k):
+        called.append(1)
+        return real(*a, **k)
+
+    monkeypatch.setattr(mig, "migrate", spy)
+    assert mig.main(_cli(data) + ["--force"]) == 0
+    assert called == [1]
+
+
+def test_mismatch_does_not_write_marker(monkeypatch, tmp_path):
+    data = _copy_data(tmp_path)
+    mem = MemoryStorage()
+    monkeypatch.setattr(mig, "_get_storage", lambda: mem)
+    rec = mig.Reconciliation()
+    rec["appeals"] = (2, 1)
+    monkeypatch.setattr(mig, "migrate", lambda *a, **k: rec)
+    assert mig.main(_cli(data)) == 1
+    assert mem.meta.get("files_migrated") is None
+
+
+def test_marker_roundtrip_pg(pg_storage):
+    assert pg_storage.meta.get("files_migrated") is None
+    pg_storage.meta.set("files_migrated", "2026-11-11T10:00:00+00:00")
+    pg_storage.meta.set("files_migrated", "2026-11-11T11:00:00+00:00")
+    assert pg_storage.meta.get("files_migrated") == "2026-11-11T11:00:00+00:00"
 
 
 def test_unknown_legacy_status_warns_and_imports_pending(mem, tmp_path):

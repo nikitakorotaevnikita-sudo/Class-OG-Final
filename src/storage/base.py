@@ -90,6 +90,11 @@ class HistoricalStore(Protocol):
     def all(self) -> list[dict]: ...
 
 
+class MetaStore(Protocol):
+    def get(self, key: str) -> Optional[str]: ...
+    def set(self, key: str, value: str) -> None: ...
+
+
 class JobStore(Protocol):
     def create(
         self,

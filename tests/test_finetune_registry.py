@@ -396,3 +396,20 @@ def test_build_vectordb_cli_builds_registered_empty_version():
 def test_build_vectordb_cli_usage_without_args(capsys):
     assert build_vectordb.main([]) == 2
     assert "--version" in capsys.readouterr().out
+
+
+def test_auto_finetune_race_with_active_job_exits_cleanly(monkeypatch, capsys):
+    import auto_finetune
+    from queueing import dispatcher
+    from storage import get_storage
+
+    storage = seed(get_storage())
+    storage.jobs.create("finetune", {}, queue_class="training")
+    monkeypatch.setattr(storage.jobs, "has_active", lambda job_type: False)  # гонка
+    sent = []
+    monkeypatch.setattr(dispatcher.CeleryDispatcher, "send",
+                        lambda self, name, msg, queue: sent.append(name))
+
+    assert auto_finetune._cli(["--force"]) == 0
+    assert sent == []
+    assert "уже в очереди или выполняется" in capsys.readouterr().out

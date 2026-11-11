@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import config
 from storage import get_storage
+from storage.models import ActiveJobExists
 
 FINETUNE_QUEUE = "training"
 
@@ -56,8 +57,12 @@ def main(force: bool = False, source: str = "combined") -> Optional[str]:
         print("\n  Дообучение уже в очереди или выполняется — новая задача не создана.")
         return None
 
-    job = storage.jobs.create("finetune", {"source": source, "force": force},
-                              queue_class=FINETUNE_QUEUE)
+    try:
+        job = storage.jobs.create("finetune", {"source": source, "force": force},
+                                  queue_class=FINETUNE_QUEUE)
+    except ActiveJobExists:  # параллельный запуск успел создать задачу
+        print("\n  Дообучение уже в очереди или выполняется — новая задача не создана.")
+        return None
     msg = {"job_id": job.id, "appeal_id": None, "document_id": None}
     try:
         CeleryDispatcher().send("finetune", msg, FINETUNE_QUEUE)
