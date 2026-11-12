@@ -357,7 +357,10 @@ def test_local_dispatcher_bounds_concurrency(monkeypatch):
     before = threading.active_count()
     for job in jobs:
         disp.send("classify_appeal", {"job_id": job.id}, queue="classify")
-    time.sleep(0.3)
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and state["now"] < 2:
+        time.sleep(0.02)
+    time.sleep(0.1)  # короткая пауза: убедиться, что третья задача не стартует
     assert state["now"] == 2
     assert threading.active_count() - before <= 2
     assert all(t.daemon for t in disp._threads)
@@ -377,6 +380,52 @@ def test_local_dispatcher_default_workers_from_config(monkeypatch):
     assert LocalDispatcher(MemoryStorage(), agent_factory=lambda: None).max_workers == 3
     monkeypatch.setattr(config, "CLASSIFY_CONCURRENCY", 0)
     assert LocalDispatcher(MemoryStorage(), agent_factory=lambda: None).max_workers == 2
+
+
+def test_local_dispatcher_clamps_non_positive_workers(monkeypatch):
+    import config
+
+    assert LocalDispatcher(MemoryStorage(), agent_factory=lambda: None,
+                           max_workers=-1).max_workers == 1
+    monkeypatch.setattr(config, "CLASSIFY_CONCURRENCY", -3)
+    assert LocalDispatcher(MemoryStorage(), agent_factory=lambda: None).max_workers == 1
+
+
+def test_local_finetune_does_not_hold_classify_slot(monkeypatch):
+    """Долгое дообучение идёт в отдельном потоке: классификация не ждёт."""
+    from queueing import tasks
+
+    storage = MemoryStorage()
+    ft_job, cl_job = _new_job(storage), _new_job(storage)
+    gate = threading.Event()
+    started = threading.Event()
+
+    def slow_finetune(msg, st):
+        started.set()
+        gate.wait(10)
+        st.jobs.finish(msg["job_id"], result={"ok": 1}, error=None)
+
+    def fast_classify(msg, st, agent):
+        st.jobs.finish(msg["job_id"], result={"ok": 1}, error=None)
+
+    monkeypatch.setattr(tasks, "run_finetune", slow_finetune)
+    monkeypatch.setattr(tasks, "run_classify_appeal", fast_classify)
+    disp = LocalDispatcher(storage, agent_factory=lambda: "A", max_workers=1)
+    try:
+        disp.send("finetune", {"job_id": ft_job.id}, queue="training")
+        assert started.wait(5)
+        disp.send("classify_appeal", {"job_id": cl_job.id}, queue="classify")
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and storage.jobs.get(cl_job.id).status != "done":
+            time.sleep(0.02)
+        assert storage.jobs.get(cl_job.id).status == "done"
+        assert storage.jobs.get(ft_job.id).status != "done"
+    finally:
+        gate.set()
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and storage.jobs.get(ft_job.id).status != "done":
+        time.sleep(0.02)
+    assert storage.jobs.get(ft_job.id).status == "done"
 
 
 def test_local_dispatcher_unknown_task():

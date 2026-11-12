@@ -46,7 +46,11 @@ def test_worker_proc_alive_timeout_from_config():
     """Страховка prefork: дочерний процесс не убивается за долгую инициализацию."""
     import config
 
-    assert config.WORKER_PROC_ALIVE_TIMEOUT_SEC == 300
+    from pathlib import Path
+
+    # Дефолт кода, независимо от .env разработчика.
+    src = (Path(__file__).resolve().parents[2] / "src" / "config.py").read_text(encoding="utf-8")
+    assert 'os.getenv("WORKER_PROC_ALIVE_TIMEOUT_SEC", "300")' in src
     assert app.conf.worker_proc_alive_timeout == config.WORKER_PROC_ALIVE_TIMEOUT_SEC
 
 

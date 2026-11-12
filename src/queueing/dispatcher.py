@@ -60,7 +60,8 @@ class LocalDispatcher:
     Одновременно — не больше max_workers задач (по умолчанию
     CLASSIFY_CONCURRENCY, как у воркера; при 0 — 2), остальные ждут в очереди.
     Не ThreadPoolExecutor: его потоки не daemon, и зависшая задача не дала бы
-    процессу (тестам) завершиться.
+    процессу (тестам) завершиться. Дообучение (finetune) в пул не входит:
+    оно идёт в отдельном daemon-потоке, чтобы не занимать слот классификации.
     """
 
     def __init__(self, storage, agent_factory: Callable[[], object],
@@ -69,7 +70,7 @@ class LocalDispatcher:
         # Фабрика вызывается на каждую задачу: кэш агента, горячая перезагрузка
         # модели после дообучения и применение .env живут в worker_main.get_agent.
         self._agent_factory = agent_factory
-        self.max_workers = max_workers or config.CLASSIFY_CONCURRENCY or 2
+        self.max_workers = max(1, max_workers or config.CLASSIFY_CONCURRENCY or 2)
         self._queue: "SimpleQueue[tuple[str, dict]]" = SimpleQueue()
         self._threads: list[threading.Thread] = []
         self._threads_lock = threading.Lock()
@@ -77,6 +78,10 @@ class LocalDispatcher:
     def send(self, task_name: str, msg: dict, queue: str) -> None:
         if task_name not in _LOCAL_TASKS:
             raise DispatchError(f"неизвестная задача: {task_name!r}")
+        if task_name == "finetune":
+            threading.Thread(target=self._run_safe, args=(task_name, msg),
+                             daemon=True, name="local-dispatcher-finetune").start()
+            return
         self._queue.put((task_name, msg))
         with self._threads_lock:
             if len(self._threads) < self.max_workers:
@@ -89,10 +94,13 @@ class LocalDispatcher:
     def _worker(self) -> None:
         while True:
             task_name, msg = self._queue.get()
-            try:
-                self._run(task_name, msg)
-            except Exception:  # noqa: BLE001 — поток пула не должен умирать
-                log.exception("Локальный диспетчер: сбой задачи %s", task_name)
+            self._run_safe(task_name, msg)
+
+    def _run_safe(self, task_name: str, msg: dict) -> None:
+        try:
+            self._run(task_name, msg)
+        except Exception:  # noqa: BLE001 — поток не должен умирать
+            log.exception("Локальный диспетчер: сбой задачи %s", task_name)
 
     def _run(self, task_name: str, msg: dict) -> None:
         job_id = msg.get("job_id")

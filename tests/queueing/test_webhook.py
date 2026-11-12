@@ -148,3 +148,19 @@ def test_redirects_are_not_followed(monkeypatch):
     assert webhook.deliver("https://rx.local/h", {}, transport=httpx.MockTransport(handler)) is False
     assert hosts and set(hosts) == {"rx.local"}
     assert clients and clients[0].get("follow_redirects") is False
+
+
+def test_allowlist_entry_with_scheme_or_userinfo_is_skipped_and_warned(monkeypatch, caplog):
+    monkeypatch.setattr(config, "WEBHOOK_ALLOWED_HOSTS",
+                        ["https://rx.local", "user@rx2.local", "ok.local"])
+    with caplog.at_level("WARNING"):
+        assert webhook.is_allowed("https://https/hook") is False
+        assert not webhook.is_allowed("https://rx2.local/hook")
+        assert webhook.is_allowed("https://ok.local/hook")
+    assert "https://rx.local" in caplog.text
+
+
+def test_explicit_zero_port_is_not_the_default_port(monkeypatch):
+    monkeypatch.setattr(config, "WEBHOOK_ALLOWED_HOSTS", ["host:80"])
+    assert webhook.is_allowed("http://host/hook")
+    assert not webhook.is_allowed("http://host:0/hook")

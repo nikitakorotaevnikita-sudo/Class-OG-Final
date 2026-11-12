@@ -41,6 +41,10 @@ def _allowed_entries() -> list[tuple[str, Optional[int]]]:
         raw = raw.strip()
         if not raw:
             continue
+        if "/" in raw or "@" in raw:
+            log.warning("WEBHOOK_ALLOWED_HOSTS: запись %r пропущена: нужен только "
+                        "host, host:port или [ipv6] (без схемы и userinfo)", raw)
+            continue
         try:
             parsed = urlparse("//" + raw)
             host, port = _norm_host(parsed.hostname), parsed.port
@@ -61,7 +65,9 @@ def is_allowed(url: str) -> bool:
     try:
         parsed = urlparse(url)
         host = _norm_host(parsed.hostname)
-        port = parsed.port or _DEFAULT_PORTS.get(parsed.scheme)
+        port = parsed.port
+        if port is None:
+            port = _DEFAULT_PORTS.get(parsed.scheme)
     except ValueError:
         return False
     if parsed.scheme not in _DEFAULT_PORTS or not host:
