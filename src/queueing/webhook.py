@@ -22,17 +22,52 @@ def _sleep(seconds: float) -> None:
     time.sleep(seconds)
 
 
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def _norm_host(host: Optional[str]) -> str:
+    """Имя хоста без регистра и без завершающей точки (rx.local. == rx.local)."""
+    return (host or "").lower().rstrip(".")
+
+
+def _allowed_entries() -> list[tuple[str, Optional[int]]]:
+    """Записи WEBHOOK_ALLOWED_HOSTS как (хост, порт или None = любой порт).
+
+    Формат записи: host, host:port, [ipv6] или [ipv6]:port. Запись с
+    некорректным портом пропускается (ничего не разрешает).
+    """
+    entries = []
+    for raw in config.WEBHOOK_ALLOWED_HOSTS:
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            parsed = urlparse("//" + raw)
+            host, port = _norm_host(parsed.hostname), parsed.port
+        except ValueError:
+            continue
+        if host:
+            entries.append((host, port))
+    return entries
+
+
 def is_allowed(url: str) -> bool:
-    """http/https и хост точно в WEBHOOK_ALLOWED_HOSTS (без wildcard)."""
+    """http/https и хост точно в WEBHOOK_ALLOWED_HOSTS (без wildcard).
+
+    Решает хост после userinfo (http://rx.local@evil/ — это хост evil).
+    Запись с портом разрешает только этот порт (с учётом порта схемы по
+    умолчанию), запись без порта — любой.
+    """
     try:
         parsed = urlparse(url)
-        host = (parsed.hostname or "").lower()
+        host = _norm_host(parsed.hostname)
+        port = parsed.port or _DEFAULT_PORTS.get(parsed.scheme)
     except ValueError:
         return False
-    if parsed.scheme not in ("http", "https") or not host:
+    if parsed.scheme not in _DEFAULT_PORTS or not host:
         return False
-    allowed = {h.strip().lower() for h in config.WEBHOOK_ALLOWED_HOSTS if h.strip()}
-    return host in allowed
+    return any(host == allowed_host and allowed_port in (None, port)
+               for allowed_host, allowed_port in _allowed_entries())
 
 
 def _host(url: str) -> str:
@@ -62,8 +97,9 @@ def deliver(url: str, payload: dict, transport: Optional[httpx.BaseTransport] = 
         signature = sign(body)
         if signature:
             headers["X-Signature"] = signature
+        # Редиректы не следуем: 3xx увёл бы запрос на хост вне белого списка.
         with httpx.Client(timeout=10, trust_env=uses_env_proxy(url, None),
-                          transport=transport) as client:
+                          transport=transport, follow_redirects=False) as client:
             for attempt in range(ATTEMPTS):
                 try:
                     resp = client.post(url, content=body, headers=headers)
