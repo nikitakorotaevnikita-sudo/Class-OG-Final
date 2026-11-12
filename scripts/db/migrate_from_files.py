@@ -29,6 +29,7 @@ from storage.models import (  # noqa: E402
 ROOT_PARENT = "0000.0000.0000.0000"
 RESTART_ERROR = "Сервис переведён на новую очередь, отправьте обращение заново"
 HIST_SOURCE = "historical_verified.jsonl"
+VECTOR_DIM = 768  # размерность classifier_vectors.embedding (schema.sql)
 MIGRATED_KEY = "files_migrated"  # schema_meta: отметка полного успешного переноса
 _MODEL_DIR_RE = re.compile(r"^e5-finetuned-v(\d+)$")
 
@@ -106,11 +107,21 @@ def _load_entries(data_dir: Path) -> list[ClassifierEntry]:
 
 
 def _load_vector_db(vector_db_dir: Path, entry_codes: set[str]):
+    """Проверки до любых записей: размерность, число строк, состав кодов.
+
+    Строка i embeddings.npy соответствует записи i metadata.json (порядок сохраняется).
+    """
     meta = _read_json(vector_db_dir / "metadata.json")
     emb = np.load(vector_db_dir / "embeddings.npy")
+    if emb.ndim != 2 or emb.shape[1] != VECTOR_DIM:
+        raise SystemExit(
+            f"embeddings.npy: размерность {tuple(emb.shape)}, ожидается (N, {VECTOR_DIM}) - "
+            f"векторы не от multilingual-e5-base?"
+        )
     if emb.shape[0] != len(meta):
         raise SystemExit(
-            f"embeddings.npy ({emb.shape[0]} строк) не соответствует metadata.json ({len(meta)})"
+            f"embeddings.npy ({emb.shape[0]} строк) не соответствует metadata.json "
+            f"({len(meta)} записей): строка i векторов должна соответствовать записи i"
         )
     meta_codes = {m["code"] for m in meta}
     if meta_codes != entry_codes:
@@ -237,11 +248,13 @@ def _migrate_appeals(storage, data_dir: Path, rec) -> dict[str, dict]:
             cards.setdefault(_legacy_uuid(c["id"]), c)
     for aid, c in cards.items():
         v = c.get("verification") or {}
-        status = v.get("status") or "pending"
+        status = v.get("status") or "pending"  # null / "" / нет поля -> pending
         if status not in ac.STATUSES:
             _say(f"  предупреждение: карточка {aid}: неизвестный статус {status!r} -> pending")
             rec.warnings += 1
-            c["verification"] = {**v, "status": "pending"}
+            status = "pending"
+        # статус нормализован один раз: импорт и сверка читают одно и то же значение
+        c["verification"] = {**v, "status": status}
 
     created = 0
     for aid, c in cards.items():
@@ -274,7 +287,7 @@ def _migrate_appeals(storage, data_dir: Path, rec) -> dict[str, dict]:
     # проверить карточку уже после переноса)
     ok = sum(
         1 for a in present
-        if (cards[a].get("verification") or {}).get("status", "pending") == "pending"
+        if cards[a]["verification"]["status"] == "pending"
         or in_db[a]["verification"]["status"] == cards[a]["verification"]["status"]
     )
     rec["verifications"] = (len(cards), ok)
@@ -296,7 +309,9 @@ def _migrate_request_log(storage, data_dir: Path, cards: dict, rec):
             continue
         matched[aid] = r
     for aid, r in matched.items():
-        storage.appeals.set_request_meta(aid, r.get("ip"), r.get("elapsed_seconds"))
+        # only_missing: при повторе (--force) живые ip/elapsed карточки не перетираются
+        storage.appeals.set_request_meta(aid, r.get("ip"), r.get("elapsed_seconds"),
+                                         only_missing=True)
     have_ip = storage.appeals.ip_addresses(list(matched))
     rec["ip_records"] = (len(matched), sum(1 for a in matched if have_ip.get(a)))
     _say(f"  IP-записи: применено {len(matched)}, без пары {unmatched}")
@@ -372,6 +387,11 @@ def migrate(storage: Storage, data_dir: Path, vector_db_dir: Path, models_dir: P
     entries = _load_entries(data_dir)
     entry_codes = {e.code for e in entries}
     meta, emb = _load_vector_db(vector_db_dir, entry_codes)  # до любых записей
+    dups = len(meta) - len({m["code"] for m in meta})
+    if dups:
+        _say(f"  предупреждение: metadata.json - {dups} строк дублируют уже встреченные коды "
+             f"(импортируются как есть, поиск берёт максимум по коду)")
+        rec.warnings += 1
 
     _say("Классификатор и векторы...")
     _migrate_classifier(storage, entries, meta, emb, vector_db_dir, embedding_model, rec)

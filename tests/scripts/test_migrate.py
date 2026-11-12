@@ -317,3 +317,96 @@ def test_entries_keep_flat_order_and_correct_name_is_honoured(mem, tmp_path, mon
     import annotations_storage
     assert annotations_storage.build_search_text(CODE, "Старое", "путь", storage=mem) == (
         "Новое имя. путь | Note: x")
+
+
+# --- WP3 ----------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("raw", ['"status": null', '"status": ""'])
+def test_null_or_empty_status_reconciles_as_pending(mem, tmp_path, raw):
+    data = _copy_data(tmp_path, '"status": "confirmed"', raw)
+    rec = mig.migrate(mem, data, data / "vector_db", data / "models", "m")
+    assert all(a == b for a, b in rec.values()), rec
+    assert rec.warnings == 0
+    entry = {e["id"]: e for e in mem.appeals.as_log_entries()}[CARD_A]
+    assert entry["verification"]["status"] == "pending"
+
+
+def _vdb_copy(tmp_path):
+    import json
+
+    import numpy as np
+
+    vdb = tmp_path / "vdb"
+    shutil.copytree(FIX / "vector_db", vdb)
+    meta = json.loads((vdb / "metadata.json").read_text(encoding="utf-8"))
+    emb = np.load(vdb / "embeddings.npy")
+    return vdb, meta, emb
+
+
+def _vdb_write(vdb, meta, emb):
+    import json
+
+    import numpy as np
+
+    (vdb / "metadata.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+    np.save(vdb / "embeddings.npy", emb)
+
+
+def test_wrong_embedding_dim_aborts_before_writes(mem, tmp_path):
+    vdb, meta, emb = _vdb_copy(tmp_path)
+    _vdb_write(vdb, meta, emb[:, :384])
+    with pytest.raises(SystemExit) as ei:
+        mig.migrate(mem, FIX, vdb, FIX / "models", "m")
+    assert "768" in str(ei.value) and "384" in str(ei.value)
+    assert mem.classifier.count_entries() == 0
+
+
+def test_row_count_mismatch_aborts_with_clear_error(mem, tmp_path):
+    vdb, meta, emb = _vdb_copy(tmp_path)
+    _vdb_write(vdb, meta, emb[:2])
+    with pytest.raises(SystemExit) as ei:
+        mig.migrate(mem, FIX, vdb, FIX / "models", "m")
+    assert "2" in str(ei.value) and "3" in str(ei.value)
+    assert mem.classifier.count_entries() == 0
+
+
+def test_duplicate_metadata_codes_are_reported(mem, tmp_path, capsys):
+    import numpy as np
+
+    vdb, meta, emb = _vdb_copy(tmp_path)
+    meta = meta + [dict(meta[2], search_text="passage: дубль")] * 2
+    emb = np.vstack([emb, emb[2:3], emb[2:3]])
+    _vdb_write(vdb, meta, emb)
+    rec = mig.migrate(mem, FIX, vdb, FIX / "models", "m")
+    out = capsys.readouterr().out
+    assert rec.warnings == 1
+    assert "дублир" in out and "2" in out
+    assert rec["vectors_base"] == (5, 5)
+
+
+def test_vector_row_i_matches_metadata_row_i(mem):
+    import json
+
+    import numpy as np
+
+    run(mem)
+    meta = json.loads((FIX / "vector_db" / "metadata.json").read_text(encoding="utf-8"))
+    emb = np.load(FIX / "vector_db" / "embeddings.npy")
+    rows = mem.classifier.vectors_for_version(0)
+    assert [(c, t) for c, st, t in rows if st == "base"] == [
+        (m["code"], m.get("search_text", "")) for m in meta]
+    for i, m in enumerate(meta):
+        (code, sim), *_ = mem.classifier.search(emb[i], 0, 1, False)
+        assert code == m["code"] and sim == pytest.approx(1.0, abs=1e-5)
+
+
+def test_force_rerun_keeps_live_request_meta(monkeypatch, tmp_path):
+    data = _copy_data(tmp_path)
+    mem = MemoryStorage()
+    monkeypatch.setattr(mig, "_get_storage", lambda: mem)
+    assert mig.main(_cli(data)) == 0
+    assert mem.appeals._cards[CARD_B]["ip_address"] == "10.0.0.7"
+    mem.appeals.set_request_meta(CARD_B, "10.9.9.9", 9.5)  # живые значения после переноса
+    assert mig.main(_cli(data) + ["--force"]) == 0
+    assert mem.appeals._cards[CARD_B]["ip_address"] == "10.9.9.9"
+    assert mem.appeals._cards[CARD_B]["elapsed_seconds"] == 9.5
