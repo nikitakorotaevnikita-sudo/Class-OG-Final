@@ -85,11 +85,15 @@ def env(monkeypatch):
     waiter_mod.reset_waiter()
     storage = get_storage()
     agent = FakeAgent(storage)
-    monkeypatch.setattr(dispatcher_mod, "_dispatcher",
-                        LocalDispatcher(storage, agent_factory=lambda: agent))
+    local = LocalDispatcher(storage, agent_factory=lambda: agent)
+    monkeypatch.setattr(dispatcher_mod, "_dispatcher", local)
     monkeypatch.setattr(config, "SYNC_WAIT_TIMEOUT_SEC", 30)
     import api_server
-    yield SimpleNamespace(storage=storage, agent=agent, app=api_server.app)
+    yield SimpleNamespace(storage=storage, agent=agent, app=api_server.app, dispatcher=local)
+    # Задача, пережившая 504 (test_classify_sync_timeout_returns_504), не должна
+    # доделываться в следующих тестах: ждём её и останавливаем потоки пула.
+    local.shutdown(timeout=10)
+    assert not any(t.is_alive() for t in local._threads)
     waiter_mod.reset_waiter()
 
 
@@ -406,3 +410,251 @@ def test_confirm_historical_reports_actually_inserted(env, client, monkeypatch):
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"status": "ok", "records_saved": 1, "duplicates_skipped": 1}
     assert env.storage.historical.count() == 2
+
+
+# ── WP4: /verify, ошибки БД, снимок дообучения, /health, блокирующие вызовы ──
+
+def test_verify_enqueues_exactly_inserted_annotation_ids(env, client, monkeypatch):
+    """Эмбеддинг ставится ровно для строк, вставленных этим исправлением: чужая
+    строка без эмбеддинга, появившаяся одновременно, не попадает в задачи."""
+    sent = []
+
+    class Rec:
+        def send(self, task_name, msg, queue):
+            sent.append(env.storage.jobs.get(msg["job_id"]).payload["vector_id"])
+
+    _register_models(env.storage)
+    aid = env.storage.appeals.create("текст")
+    classifier = env.storage.classifier
+    real_add = classifier.add_annotation
+    neighbours = []
+
+    def add_with_neighbour(code, text, version):
+        neighbours.append(real_add("0001.0001.0001.0001", "чужая аннотация", version))
+        return real_add(code, text, version)
+
+    monkeypatch.setattr(classifier, "add_annotation", add_with_neighbour)
+    monkeypatch.setattr(dispatcher_mod, "_dispatcher", Rec())
+    resp = client.post("/verify", json={"log_id": aid, "action": "correct",
+                                        "operator_codes": [CODE, "0002.0002.0002.0002"],
+                                        "annotation": "про мусор"})
+    assert resp.status_code == 200, resp.text
+    own = {vid for vid, _ in classifier.pending_annotations(0)} - set(neighbours)
+    assert len(own) == 2
+    assert sorted(sent) == sorted(own)
+
+
+def test_logger_correct_with_annotations_returns_inserted_ids(env):
+    from appeals_logger import AppealsLogger
+
+    _register_models(env.storage)
+    logger = AppealsLogger(storage=env.storage)
+    aid = env.storage.appeals.create("текст")
+    updated, ids = logger.correct_with_annotations(aid, [CODE], comment="про мусор")
+    assert updated is True
+    assert ids == [vid for vid, _ in env.storage.classifier.pending_annotations(0)]
+    assert logger.correct_with_annotations(aid, [CODE]) == (True, [])
+    assert logger.correct(aid, [CODE], comment="ещё") is True
+
+
+_DB_DOWN_ENDPOINTS = [
+    ("get", "/api/historical-count", "historical", "count"),
+    ("get", "/api/models", "models", "list"),
+    ("post", "/api/models/1/activate", "models", "activate"),
+    ("get", "/stats", "appeals", "stats"),
+    ("get", "/api/backoffice/stats", "appeals", "backoffice_stats"),
+    ("get", "/api/finetune/status", "jobs", "latest"),
+    ("post", "/api/finetune", "jobs", "has_active"),
+]
+
+
+@pytest.mark.parametrize("method, path, repo, fn", _DB_DOWN_ENDPOINTS)
+def test_db_errors_map_to_503(env, client, monkeypatch, method, path, repo, fn):
+    import psycopg
+
+    monkeypatch.setattr(config, "BACKOFFICE_USER", "admin")
+    monkeypatch.setattr(config, "BACKOFFICE_PASSWORD", "secret")
+
+    def boom(*a, **kw):
+        raise psycopg.OperationalError("connection refused")
+
+    monkeypatch.setattr(getattr(env.storage, repo), fn, boom)
+    kw = {"auth": ("admin", "secret")} if "activate" in path else {}
+    if path == "/api/finetune":
+        kw["json"] = {"source": "verified"}
+    resp = getattr(client, method)(path, **kw)
+    assert resp.status_code == 503, resp.text
+    assert resp.json() == {"detail": "База данных недоступна"}
+
+
+def test_finetune_snapshot_timestamps_in_legacy_format(env, client, monkeypatch):
+    """Прежний формат — локальное время без зоны, до секунд (datetime.now().isoformat)."""
+    import re
+    from datetime import datetime
+
+    monkeypatch.setattr(dispatcher_mod, "_dispatcher",
+                        SimpleNamespace(send=lambda *a, **k: None))
+    snap = client.post("/api/finetune", json={"source": "verified", "force": True}).json()
+    env.storage.jobs.claim(snap["job_id"])
+    env.storage.jobs.finish(snap["job_id"], result={"status": "completed"}, error=None)
+    done = client.get("/api/finetune/status").json()
+    legacy = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d$")
+    assert legacy.match(done["started_at"]), done["started_at"]
+    assert legacy.match(done["finished_at"]), done["finished_at"]
+    started = datetime.fromisoformat(done["started_at"])
+    assert abs((datetime.now() - started).total_seconds()) < 60  # локальное время
+
+
+@pytest.mark.parametrize("source, force, effective", [
+    ("verified", False, False), ("verified", True, True),
+    ("historical", False, True), ("combined", False, True),
+])
+def test_finetune_force_reports_effective_flag(env, client, monkeypatch, source, force,
+                                               effective):
+    monkeypatch.setattr(dispatcher_mod, "_dispatcher",
+                        SimpleNamespace(send=lambda *a, **k: None))
+    snap = client.post("/api/finetune", json={"source": source, "force": force}).json()
+    assert snap["force"] is effective
+    assert client.get("/api/finetune/status").json()["force"] is effective
+
+
+def test_health_probe_is_single_flight_and_cached(monkeypatch):
+    """Параллельные /health ждут одну проверку брокера; результат кэшируется ~2 с."""
+    import asyncio
+    import job_api
+
+    monkeypatch.setattr(config, "STORAGE_BACKEND", "postgres")
+    monkeypatch.setattr(job_api, "_ping_cache", {"at": None, "value": (False, False),
+                                                 "task": None})
+    calls = []
+
+    def slow_ping():
+        calls.append(1)
+        time.sleep(0.2)
+        return True, True
+
+    monkeypatch.setattr(job_api, "_ping_workers", slow_ping)
+
+    async def burst():
+        return await asyncio.gather(*(job_api.worker_status() for _ in range(5)))
+
+    assert asyncio.run(burst()) == [(True, True)] * 5
+    assert len(calls) == 1
+    assert asyncio.run(job_api.worker_status()) == (True, True)
+    assert len(calls) == 1, "в пределах кэша брокер не опрашивается"
+    assert job_api._PING_CACHE_SEC <= 2.5
+    job_api._ping_cache["at"] -= job_api._PING_CACHE_SEC + 0.1
+    asyncio.run(job_api.worker_status())
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("replies, expected", [
+    ({"classify1@h": [{"name": "classify_sync"}, {"name": "classify"}]}, (True, True)),
+    ({"training@h": [{"name": "training"}]}, (False, True)),
+    ({"training@h": [{"name": "training"}], "celery@abc": [{"name": "classify"}]},
+     (True, True)),
+    (None, (False, True)),
+])
+def test_ping_counts_only_classify_workers(monkeypatch, replies, expected):
+    import job_api
+    from queueing import celery_app as celery_mod
+
+    class Inspect:
+        def active_queues(self):
+            return replies
+
+    monkeypatch.setattr(celery_mod.app.control, "inspect", lambda timeout=1: Inspect())
+    assert job_api._ping_workers() == expected
+
+
+def test_ping_broker_down(monkeypatch):
+    import job_api
+    from queueing import celery_app as celery_mod
+
+    def down(timeout=1):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(celery_mod.app.control, "inspect", down)
+    assert job_api._ping_workers() == (False, False)
+
+
+def _off_loop() -> bool:
+    import asyncio
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return True
+    return False
+
+
+def test_classify_file_extracts_text_off_event_loop(env, client, monkeypatch):
+    import api_server
+
+    seen = []
+
+    def fake_extract(content, filename):
+        seen.append(_off_loop())
+        return "Не вывозят мусор", False
+
+    monkeypatch.setattr(api_server, "extract_text", fake_extract)
+    resp = client.post("/classify/file",
+                       files={"file": ("a.txt", "x".encode("utf-8"), "text/plain")})
+    assert resp.status_code == 200, resp.text
+    assert seen == [True]
+
+
+def test_upload_historical_parses_off_event_loop(env, client, monkeypatch):
+    import api_server
+
+    seen = []
+
+    def fake_parse(path):
+        seen.append(("parse", _off_loop()))
+        return [{"appeal_text": "т", "assigned_code": CODE}]
+
+    def fake_validate(records):
+        seen.append(("validate", _off_loop()))
+        return SimpleNamespace(stats={"total": 1, "valid": 1, "invalid": 0}, errors=[],
+                               valid_records=records)
+
+    monkeypatch.setattr(api_server, "parse_file", fake_parse)
+    monkeypatch.setattr(api_server, "validate_codes", fake_validate)
+    monkeypatch.setattr(api_server, "_last_historical_upload", {})
+    resp = client.post("/api/upload-historical",
+                       files={"file": ("h.csv", b"a,b\n", "text/csv")})
+    assert resp.status_code == 200, resp.text
+    assert seen == [("parse", True), ("validate", True)]
+
+
+def test_settings_read_and_save_off_event_loop(env, client, monkeypatch):
+    import settings_store
+
+    seen = []
+    monkeypatch.setattr(settings_store, "read_settings",
+                        lambda: seen.append(("read", _off_loop())) or {"groups": []})
+    monkeypatch.setattr(settings_store, "save_settings",
+                        lambda values: seen.append(("save", _off_loop())) or {"saved": []})
+    assert client.get("/api/settings").status_code == 200
+    assert client.post("/api/settings", json={"values": {}}).json()["message"] == "Изменений нет"
+    assert seen == [("read", True), ("save", True)]
+
+
+def test_examples_read_off_event_loop(env, client, tmp_path, monkeypatch):
+    import api_server
+
+    path = tmp_path / "ex.json"
+    path.write_text('[{"text": "пример"}]', encoding="utf-8")
+    seen = []
+    real_load = api_server.json.load
+
+    def spy_load(f, *a, **kw):
+        seen.append(_off_loop())
+        return real_load(f, *a, **kw)
+
+    monkeypatch.setattr(api_server.json, "load", spy_load)
+    env.app.dependency_overrides[api_server.get_examples_path] = lambda: path
+    try:
+        assert client.get("/examples").json() == {"examples": [{"text": "пример"}]}
+    finally:
+        env.app.dependency_overrides.pop(api_server.get_examples_path, None)
+    assert seen == [True]

@@ -261,6 +261,101 @@ def test_sync_timeout_returns_504(monkeypatch):
     assert resp.status_code == 504
 
 
+def test_webhook_checked_before_odata_fetch(monkeypatch):
+    """Запрещённый webhook отклоняется до обращения к RX по OData."""
+    calls = []
+    monkeypatch.setattr(rx_client, "get_document_text",
+                        lambda doc_id: calls.append(doc_id) or ("текст", "doc.pdf"))
+    monkeypatch.setattr(integration_api.config, "WEBHOOK_ALLOWED_HOSTS", ["rx.example"])
+    resp = client(_FakeAgent()).post(
+        "/integration/classify-document-async",
+        json={"document_id": 26, "webhook_url": "http://evil.example/hook"})
+    assert resp.status_code == 400
+    assert calls == []
+
+
+def test_odata_fetch_runs_off_event_loop(monkeypatch):
+    import asyncio
+    seen = []
+
+    def fetch(doc_id):
+        try:
+            asyncio.get_running_loop()
+            seen.append(False)
+        except RuntimeError:
+            seen.append(True)
+        return "текст из RX", "doc.pdf"
+
+    monkeypatch.setattr(rx_client, "get_document_text", fetch)
+    api = client(_FakeAgent())
+    assert api.post("/integration/classify-document-async",
+                    json={"document_id": 26}).status_code == 202
+    assert api.post("/integration/classify-document",
+                    json={"document_id": 26}).status_code == 200
+    assert seen == [True, True]
+
+
+def test_queue_listing_counts_only_classify_jobs_and_keeps_worker_alive():
+    """Сводка — по задачам классификации (как прежняя очередь RX); ключ
+    worker_alive сохранён для совместимости RX."""
+    from storage import get_storage
+    jobs = get_storage().jobs
+    jobs.create("finetune", {}, queue_class="training")
+    jobs.create("search", {})
+    api = client(_FakeAgent())
+    job_id = api.post("/integration/classify-document-async",
+                      json={"appeal_text": "текст"}).json()["job_id"]
+    poll_until_done(api, job_id)
+    stats = api.get("/integration/jobs").json()["stats"]
+    assert stats == {"queued": 0, "running": 0, "done": 1, "error": 0,
+                     "worker_alive": True}
+
+
+def test_queue_listing_worker_alive_follows_worker_readiness(monkeypatch):
+    import job_api
+
+    async def no_workers():
+        return False, True
+
+    monkeypatch.setattr(job_api, "worker_status", no_workers)
+    stats = client(_FakeAgent()).get("/integration/jobs").json()["stats"]
+    assert stats["worker_alive"] is False
+
+
+def _db_down(*a, **kw):
+    import psycopg
+    raise psycopg.OperationalError("connection refused")
+
+
+@pytest.mark.parametrize("method, path, body, repo, fn", [
+    ("post", "/integration/classify-document-async", {"appeal_text": "т"}, "appeals", "create"),
+    ("post", "/integration/classify-document", {"appeal_text": "т"}, "appeals", "create"),
+    ("get", "/integration/jobs/" + "a" * 32, None, "jobs", "get"),
+    ("get", "/integration/jobs", None, "jobs", "stats"),
+])
+def test_rx_endpoints_answer_503_when_db_down(monkeypatch, method, path, body, repo, fn):
+    """RX получает 503 «База данных недоступна», а не 500 с трассировкой."""
+    from storage import get_storage
+    api = client(_FakeAgent())
+    monkeypatch.setattr(getattr(get_storage(), repo), fn, _db_down)
+    resp = api.post(path, json=body) if method == "post" else api.get(path)
+    assert resp.status_code == 503
+    assert resp.json() == {"detail": "База данных недоступна"}
+
+
+def test_rx_async_answers_503_when_broker_down():
+    from queueing.dispatcher import DispatchError
+
+    class _Down:
+        def send(self, task_name, msg, queue):
+            raise DispatchError("брокер недоступен: OSError: refused")
+
+    resp = make_client(_FakeAgent(), dispatcher=_Down()).post(
+        "/integration/classify-document-async", json={"appeal_text": "т"})
+    assert resp.status_code == 503
+    assert resp.json()["detail"].startswith("Брокер недоступен: ")
+
+
 def test_sync_failure_returns_500():
     resp = client(_FakeAgent(boom=True)).post("/integration/classify-document",
                                               json={"appeal_text": "текст"})

@@ -653,9 +653,13 @@ class PgJobStore(_PgBase):
             ).fetchall()
         return [_job(r) for r in rows]
 
-    def stats(self, conn=None):
+    def stats(self, job_type=None, conn=None):
         with self._tx(conn) as c:
-            rows = c.execute("SELECT status, count(*) FROM jobs GROUP BY status").fetchall()
+            rows = c.execute(
+                """SELECT status, count(*) FROM jobs
+                   WHERE (%s::text IS NULL OR job_type = %s) GROUP BY status""",
+                (job_type, job_type),
+            ).fetchall()
         counts = {"queued": 0, "running": 0, "done": 0, "error": 0}
         counts.update({s: int(n) for s, n in rows})
         return counts

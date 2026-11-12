@@ -126,16 +126,27 @@ class AppealsLogger:
         operator_codes — список правильных кодов классификатора.
         comment — пояснение оператора (сохраняется как аннотация каждого кода)
         """
+        return self.correct_with_annotations(log_id, operator_codes, comment)[0]
+
+    def correct_with_annotations(self, log_id: str, operator_codes: list[str],
+                                 comment: str = None) -> tuple[bool, list[int]]:
+        """То же, что correct(), плюс id вставленных строк аннотаций.
+
+        Строки создаются без эмбеддинга (ждут embed_annotation): /verify ставит
+        в очередь ровно эти id, без сравнения «до/после» со всей таблицей.
+        """
         updated = self.storage.appeals.set_verification(
             log_id, "corrected", operator_codes, comment)
+        inserted: list[int] = []
         if updated and comment:
             from annotations_storage import add_annotation
             for op_code in operator_codes:
                 try:
-                    add_annotation(op_code, comment, case_id=log_id, storage=self.storage)
+                    inserted.append(add_annotation(op_code, comment, case_id=log_id,
+                                                   storage=self.storage))
                 except Exception as e:  # noqa: BLE001 — аннотация не должна терять исправление
                     print(f"  [logger] Аннотация для {op_code} не сохранена: {e}")
-        return updated
+        return updated, inserted
 
     def reject(self, log_id: str, comment: str = None) -> bool:
         """

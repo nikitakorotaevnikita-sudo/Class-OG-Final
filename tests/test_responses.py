@@ -3,8 +3,10 @@
 import subprocess
 import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 
-sys.path.insert(0, "src")
+SRC = Path(__file__).resolve().parents[1] / "src"
+sys.path.insert(0, str(SRC))
 
 import responses
 
@@ -79,11 +81,17 @@ def test_request_has_webhook_url():
     assert responses.ClassifyDocumentRequest().webhook_url is None
 
 
-def test_responses_module_has_no_heavy_imports():
-    code = ("import sys; sys.path.insert(0, 'src'); import responses; "
-            "assert 'torch' not in sys.modules; "
-            "assert 'classifier_agent' not in sys.modules")
-    subprocess.run([sys.executable, "-c", code], check=True)
+def test_responses_module_has_no_heavy_imports(tmp_path):
+    """Отдельный процесс из чужого cwd: путь к src абсолютный, а `responses`
+    берётся именно из src (не одноимённый пакет PyPI)."""
+    code = ("import sys; sys.path.insert(0, %r); import responses; "
+            "assert responses.__file__.startswith(%r), responses.__file__; "
+            "heavy = [m for m in ('torch', 'sentence_transformers', 'classifier_agent') "
+            "if m in sys.modules]; "
+            "assert not heavy, heavy" % (str(SRC), str(SRC)))
+    proc = subprocess.run([sys.executable, "-c", code], cwd=tmp_path,
+                          capture_output=True, text=True, encoding="utf-8", errors="replace")
+    assert proc.returncode == 0, proc.stderr
 
 
 def test_job_status_payload_shape():

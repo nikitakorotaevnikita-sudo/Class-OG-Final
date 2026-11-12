@@ -203,6 +203,12 @@ def test_list_stats_latest_has_active(storage):
     storage.jobs.finish(c.id, None, "e")
     assert storage.jobs.has_active("classify") is False
     assert storage.jobs.stats() == {"queued": 1, "running": 0, "done": 1, "error": 1}
+    assert storage.jobs.stats(job_type="classify") == {
+        "queued": 0, "running": 0, "done": 1, "error": 1}
+    assert storage.jobs.stats(job_type="search") == {
+        "queued": 1, "running": 0, "done": 0, "error": 0}
+    assert storage.jobs.stats(job_type="finetune") == {
+        "queued": 0, "running": 0, "done": 0, "error": 0}
 
 
 def test_cleanup_expired_removes_only_finished(storage):

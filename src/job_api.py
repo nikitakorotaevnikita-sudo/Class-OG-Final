@@ -11,12 +11,14 @@
    выполняться, её id — в тексте ошибки), `error` → 500.
 
 Ошибки БД (psycopg.Error) при создании и при первом чтении → 503.
-Модуль не импортирует classifier_agent / torch.
+Здесь же — готовность воркеров классификации (worker_status) для /health и
+GET /integration/jobs. Модуль не импортирует classifier_agent / torch.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from typing import Optional
 
@@ -112,6 +114,56 @@ async def wait_job(job_id: str, timeout: float, *,
     if job.status == STATUS_ERROR:
         raise HTTPException(status_code=500, detail=f"{error_prefix}: {job.error}")
     return job
+
+
+# ── Готовность воркеров классификации (/health, GET /integration/jobs) ────────
+
+CLASSIFY_QUEUES = frozenset({"classify_sync", "classify"})
+_PING_CACHE_SEC = 2.0
+_ping_cache: dict = {"at": None, "value": (False, False), "task": None}
+
+
+def _ping_workers() -> tuple[bool, bool]:
+    """(agent_ready, broker): слушает ли очередь классификации хоть один воркер.
+
+    Опрос active_queues вместо ping: воркер дообучения (очередь training) на
+    ping тоже отвечает, но классификацию не выполняет.
+    """
+    try:
+        from queueing.celery_app import app as celery_app
+        replies = celery_app.control.inspect(timeout=1).active_queues() or {}
+    except Exception as exc:  # noqa: BLE001 — /health не должен падать
+        log.warning("Опрос воркеров Celery не удался: %s", exc)
+        return False, False
+    ready = any(q.get("name") in CLASSIFY_QUEUES
+                for queues in replies.values() for q in (queues or []))
+    return ready, True
+
+
+async def _probe() -> tuple[bool, bool]:
+    value = await asyncio.to_thread(_ping_workers)
+    _ping_cache.update(at=time.monotonic(), value=value)
+    return value
+
+
+async def worker_status() -> tuple[bool, bool]:
+    """(agent_ready, broker) с кэшем ~2 с и одной проверкой на всех ожидающих.
+
+    Параллельные запросы ждут одну и ту же задачу опроса (single-flight):
+    медленный брокер не размножает потоки и не забивает пул to_thread.
+    """
+    if config.STORAGE_BACKEND == "memory":
+        return True, True  # LocalDispatcher: задачи выполняются в процессе API
+    at = _ping_cache["at"]
+    if at is not None and time.monotonic() - at < _PING_CACHE_SEC:
+        return _ping_cache["value"]
+    loop = asyncio.get_running_loop()
+    task = _ping_cache["task"]
+    if task is None or task.done() or task.get_loop() is not loop:
+        task = loop.create_task(_probe())
+        _ping_cache["task"] = task
+    # shield: отменённый запрос не отменяет общий опрос для остальных
+    return await asyncio.shield(task)
 
 
 def sync_wait_timeout() -> float:

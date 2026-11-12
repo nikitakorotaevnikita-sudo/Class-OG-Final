@@ -496,10 +496,12 @@ class MemoryJobStore:
             jobs.sort(key=self._order, reverse=True)
             return [copy.deepcopy(j) for j in jobs[:limit]]
 
-    def stats(self):
+    def stats(self, job_type=None):
         with self._lock:
             counts = {STATUS_QUEUED: 0, STATUS_RUNNING: 0, STATUS_DONE: 0, STATUS_ERROR: 0}
             for j in self._jobs.values():
+                if job_type is not None and j.job_type != job_type:
+                    continue
                 counts[j.status] = counts.get(j.status, 0) + 1  # как GROUP BY в PostgreSQL
             return counts
 

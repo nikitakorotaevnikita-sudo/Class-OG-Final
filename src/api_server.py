@@ -19,14 +19,13 @@ import asyncio
 import sys
 import json
 import logging
-import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal, Optional
 sys.path.insert(0, str(Path(__file__).parent))
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Request, Form
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from starlette.status import HTTP_401_UNAUTHORIZED
 from pydantic import BaseModel
@@ -79,6 +78,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.include_router(integration_router)
+
+
+@app.exception_handler(psycopg.Error)
+async def _db_unavailable(_request: Request, exc: psycopg.Error) -> JSONResponse:
+    """Любая ошибка PostgreSQL в эндпоинте → 503, как у эндпоинтов классификации."""
+    log.error("Ошибка БД при обработке запроса: %s: %s", type(exc).__name__, exc)
+    return JSONResponse(status_code=503, content={"detail": job_api.DB_UNAVAILABLE})
 
 # Статика и главная страница
 _STATIC_DIR = Path(__file__).parent / "static"
@@ -149,42 +155,20 @@ class FineTuneRequest(BaseModel):
 
 # ── Эндпоинты ──────────────────────────────────────────────────────────────────
 
-_PING_CACHE_SEC = 10.0
-_ping_cache: dict = {"at": None, "agent_ready": False, "broker": False}
-
-
-def _ping_workers() -> tuple[bool, bool]:
-    """(agent_ready, broker): ответил ли хотя бы один воркер на ping за 1 с."""
-    try:
-        from queueing.celery_app import app as celery_app
-        replies = celery_app.control.ping(timeout=1)
-        return bool(replies), True
-    except Exception as exc:  # noqa: BLE001 — /health не должен падать
-        log.warning("Celery ping не удался: %s", exc)
-        return False, False
-
-
-async def _worker_status() -> tuple[bool, bool]:
-    if config.STORAGE_BACKEND == "memory":
-        return True, True  # LocalDispatcher: задачи выполняются в процессе API
-    now = time.monotonic()
-    at = _ping_cache["at"]
-    if at is None or now - at >= _PING_CACHE_SEC:
-        agent_ready, broker = await asyncio.to_thread(_ping_workers)
-        _ping_cache.update(at=time.monotonic(), agent_ready=agent_ready, broker=broker)
-    return _ping_cache["agent_ready"], _ping_cache["broker"]
-
-
 @app.get("/health")
 async def health_check():
-    """Проверка работоспособности: БД, брокер и воркеры классификации."""
+    """Проверка работоспособности: БД, брокер и воркеры классификации.
+
+    agent_ready — очередь классификации слушает хотя бы один воркер (воркер
+    дообучения не считается); опрос брокера кэшируется ~2 с (job_api).
+    """
     try:
         entries_count = await asyncio.to_thread(get_storage().classifier.count_entries)
         db_ok = True
     except Exception as exc:  # noqa: BLE001 — /health не должен падать
         log.warning("/health: БД недоступна: %s", exc)
         entries_count, db_ok = 0, False
-    agent_ready, broker = await _worker_status()
+    agent_ready, broker = await job_api.worker_status()
     return {
         "status": "ok",
         "agent_ready": agent_ready,
@@ -287,7 +271,8 @@ async def classify_appeal_file(
         raise HTTPException(status_code=413, detail=str(e))
 
     try:
-        text, truncated = extract_text(content, file.filename or "upload.txt")
+        text, truncated = await asyncio.to_thread(extract_text, content,
+                                                  file.filename or "upload.txt")
     except ScanNotSupportedError as e:
         raise HTTPException(
             status_code=422,
@@ -325,19 +310,7 @@ async def search_classifier(q: str, top_k: int = 5):
 
 # ── Новые эндпоинты для MVP-демо ───────────────────────────────────────────────
 
-def _new_annotation_ids(storage, apply) -> list[int]:
-    """Выполнить apply() и вернуть id появившихся строк аннотаций без эмбеддинга."""
-    active = storage.models.active()
-    if active is None:
-        apply()
-        return []
-    before = {vid for vid, _ in storage.classifier.pending_annotations(active.version)}
-    apply()
-    return [vid for vid, _ in storage.classifier.pending_annotations(active.version)
-            if vid not in before]
-
-
-async def _dispatch_embeddings(storage, vector_ids: list[int]) -> None:
+async def _dispatch_embeddings(vector_ids: list[int]) -> None:
     """Эмбеддинг новых аннотаций — задачей embed_annotation (очередь classify).
 
     Сбой не ломает верификацию: строка остаётся без эмбеддинга, воркер досчитает
@@ -376,15 +349,12 @@ async def verify(
                 detail="operator_codes обязательно для action='correct'",
             )
 
-        def apply():
-            logger.correct(request.log_id, operator_codes=request.operator_codes,
-                           comment=request.annotation)
-
-        if request.annotation:
-            new_ids = await asyncio.to_thread(_new_annotation_ids, storage, apply)
-            await _dispatch_embeddings(storage, new_ids)
-        else:
-            await asyncio.to_thread(apply)
+        # Эмбеддинг — ровно для вставленных строк (без сравнения «до/после»:
+        # чужая аннотация, вставленная одновременно, иначе попала бы в задачи).
+        _updated, new_ids = await asyncio.to_thread(
+            logger.correct_with_annotations, request.log_id,
+            request.operator_codes, request.annotation)
+        await _dispatch_embeddings(new_ids)
 
         # Количество аннотаций для первого кода
         try:
@@ -411,8 +381,12 @@ async def get_examples(
 ):
     """
     Возвращает 10 заранее подготовленных тестовых обращений для демо.
-    Источник: data/test_appeals.json.
+    Источник: data/test_appeals.json (читается в потоке, не в event loop).
     """
+    return await asyncio.to_thread(_read_examples, examples_path)
+
+
+def _read_examples(examples_path: Path) -> dict:
     if not examples_path.exists():
         raise HTTPException(status_code=503, detail="Файл примеров не найден")
     with open(examples_path, encoding="utf-8") as f:
@@ -475,15 +449,21 @@ class RxTestRequest(BaseModel):
 
 
 @app.get("/api/settings", tags=["Настройки"])
-async def get_settings():
-    """Текущие настройки LLM и RX для формы бэк-офиса. Секреты маскируются."""
+def get_settings():
+    """Текущие настройки LLM и RX для формы бэк-офиса. Секреты маскируются.
+
+    Синхронный: чтение .env идёт в пуле потоков, не в event loop.
+    """
     import settings_store
     return settings_store.read_settings()
 
 
 @app.post("/api/settings", tags=["Настройки"])
-async def save_settings(request: SettingsSaveRequest):
-    """Записать настройки в .env и применить их без перезапуска сервиса."""
+def save_settings(request: SettingsSaveRequest):
+    """Записать настройки в .env и применить их без перезапуска сервиса.
+
+    Синхронный: запись .env идёт в пуле потоков, не в event loop.
+    """
     import settings_store
     try:
         result = settings_store.save_settings(request.values)
@@ -545,6 +525,11 @@ async def test_llm_connection(request: LlmTestRequest):
         llm_check.check_active, provider=provider, values=values)
 
 
+def _parse_upload(temp_path: Path, content: bytes):
+    temp_path.write_bytes(content)
+    return validate_codes(parse_file(str(temp_path)))
+
+
 @app.post("/api/upload-historical")
 async def upload_historical(file: UploadFile = File(...)):
     """Загрузить файл исторических данных для валидации"""
@@ -564,11 +549,8 @@ async def upload_historical(file: UploadFile = File(...)):
         if len(content) > 50 * 1024 * 1024:
             raise HTTPException(status_code=400, detail="File size > 50MB")
 
-        with open(temp_path, "wb") as f:
-            f.write(content)
-
-        records = parse_file(str(temp_path))
-        result = validate_codes(records)
+        # Запись файла, разбор Excel/CSV и сверка кодов — вне event loop.
+        result = await asyncio.to_thread(_parse_upload, temp_path, content)
         response = {
             "status": "ok" if result.stats["invalid"] == 0 else "validation_errors",
             "filename": file.filename,
@@ -601,11 +583,8 @@ async def confirm_historical(request: dict):
 
     from historical_loader import save_to_historical_db
     filename = _last_historical_upload.get("filename", "unknown")
-    try:
-        inserted = await asyncio.to_thread(save_to_historical_db, preview, filename,
-                                           get_storage())
-    except psycopg.Error as exc:
-        raise HTTPException(status_code=503, detail=job_api.DB_UNAVAILABLE) from exc
+    inserted = await asyncio.to_thread(save_to_historical_db, preview, filename,
+                                       get_storage())
 
     _last_historical_upload = {}
     # records_saved — реально добавленные строки; дубли (hist_dedup) пропускаются
@@ -625,7 +604,10 @@ async def get_historical_count():
 # ── Дообучение (задача finetune в очереди training) ──────────────────────────
 
 def _iso(dt) -> Optional[str]:
-    return dt.astimezone().isoformat(timespec="seconds") if dt is not None else None
+    """Прежний формат статуса: локальное время без зоны, до секунд."""
+    if dt is None:
+        return None
+    return dt.astimezone().replace(tzinfo=None).isoformat(timespec="seconds")
 
 
 def _finetune_snapshot(job) -> dict:
@@ -675,15 +657,13 @@ def _finetune_snapshot(job) -> dict:
 async def start_finetune(request: FineTuneRequest):
     """Ставит дообучение в очередь training (выполняет воркер дообучения)."""
     storage = get_storage()
-    try:
-        active = await asyncio.to_thread(storage.jobs.has_active, "finetune")
-    except psycopg.Error as exc:
-        raise HTTPException(status_code=503, detail=job_api.DB_UNAVAILABLE) from exc
+    active = await asyncio.to_thread(storage.jobs.has_active, "finetune")
     if active:
         raise HTTPException(status_code=409, detail="Дообучение уже выполняется")
 
     # Как и прежний запуск finetune_model.py: для historical/combined порог
-    # верифицированных записей не проверяется (--force).
+    # верифицированных записей не проверяется (--force). В ответе и статусе —
+    # этот действующий флаг (payload.force), а не присланный в запросе.
     force = request.force or request.source in ("historical", "combined")
     try:
         sub = await job_api.submit_job("finetune", "finetune", "training",
@@ -697,10 +677,7 @@ async def start_finetune(request: FineTuneRequest):
 @app.get("/api/finetune/status")
 async def finetune_status():
     """Статус последнего дообучения (последняя задача finetune)."""
-    try:
-        job = await asyncio.to_thread(get_storage().jobs.latest, "finetune")
-    except psycopg.Error as exc:
-        raise HTTPException(status_code=503, detail=job_api.DB_UNAVAILABLE) from exc
+    job = await asyncio.to_thread(get_storage().jobs.latest, "finetune")
     return _finetune_snapshot(job)
 
 

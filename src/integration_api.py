@@ -70,6 +70,14 @@ def _resolve_text(body: ClassifyDocumentRequest) -> str:
     raise HTTPException(status_code=400, detail="Нужен appeal_text либо document_id")
 
 
+async def _resolve_text_async(body: ClassifyDocumentRequest) -> str:
+    """_resolve_text вне event loop: запрос к RX по OData синхронный и может
+    висеть до таймаута."""
+    if body.appeal_text is not None:
+        return _resolve_text(body)
+    return await asyncio.to_thread(_resolve_text, body)
+
+
 _WEBHOOK_REJECTED = "webhook_url не разрешён: хост не входит в WEBHOOK_ALLOWED_HOSTS"
 _JOB_TYPE = "classify"
 
@@ -96,7 +104,7 @@ async def classify_document(body: ClassifyDocumentRequest):
     вызывающая сторона не может держать соединение минутами, использовать
     `/classify-document-async`.
     """
-    text = _resolve_text(body)
+    text = await _resolve_text_async(body)
     sub = await job_api.run_sync_job("classify", "classify_appeal", _document_payload(),
                                      appeal_text=text, document_id=body.document_id)
     return ClassifyDocumentResponse(**sub.job.result)
@@ -114,9 +122,11 @@ async def classify_document_async(body: ClassifyDocumentRequest, response: Respo
     Ошибки в самом запросе (нет текста и document_id, документ не найден,
     webhook не разрешён) возвращаются сразу — до постановки в очередь.
     """
-    text = _resolve_text(body)
+    # Webhook проверяется до OData: запрос с запрещённым адресом не должен
+    # ходить в RX за документом.
     if body.webhook_url and not webhook.is_allowed(body.webhook_url):
         raise HTTPException(status_code=400, detail=_WEBHOOK_REJECTED)
+    text = await _resolve_text_async(body)
 
     try:
         sub = await job_api.submit_job(
@@ -159,9 +169,14 @@ async def get_job(job_id: str):
 
 @router.get("/jobs")
 async def list_jobs(limit: int = 20):
-    """Сводка по очереди — для диагностики на стенде."""
+    """Сводка по очереди — для диагностики на стенде.
+
+    stats — только задачи классификации (как в прежней очереди RX), плюс
+    worker_alive: очередь классификации слушает хотя бы один воркер.
+    """
     jobs = get_storage().jobs
-    stats = await _db(jobs.stats)
+    stats = await _db(jobs.stats, _JOB_TYPE)
+    stats["worker_alive"] = (await job_api.worker_status())[0]
     items = await _db(lambda: jobs.list(limit=limit, job_type=_JOB_TYPE))
     return {
         "stats": stats,
