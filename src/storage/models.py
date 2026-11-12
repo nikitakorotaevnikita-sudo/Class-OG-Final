@@ -20,6 +20,26 @@ class ClassifierEntry:
     sort_order: Optional[int] = None  # порядок в classifier_flat.json (None -> индекс в списке)
 
 
+def assign_sort_orders(entries, stored: dict, top) -> list:
+    """sort_order для upsert_entries (общая логика memory и PostgreSQL).
+
+    Явный sort_order записи побеждает; None -> у существующей записи сохраняется
+    хранимый порядок, новые (или без хранимого порядка) получают top+1, top+2, ...
+    stored: {code: хранимый sort_order|None}; top: текущий максимум или None.
+    """
+    nxt = -1 if top is None else int(top)
+    out = []
+    for e in entries:
+        if e.sort_order is not None:
+            out.append(e.sort_order)
+        elif stored.get(e.code) is not None:
+            out.append(stored[e.code])
+        else:
+            nxt += 1
+            out.append(nxt)
+    return out
+
+
 @dataclass
 class ModelVersion:
     version: int

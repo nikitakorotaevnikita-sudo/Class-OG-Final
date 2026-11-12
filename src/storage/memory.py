@@ -16,7 +16,8 @@ from . import appeal_common as ac
 from .base import DuplicateError
 from .models import (STATUS_DONE, STATUS_ERROR, STATUS_QUEUED, STATUS_RUNNING,
                      ActiveJobExists, AppealResult, ClassifierEntry, Job, ModelVersion,
-                     ModelVersionExists, QueueFull, Storage, check_job_values)
+                     ModelVersionExists, QueueFull, Storage, assign_sort_orders,
+                     check_job_values)
 
 logger = logging.getLogger(__name__)
 
@@ -80,9 +81,13 @@ class MemoryClassifierStore:
         self._lock = threading.RLock()
 
     def upsert_entries(self, entries):
+        """sort_order=None: у существующей записи сохраняется, новые получают max+1, ..."""
         with self._lock:
-            for i, e in enumerate(entries):
-                order = i if e.sort_order is None else e.sort_order
+            stored = {e.code: self._entries[e.code].sort_order
+                      for e in entries if e.code in self._entries}
+            top = max((x.sort_order for x in self._entries.values()
+                       if x.sort_order is not None), default=None)
+            for e, order in zip(entries, assign_sort_orders(entries, stored, top)):
                 self._entries[e.code] = dataclasses.replace(e, search_text="", sort_order=order)
             return len(entries)
 
@@ -180,6 +185,15 @@ class MemoryClassifierStore:
             for i in ids:
                 del self._vectors[i]
             return len(ids)
+
+    def annotations_by_code(self):
+        """{code: [тексты аннотаций по порядку id]} одним проходом (без N+1)."""
+        with self._lock:
+            out: dict[str, list[str]] = {}
+            for _, v in sorted(self._vectors.items()):
+                if v["source_type"] == "annotation":
+                    out.setdefault(v["code"], []).append(v["search_text"])
+            return out
 
     def annotated_codes(self):
         with self._lock:

@@ -159,3 +159,35 @@ def test_vector_text_returns_text_or_none(storage):
     vid = storage.classifier.add_annotation(A, "пояснение", 0)
     assert storage.classifier.vector_text(vid) == "пояснение"
     assert storage.classifier.vector_text(vid + 1000) is None
+
+
+# --- WP3 ----------------------------------------------------------------------------------
+
+def test_upsert_subset_without_sort_order_keeps_existing_order(storage):
+    storage.classifier.upsert_entries(entries())  # B=0, A=1, A1=2
+    c = ClassifierEntry("0003.0000.0000.0000", "C", 1, None, "C", 0)
+    renamed = ClassifierEntry(A, "A новое", 1, None, "A", 1)
+    storage.classifier.upsert_entries([renamed, c])  # sort_order=None у обоих
+    got = storage.classifier.load_entries()
+    assert [(e.code, e.sort_order) for e in got] == [
+        (B, 0), (A, 1), (A1, 2), ("0003.0000.0000.0000", 3)]
+    assert {e.code: e.name for e in got}[A] == "A новое"
+
+
+def test_upsert_explicit_sort_order_still_wins(storage):
+    storage.classifier.upsert_entries(entries())
+    moved = ClassifierEntry(B, "B", 1, None, "B", 0, sort_order=10)
+    storage.classifier.upsert_entries([moved])
+    assert [e.code for e in storage.classifier.load_entries()] == [A, A1, B]
+
+
+def test_annotations_by_code_bulk(storage):
+    storage.classifier.upsert_entries(entries())
+    setup_versions(storage, 2)
+    storage.classifier.add_annotation(A, "first", 0)
+    storage.classifier.add_annotation(B, "b", 0)
+    storage.classifier.add_annotation(A, "second", 1)
+    storage.classifier.add_annotation(A, "first", 1)
+    got = storage.classifier.annotations_by_code()
+    assert got == {A: ["first", "second", "first"], B: ["b"]}
+    assert got[A] == storage.classifier.annotations_for(A)

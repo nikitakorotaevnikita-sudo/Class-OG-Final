@@ -15,7 +15,7 @@ from . import appeal_common as ac
 from . import db
 from .base import DuplicateError
 from .models import (ActiveJobExists, ClassifierEntry, Job, ModelVersion, ModelVersionExists,
-                     QueueFull, Storage, check_job_values)
+                     QueueFull, Storage, assign_sort_orders, check_job_values)
 
 _ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
@@ -42,7 +42,14 @@ def _f32(v) -> np.ndarray:
 
 class PgClassifierStore(_PgBase):
     def upsert_entries(self, entries, conn=None):
+        """sort_order=None: у существующей записи сохраняется, новые получают max+1, ..."""
         with self._tx(conn) as c:
+            stored = dict(c.execute(
+                "SELECT code, sort_order FROM classifier_entries WHERE code = ANY(%s)",
+                ([e.code for e in entries],),
+            ).fetchall())
+            top = c.execute("SELECT max(sort_order) FROM classifier_entries").fetchone()[0]
+            orders = assign_sort_orders(entries, stored, top)
             with c.cursor() as cur:
                 cur.executemany(
                     """INSERT INTO classifier_entries
@@ -54,8 +61,8 @@ class PgClassifierStore(_PgBase):
                          sort_order=EXCLUDED.sort_order""",
                     [
                         (e.code, e.name, e.level, e.parent_code, e.full_path, e.children_count,
-                         i if e.sort_order is None else e.sort_order)
-                        for i, e in enumerate(entries)
+                         order)
+                        for e, order in zip(entries, orders)
                     ],
                 )
         return len(entries)
@@ -158,6 +165,18 @@ class PgClassifierStore(_PgBase):
                 (code, text_prefix, text_prefix),
             )
             return cur.rowcount
+
+    def annotations_by_code(self, conn=None):
+        """{code: [тексты аннотаций по порядку id]} одним запросом (без N+1)."""
+        with self._tx(conn) as c:
+            rows = c.execute(
+                """SELECT code, search_text FROM classifier_vectors
+                   WHERE source_type = 'annotation' ORDER BY id"""
+            ).fetchall()
+        out: dict[str, list[str]] = {}
+        for code, text in rows:
+            out.setdefault(code, []).append(text)
+        return out
 
     def annotated_codes(self, conn=None):
         with self._tx(conn) as c:

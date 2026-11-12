@@ -52,3 +52,26 @@ def test_config_defaults(monkeypatch):
     finally:
         monkeypatch.undo()
         importlib.reload(config)
+
+
+@pytest.mark.db
+def test_schema_supersedes_extra_active_finetunes_before_unique_index(pg_conn):
+    """Старая БД без one_active_finetune с двумя активными дообучениями: схема применяется."""
+    from storage import db
+
+    pg_conn.execute("DROP INDEX one_active_finetune")
+    for jid, minutes in (("a" * 32, 10), ("b" * 32, 5), ("c" * 32, 1)):
+        pg_conn.execute(
+            """INSERT INTO jobs (id, job_type, status, payload, created_at)
+               VALUES (%s, 'finetune', %s, '{}', now() - make_interval(mins => %s))""",
+            (jid, "running" if jid == "a" * 32 else "queued", minutes),
+        )
+    db.apply_schema(pg_conn)
+    db.apply_schema(pg_conn)  # повторно — без изменений
+    rows = dict(pg_conn.execute(
+        "SELECT id, status || ':' || coalesce(error, '') FROM jobs ORDER BY id").fetchall())
+    assert rows == {"a" * 32: "error:superseded", "b" * 32: "error:superseded",
+                    "c" * 32: "queued:"}
+    assert pg_conn.execute(
+        "SELECT count(*) FROM pg_indexes WHERE indexname = 'one_active_finetune' "
+        "AND schemaname = current_schema()").fetchone()[0] == 1
