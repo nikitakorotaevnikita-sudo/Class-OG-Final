@@ -333,6 +333,52 @@ def test_local_dispatcher_agent_factory_failure_finishes_job(monkeypatch):
     assert result.status == "error" and "нет активной модели" in result.error
 
 
+def test_local_dispatcher_bounds_concurrency(monkeypatch):
+    """Не поток на задачу: одновременно выполняется не больше max_workers задач."""
+    from queueing import tasks
+
+    storage = MemoryStorage()
+    jobs = [_new_job(storage) for _ in range(6)]
+    lock = threading.Lock()
+    state = {"now": 0, "max": 0}
+    gate = threading.Event()
+
+    def slow(msg, st, agent):
+        with lock:
+            state["now"] += 1
+            state["max"] = max(state["max"], state["now"])
+        gate.wait(5)
+        with lock:
+            state["now"] -= 1
+        st.jobs.finish(msg["job_id"], result={"ok": 1}, error=None)
+
+    monkeypatch.setattr(tasks, "run_classify_appeal", slow)
+    disp = LocalDispatcher(storage, agent_factory=lambda: "A", max_workers=2)
+    before = threading.active_count()
+    for job in jobs:
+        disp.send("classify_appeal", {"job_id": job.id}, queue="classify")
+    time.sleep(0.3)
+    assert state["now"] == 2
+    assert threading.active_count() - before <= 2
+    assert all(t.daemon for t in disp._threads)
+    gate.set()
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and any(
+            storage.jobs.get(j.id).status != "done" for j in jobs):
+        time.sleep(0.02)
+    assert all(storage.jobs.get(j.id).status == "done" for j in jobs)
+    assert state["max"] == 2
+
+
+def test_local_dispatcher_default_workers_from_config(monkeypatch):
+    import config
+
+    monkeypatch.setattr(config, "CLASSIFY_CONCURRENCY", 3)
+    assert LocalDispatcher(MemoryStorage(), agent_factory=lambda: None).max_workers == 3
+    monkeypatch.setattr(config, "CLASSIFY_CONCURRENCY", 0)
+    assert LocalDispatcher(MemoryStorage(), agent_factory=lambda: None).max_workers == 2
+
+
 def test_local_dispatcher_unknown_task():
     disp = LocalDispatcher(MemoryStorage(), agent_factory=lambda: None)
     with pytest.raises(DispatchError):

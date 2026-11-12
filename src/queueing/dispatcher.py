@@ -2,7 +2,7 @@
 
 - `CeleryDispatcher` — публикация в RabbitMQ (`send_task` по строковому имени;
   модуль задач и модель API не импортирует).
-- `LocalDispatcher` — выполнение `tasks.run_*` в потоке этого же процесса
+- `LocalDispatcher` — выполнение `tasks.run_*` в пуле потоков этого же процесса
   (тесты и `STORAGE_BACKEND=memory`): `await waiter.wait(...)` ведёт себя как в
   проде. Повторов нет — любой сбой завершает задачу ошибкой. Агент берётся из
   `agent_factory()` на каждую задачу (кэширует и перезагружает его worker_main).
@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from queue import SimpleQueue
 from typing import Callable, Optional, Protocol
 
 from kombu.exceptions import OperationalError as KombuOperationalError
@@ -54,21 +55,44 @@ _LOCAL_TASKS = {
 
 
 class LocalDispatcher:
-    """Выполняет задачу в daemon-потоке текущего процесса."""
+    """Выполняет задачи в ограниченном пуле daemon-потоков текущего процесса.
 
-    def __init__(self, storage, agent_factory: Callable[[], object]) -> None:
+    Одновременно — не больше max_workers задач (по умолчанию
+    CLASSIFY_CONCURRENCY, как у воркера; при 0 — 2), остальные ждут в очереди.
+    Не ThreadPoolExecutor: его потоки не daemon, и зависшая задача не дала бы
+    процессу (тестам) завершиться.
+    """
+
+    def __init__(self, storage, agent_factory: Callable[[], object],
+                 max_workers: Optional[int] = None) -> None:
         self._storage = storage
         # Фабрика вызывается на каждую задачу: кэш агента, горячая перезагрузка
         # модели после дообучения и применение .env живут в worker_main.get_agent.
         self._agent_factory = agent_factory
+        self.max_workers = max_workers or config.CLASSIFY_CONCURRENCY or 2
+        self._queue: "SimpleQueue[tuple[str, dict]]" = SimpleQueue()
+        self._threads: list[threading.Thread] = []
+        self._threads_lock = threading.Lock()
 
     def send(self, task_name: str, msg: dict, queue: str) -> None:
         if task_name not in _LOCAL_TASKS:
             raise DispatchError(f"неизвестная задача: {task_name!r}")
-        threading.Thread(
-            target=self._run, args=(task_name, msg), daemon=True,
-            name=f"local-{task_name}-{msg.get('job_id')}",
-        ).start()
+        self._queue.put((task_name, msg))
+        with self._threads_lock:
+            if len(self._threads) < self.max_workers:
+                thread = threading.Thread(
+                    target=self._worker, daemon=True,
+                    name=f"local-dispatcher-{len(self._threads) + 1}")
+                self._threads.append(thread)
+                thread.start()
+
+    def _worker(self) -> None:
+        while True:
+            task_name, msg = self._queue.get()
+            try:
+                self._run(task_name, msg)
+            except Exception:  # noqa: BLE001 — поток пула не должен умирать
+                log.exception("Локальный диспетчер: сбой задачи %s", task_name)
 
     def _run(self, task_name: str, msg: dict) -> None:
         job_id = msg.get("job_id")
