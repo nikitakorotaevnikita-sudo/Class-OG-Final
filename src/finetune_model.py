@@ -11,8 +11,10 @@ finetune_model.py — Дообучение эмбеддинговой модел
     2. Строит обучающие пары (текст обращения, запись классификатора)
     3. Дообучает модель АКТИВНОЙ версии через MultipleNegativesRankingLoss,
        считает recall@5 до и после
-    4. Сохраняет модель в models/e5-finetuned-vN/ (+ training_report.json),
-       N = следующая версия реестра ml_model_registry
+    4. Сохраняет модель в models/<семейство>-finetuned-vN/ (+ training_report.json),
+       N = следующая версия реестра ml_model_registry, семейство — от имени
+       базовой модели (для e5 — прежнее e5-finetuned-vN). Папка создаётся
+       атомарно и удаляется, если версия не зарегистрирована
     5. Строит векторы классификатора версии N (build_vectordb.build_database)
     6. Регистрирует версию N; активирует её, только если recall@5 вырос
 
@@ -24,6 +26,8 @@ finetune_model.py — Дообучение эмбеддинговой модел
 
 import argparse
 import random
+import re
+import shutil
 import sys
 import traceback
 import json
@@ -183,6 +187,90 @@ def sentence_transformers_train(base_model_path: str, train_examples: list,
 TrainFn = Callable[[str, list, list, Path], tuple[float, float]]
 
 
+def model_dir_name(base_model: str, version: int) -> str:
+    """Имя папки дообученной версии: `<семейство>-finetuned-v<N>`.
+
+    Семейство — последний компонент пути/имени базовой модели без суффикса
+    `-finetuned-vK`. Любое имя с отдельным «e5» даёт `e5`: прежние пути
+    models/e5-finetuned-vN не меняются. Символы вне [A-Za-z0-9._-] → «-».
+    """
+    name = re.split(r"[\\/]", base_model.strip().rstrip("\\/"))[-1]
+    name = re.sub(r"-finetuned-v\d+$", "", name)
+    if re.search(r"(^|[^a-z0-9])e5([^a-z0-9]|$)", name.lower()):
+        return f"e5-finetuned-v{version}"
+    family = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-.") or "model"
+    return f"{family}-finetuned-v{version}"
+
+
+def _train_and_register(storage, active, version: int, output_path: Path, source: str,
+                        train_fn: TrainFn, train_examples: list, val_examples: list,
+                        annotated_codes: int, total_pairs: int, verified_pairs: int,
+                        historical_pairs: int, say) -> tuple[bool, float, float]:
+    """Обучение в output_path, векторы версии N, регистрация (одна транзакция).
+
+    Возвращает (recall@5 вырос, recall@5 до, recall@5 после).
+    """
+    recall_before, recall_after = train_fn(active.model_path, train_examples,
+                                           val_examples, output_path)
+    recall_before, recall_after = float(recall_before), float(recall_after)
+    improved = recall_after > recall_before
+    delta = recall_after - recall_before
+    say("─" * 52)
+    say(f"  recall@5:  {recall_before:.3f} → {recall_after:.3f}  "
+        f"({'↑ +' if delta >= 0 else '↓ '}{delta:.3f})")
+    say("─" * 52)
+
+    trained_at = datetime.now(timezone.utc)
+    report = {
+        "timestamp":      trained_at.astimezone().isoformat(timespec="seconds"),
+        "version":        version,
+        "base_model":     active.model_path,
+        "output_path":    str(output_path),
+        "source":         source,
+        "train_size":     len(train_examples),
+        "val_size":       len(val_examples),
+        "recall5_before": round(recall_before, 4),
+        "recall5_after":  round(recall_after, 4),
+        "improved":       improved,
+        "annotated_codes_count": annotated_codes,
+        "historical_pairs": historical_pairs,
+        "verified_records": verified_pairs,
+        "total_training_pairs": total_pairs,
+    }
+    with open(output_path / "training_report.json", "w", encoding="utf-8") as f:
+        json.dump(report, f, ensure_ascii=False, indent=2)
+
+    # ── Векторы версии N и регистрация ────────────────────────────────────────
+    # Векторы считаются заранее (долго, вне транзакции); строка реестра и векторы
+    # пишутся одной транзакцией (векторы ссылаются на реестр внешним ключом):
+    # версия без векторов не появляется, при сбое не остаётся ничего.
+    say(f"  Построение векторов классификатора для v{version}...")
+    rows = build_vectordb.compute_vectors(storage, str(output_path))
+    mv = ModelVersion(
+        version=version,
+        base_model_name=active.model_path,
+        model_path=str(output_path),
+        is_active=False,
+        recall5_before=recall_before,
+        recall5_after=recall_after,
+        training_samples_count=len(train_examples),
+        trained_at=trained_at,
+        report=report,
+        adapter=None,
+    )
+    with storage.transaction() as conn:
+        kw = {} if conn is None else {"conn": conn}
+        try:
+            storage.models.register_new(mv, **kw)
+        except ModelVersionExists as exc:
+            raise RuntimeError(
+                f"Версию {version} уже зарегистрировало другое дообучение — результат этого "
+                f"запуска не сохранён в реестре ({exc})") from exc
+        n_vectors = storage.classifier.add_vectors(version, rows, **kw)
+    say(f"  Версия v{version} зарегистрирована, векторов: {n_vectors}")
+    return improved, recall_before, recall_after
+
+
 def run_training(storage, source: str = "combined", force: bool = False,
                  train_fn: Optional[TrainFn] = None) -> dict:
     """Дообучение с регистрацией версии в ml_model_registry.
@@ -273,75 +361,30 @@ def _train(storage, source: str, force: bool, train_fn: TrainFn, result: dict, s
 
     # ── Дообучение ────────────────────────────────────────────────────────────
     version = storage.models.next_version()
-    output_path = Path(config.MODELS_DIR) / f"e5-finetuned-v{version}"
-    if output_path.exists():
+    output_path = Path(config.MODELS_DIR) / model_dir_name(active.model_path, version)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        # Проверка и создание — одна операция: два одновременных запуска не
+        # пишут в одну папку.
+        output_path.mkdir(exist_ok=False)
+    except FileExistsError:
         raise RuntimeError(
             f"Папка {output_path} уже существует, а версии {version} нет в реестре: "
             f"возможно, идёт другое дообучение или осталась незарегистрированная модель. "
-            f"Перенесите папку и запустите дообучение снова.")
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+            f"Перенесите папку и запустите дообучение снова.") from None
     result.update(version=version, model_path=str(output_path))
-
-    recall_before, recall_after = train_fn(active.model_path, train_examples,
-                                           val_examples, output_path)
-    recall_before, recall_after = float(recall_before), float(recall_after)
-    improved = recall_after > recall_before
+    try:
+        improved, recall_before, recall_after = _train_and_register(
+            storage, active, version, output_path, source, train_fn, train_examples,
+            val_examples, len(texts.annotations), len(all_examples),
+            len(verified_examples), len(historical_examples), say)
+    except BaseException:
+        # Папку создал этот запуск, а версии в реестре нет: удаляем, иначе сирота
+        # (модель + training_report.json) повторно зарегистрировалась бы миграцией.
+        shutil.rmtree(output_path, ignore_errors=True)
+        raise
     result.update(recall5_before=recall_before, recall5_after=recall_after)
-    delta = recall_after - recall_before
-    say("─" * 52)
-    say(f"  recall@5:  {recall_before:.3f} → {recall_after:.3f}  "
-        f"({'↑ +' if delta >= 0 else '↓ '}{delta:.3f})")
-    say("─" * 52)
 
-    trained_at = datetime.now(timezone.utc)
-    report = {
-        "timestamp":      trained_at.astimezone().isoformat(timespec="seconds"),
-        "version":        version,
-        "base_model":     active.model_path,
-        "output_path":    str(output_path),
-        "source":         source,
-        "train_size":     len(train_examples),
-        "val_size":       len(val_examples),
-        "recall5_before": round(recall_before, 4),
-        "recall5_after":  round(recall_after, 4),
-        "improved":       improved,
-        "annotated_codes_count": len(texts.annotations),
-        "historical_pairs": len(historical_examples),
-        "verified_records": len(verified_examples),
-        "total_training_pairs": len(all_examples),
-    }
-    output_path.mkdir(parents=True, exist_ok=True)
-    with open(output_path / "training_report.json", "w", encoding="utf-8") as f:
-        json.dump(report, f, ensure_ascii=False, indent=2)
-
-    # ── Векторы версии N и регистрация ────────────────────────────────────────
-    # Векторы считаются заранее (долго, вне транзакции); строка реестра и векторы
-    # пишутся одной транзакцией (векторы ссылаются на реестр внешним ключом):
-    # версия без векторов не появляется, при сбое не остаётся ничего.
-    say(f"  Построение векторов классификатора для v{version}...")
-    rows = build_vectordb.compute_vectors(storage, str(output_path))
-    mv = ModelVersion(
-        version=version,
-        base_model_name=active.model_path,
-        model_path=str(output_path),
-        is_active=False,
-        recall5_before=recall_before,
-        recall5_after=recall_after,
-        training_samples_count=len(train_examples),
-        trained_at=trained_at,
-        report=report,
-        adapter=None,
-    )
-    with storage.transaction() as conn:
-        kw = {} if conn is None else {"conn": conn}
-        try:
-            storage.models.register_new(mv, **kw)
-        except ModelVersionExists as exc:
-            raise RuntimeError(
-                f"Версию {version} уже зарегистрировало другое дообучение — результат этого "
-                f"запуска не сохранён в реестре ({exc})") from exc
-        n_vectors = storage.classifier.add_vectors(version, rows, **kw)
-    say(f"  Версия v{version} зарегистрирована, векторов: {n_vectors}")
     if active.version == 0:
         # v0 — продовые векторы с адаптером, а recall@5 «до» измерен на исходной
         # модели без адаптера: сравнение нечестное, автоактивация могла бы

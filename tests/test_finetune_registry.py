@@ -443,3 +443,108 @@ def test_auto_finetune_race_with_active_job_exits_cleanly(monkeypatch, capsys):
     assert auto_finetune._cli(["--force"]) == 0
     assert sent == []
     assert "уже в очереди или выполняется" in capsys.readouterr().out
+
+
+# ── Папка модели: атомарное создание, имя от базовой модели, без сирот ────────
+
+def test_failed_vector_build_removes_model_dir(store, monkeypatch):
+    """Сирота (папка + training_report.json) без версии в реестре повторно
+    регистрировалась бы перезапуском миграции — при сбое папка удаляется."""
+    storage = seed(store)
+
+    class BrokenST(FakeSentenceTransformer):
+        def encode(self, texts, **kw):
+            raise OSError("диск переполнен")
+
+    monkeypatch.setattr(build_vectordb, "SentenceTransformer", BrokenST)
+
+    result = finetune_model.run_training(storage, train_fn=FakeTrain())
+
+    assert result["status"] == "failed"
+    assert not (Path(config.MODELS_DIR) / "e5-finetuned-v1").exists()
+
+
+def test_failed_train_removes_model_dir(store):
+    storage = seed(store)
+
+    class WritingTrain(FakeTrain):
+        def __call__(self, base, train, val, output_path):
+            (output_path / "checkpoints").mkdir()
+            return super().__call__(base, train, val, output_path)
+
+    result = finetune_model.run_training(
+        storage, train_fn=WritingTrain(error=RuntimeError("CUDA OOM")))
+
+    assert result["status"] == "failed"
+    assert not (Path(config.MODELS_DIR) / "e5-finetuned-v1").exists()
+
+
+def test_lost_registration_race_removes_own_model_dir(store):
+    storage = seed(store)
+
+    class RacingTrain(FakeTrain):
+        def __call__(self, base, train, val, output_path):
+            storage.models.register_new(_mv(1, "models/winner"))
+            return super().__call__(base, train, val, output_path)
+
+    result = finetune_model.run_training(storage, train_fn=RacingTrain())
+
+    assert result["status"] == "failed"
+    assert not (Path(config.MODELS_DIR) / "e5-finetuned-v1").exists()
+
+
+def test_existing_model_dir_is_kept_untouched():
+    """Чужая папка (другой запуск, ручная копия) не удаляется и не перезаписывается."""
+    storage = seed()
+    foreign = Path(config.MODELS_DIR) / "e5-finetuned-v1"
+    foreign.mkdir(parents=True)
+    (foreign / "model.safetensors").write_text("чужая модель", encoding="utf-8")
+
+    result = finetune_model.run_training(storage, train_fn=FakeTrain())
+
+    assert result["status"] == "failed" and "уже существует" in result["message"]
+    assert (foreign / "model.safetensors").read_text(encoding="utf-8") == "чужая модель"
+
+
+def test_model_dir_is_created_exclusively(monkeypatch):
+    """Проверка существования и создание папки — одна атомарная операция."""
+    storage = seed()
+    calls = []
+    real_mkdir = Path.mkdir
+
+    def spy(self, mode=0o777, parents=False, exist_ok=False):
+        if self.name == "e5-finetuned-v1":
+            calls.append(exist_ok)
+        return real_mkdir(self, mode=mode, parents=parents, exist_ok=exist_ok)
+
+    monkeypatch.setattr(Path, "mkdir", spy)
+
+    result = finetune_model.run_training(storage, train_fn=FakeTrain())
+
+    assert result["status"] == "completed", result
+    assert calls and calls[0] is False
+
+
+@pytest.mark.parametrize("base, expected", [
+    ("intfloat/multilingual-e5-base", "e5-finetuned-v1"),
+    ("models/e5-finetuned-v3", "e5-finetuned-v1"),
+    ("D:\models\multilingual-e5-large", "e5-finetuned-v1"),
+    ("BAAI/bge-m3", "bge-m3-finetuned-v1"),
+    ("models/bge-m3-finetuned-v2", "bge-m3-finetuned-v1"),
+    ("sergeyzh/rubert-tiny 2", "rubert-tiny-2-finetuned-v1"),
+])
+def test_model_dir_name_follows_base_model(base, expected):
+    assert finetune_model.model_dir_name(base, 1) == expected
+
+
+def test_non_e5_base_gets_own_dir_name():
+    from storage.models import ModelVersion
+
+    storage = seed()
+    storage.models.register(ModelVersion(version=0, base_model_name="BAAI/bge-m3",
+                                          model_path="BAAI/bge-m3", is_active=True))
+
+    result = finetune_model.run_training(storage, train_fn=FakeTrain())
+
+    assert result["status"] == "completed", result
+    assert result["model_path"] == str(Path(config.MODELS_DIR) / "bge-m3-finetuned-v1")
