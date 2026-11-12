@@ -171,7 +171,11 @@ def test_recheck_every_is_clamped(monkeypatch):
     monkeypatch.setattr(storage.jobs, "get", counting_get)
     result = asyncio.run(waiter.wait(job.id, timeout=0.3, recheck_every=0))
     assert result is None
-    assert calls["n"] <= 0.3 / 0.05 + 2
+    assert waiter_mod.MIN_RECHECK_SEC >= 0.5
+    assert calls["n"] <= 2  # первое чтение + одна перепроверка у дедлайна
+    calls["n"] = 0
+    result = asyncio.run(waiter.wait(job.id, timeout=0.3, recheck_every=-1))
+    assert result is None and calls["n"] <= 2
 
 
 def test_concurrent_waiters_on_same_job_all_wake():
@@ -468,3 +472,175 @@ def test_pg_waiter_survives_reconnect(pg_pair):
     result, elapsed = asyncio.run(_with_waiter(waiter, scenario))
     assert result is not None and result.status == "done"
     assert elapsed < 3.0
+
+
+# ── поток LISTEN без PostgreSQL (фейковый psycopg.connect) ───────────────────
+
+class _FakeJobs:
+    """jobs без add_listener → JobWaiter идёт по ветке PostgreSQL."""
+
+    def __init__(self, job):
+        self.job = job
+        self.reads = 0
+        self.first_read = threading.Event()
+
+    def get(self, job_id):
+        from types import SimpleNamespace
+
+        self.reads += 1
+        snapshot = SimpleNamespace(**vars(self.job))  # как строка из БД: снимок
+        self.first_read.set()
+        return snapshot
+
+
+class _FakeConn:
+    def __init__(self, notifies=None):
+        self._notifies = notifies or (lambda timeout: (time.sleep(0.02), [])[1])
+        self.info = type("Info", (), {"backend_pid": id(self)})()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def execute(self, sql):
+        return None
+
+    def notifies(self, timeout=1.0):
+        return self._notifies(timeout)
+
+
+def _pending_job():
+    from types import SimpleNamespace
+
+    return SimpleNamespace(id="a" * 32, status="queued")  # ожидателю нужен только status
+
+
+def test_listener_connection_enables_tcp_keepalives(monkeypatch):
+    import psycopg
+    from types import SimpleNamespace
+
+    seen = []
+    stop_after = threading.Event()
+
+    def fake_connect(dsn, **kwargs):
+        seen.append(kwargs)
+        stop_after.set()
+        raise psycopg.OperationalError("down")
+
+    monkeypatch.setattr(psycopg, "connect", fake_connect)
+    waiter = JobWaiter(SimpleNamespace(jobs=object()), dsn="postgresql://x")
+
+    async def scenario():
+        await waiter.start()
+        await asyncio.to_thread(stop_after.wait, 5)
+        await waiter.stop()
+
+    asyncio.run(scenario())
+    assert seen, "connect не вызывался"
+    kwargs = seen[0]
+    assert kwargs["autocommit"] is True
+    assert (kwargs["keepalives"], kwargs["keepalives_idle"], kwargs["keepalives_interval"],
+            kwargs["keepalives_count"]) == (1, 30, 10, 3)
+
+
+def test_wake_all_after_reconnect_rechecks_waiters(monkeypatch):
+    """После переподключения LISTEN ожидатели перечитывают задачу (NOTIFY мог пропасть)."""
+    import psycopg
+    from types import SimpleNamespace
+
+    job = _pending_job()
+    jobs = _FakeJobs(job)
+    connects = {"n": 0}
+
+    def fake_connect(dsn, **kwargs):
+        connects["n"] += 1
+        if connects["n"] == 1:
+            # слушатель «лежит», пока ожидатель не начал ждать; задача
+            # завершается без уведомления
+            jobs.first_read.wait(5)
+            job.status = "done"
+            raise psycopg.OperationalError("connection lost")
+        return _FakeConn()
+
+    monkeypatch.setattr(psycopg, "connect", fake_connect)
+    monkeypatch.setattr(waiter_mod, "BACKOFF_START", 0.05)
+    waiter = JobWaiter(SimpleNamespace(jobs=jobs), dsn="postgresql://x")
+
+    async def scenario():
+        t0 = time.monotonic()
+        result = await waiter.wait(job.id, timeout=10, recheck_every=30)
+        return result, time.monotonic() - t0
+
+    result, elapsed = asyncio.run(_with_waiter(waiter, scenario))
+    assert result is not None and result.status == "done"
+    assert connects["n"] >= 2
+    assert elapsed < 3.0  # разбудил _WAKE_ALL, а не перепроверка через 30 с
+
+
+def test_notify_after_loop_closed_is_ignored():
+    from types import SimpleNamespace
+
+    waiter = JobWaiter(SimpleNamespace(jobs=object()), dsn="postgresql://x")
+    loop = asyncio.new_event_loop()
+    loop.close()
+    waiter._loop = loop
+    waiter._notify_threadsafe("a" * 32)  # без исключения
+    waiter._notify_threadsafe(waiter_mod._WAKE_ALL)
+
+    class ClosingLoop:  # закрылся между проверкой и вызовом
+        def is_closed(self):
+            return False
+
+        def call_soon_threadsafe(self, *args):
+            raise RuntimeError("Event loop is closed")
+
+    waiter._loop = ClosingLoop()
+    waiter._notify_threadsafe("a" * 32)
+
+
+def test_restart_does_not_revive_old_listener_thread(monkeypatch):
+    """stop() с истёкшим join + start(): старый поток всё равно завершается."""
+    import psycopg
+    from types import SimpleNamespace
+
+    gate = threading.Event()
+    connects = {"n": 0}
+
+    def blocking_notifies(timeout):
+        gate.wait(5)  # «завис» дольше, чем stop() ждёт join
+        return []
+
+    def fake_connect(dsn, **kwargs):
+        connects["n"] += 1
+        if connects["n"] == 1:
+            return _FakeConn(blocking_notifies)
+        return _FakeConn()
+
+    monkeypatch.setattr(psycopg, "connect", fake_connect)
+    monkeypatch.setattr(waiter_mod, "STOP_JOIN_SEC", 0.1)
+    waiter = JobWaiter(SimpleNamespace(jobs=object()), dsn="postgresql://x")
+
+    async def scenario():
+        await waiter.start()
+        deadline = time.monotonic() + 5
+        while not waiter._listening.is_set() and time.monotonic() < deadline:
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(0.05)     # поток дошёл до notifies() и «завис»
+        old = waiter._thread
+        await waiter.stop()           # join истёк: старый поток ещё жив
+        assert old.is_alive()
+        await waiter.start()          # новый поток
+        new = waiter._thread
+        assert new is not old
+        gate.set()                    # старый поток просыпается
+        await asyncio.to_thread(old.join, 3)
+        old_alive = old.is_alive()
+        new_alive = new.is_alive()
+        await waiter.stop()
+        return old_alive, new_alive
+
+    old_alive, new_alive = asyncio.run(scenario())
+    assert old_alive is False, "старый поток LISTEN ожил после перезапуска"
+    assert new_alive is True

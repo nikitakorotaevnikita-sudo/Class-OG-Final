@@ -10,6 +10,10 @@ PostgreSQL: отдельный daemon-поток с синхронным autocom
 используется: psycopg async не работает на ProactorEventLoop, который uvicorn
 берёт на Windows. Уведомления передаются в цикл asyncio через
 `call_soon_threadsafe`; при сбое — переподключение с паузой 1 → 10 с.
+На соединении включены TCP keepalive (тихий обрыв виден за ~60 с). У каждого
+потока своё событие остановки: поток, не завершившийся за STOP_JOIN_SEC,
+не продолжит работу после повторного start(). recheck_every не меньше
+MIN_RECHECK_SEC (0 и отрицательные значения не дают busy-loop).
 
 Memory: слушатель `storage.jobs.add_listener` (эмуляция NOTIFY).
 """
@@ -30,7 +34,12 @@ _WAKE_ALL = None  # «разбудить всех»: после переподк
 
 BACKOFF_START = 1.0
 BACKOFF_MAX = 10.0
-MIN_RECHECK_SEC = 0.05  # нижняя граница recheck_every (без busy-loop)
+MIN_RECHECK_SEC = 0.5  # нижняя граница recheck_every (без busy-loop при 0 и меньше)
+STOP_JOIN_SEC = 5.0  # сколько stop() ждёт завершения потока LISTEN
+# TCP keepalive соединения LISTEN: обрыв без FIN (NAT, файрвол) обнаруживается
+# примерно за 30 + 10 * 3 = 60 с, после чего — переподключение.
+KEEPALIVE_KWARGS = {"keepalives": 1, "keepalives_idle": 30,
+                    "keepalives_interval": 10, "keepalives_count": 3}
 
 
 class JobWaiter:
@@ -58,9 +67,12 @@ class JobWaiter:
             return
         if self._thread is not None and self._thread.is_alive():
             return
-        self._stop.clear()
+        # У каждого потока своё событие остановки: поток, не успевший
+        # завершиться за STOP_JOIN_SEC, не «оживёт» при следующем start().
+        self._stop = threading.Event()
         self._thread = threading.Thread(
-            target=self._listen_loop, name="job-done-listener", daemon=True)
+            target=self._listen_loop, args=(self._stop,),
+            name="job-done-listener", daemon=True)
         self._thread.start()
 
     async def stop(self) -> None:
@@ -72,7 +84,7 @@ class JobWaiter:
         self._stop.set()
         thread, self._thread = self._thread, None
         if thread is not None:
-            await asyncio.to_thread(thread.join, 5.0)
+            await asyncio.to_thread(thread.join, STOP_JOIN_SEC)
 
     # ── ожидание ─────────────────────────────────────────────────────────────
 
@@ -140,34 +152,38 @@ class JobWaiter:
 
     # ── PostgreSQL: поток LISTEN ─────────────────────────────────────────────
 
-    def _listen_loop(self) -> None:
+    def _listen_loop(self, stop: threading.Event) -> None:
         import psycopg
 
         backoff = BACKOFF_START
-        while not self._stop.is_set():
+        while not stop.is_set():
             try:
-                with psycopg.connect(self._dsn, autocommit=True, connect_timeout=5) as conn:
+                with psycopg.connect(self._dsn, autocommit=True, connect_timeout=5,
+                                     **KEEPALIVE_KWARGS) as conn:
                     conn.execute("LISTEN job_done")
+                    if stop.is_set():
+                        break
                     self._backend_pid = conn.info.backend_pid
                     self._listening.set()
                     backoff = BACKOFF_START
                     # Пока слушателя не было, уведомления могли пропасть — перечитать.
                     self._notify_threadsafe(_WAKE_ALL)
-                    while not self._stop.is_set():
+                    while not stop.is_set():
                         for notify in conn.notifies(timeout=1.0):
                             try:
                                 self._notify_threadsafe(notify.payload)
                             except Exception:  # noqa: BLE001 — поток не должен умирать
                                 log.exception("Сбой доставки job_done %r", notify.payload)
             except Exception as exc:  # noqa: BLE001
-                if self._stop.is_set():
+                if stop.is_set():
                     break
                 log.warning("LISTEN job_done: соединение потеряно (%s: %s), "
                             "переподключение через %.0f с", type(exc).__name__, exc, backoff)
             finally:
-                self._listening.clear()
-                self._backend_pid = None
-            if self._stop.wait(backoff):
+                if stop is self._stop:  # флаги принадлежат текущему потоку
+                    self._listening.clear()
+                    self._backend_pid = None
+            if stop.wait(backoff):
                 break
             backoff = min(backoff * 2, BACKOFF_MAX)
 
