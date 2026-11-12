@@ -17,7 +17,7 @@ class ClassifierEntry:
     full_path: str
     children_count: int
     search_text: str = ""  # текст базовой строки активной версии модели
-    sort_order: Optional[int] = None  # порядок в classifier_flat.json (None -> индекс в списке)
+    sort_order: Optional[int] = None  # порядок в classifier_flat.json (None -> сохраняется хранимый порядок, новая запись получает max+1; см. assign_sort_orders)
 
 
 def assign_sort_orders(entries, stored: dict, top) -> list:

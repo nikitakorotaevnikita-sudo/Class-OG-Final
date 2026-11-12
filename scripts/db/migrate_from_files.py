@@ -205,13 +205,16 @@ def _migrate_annotations(storage, data_dir: Path, entry_codes: set[str], rec):
                 continue
             text = f"{field}: {value}"
             rows.append((code, text))
+    existing = {c: set(t) for c, t in storage.classifier.annotations_by_code().items()}
     added = 0
     for code, text in rows:
-        if text in storage.classifier.annotations_for(code):
+        if text in existing.get(code, ()):
             continue
         storage.classifier.add_annotation(code, text, 0)
+        existing.setdefault(code, set()).add(text)
         added += 1
-    present = sum(1 for code, text in rows if text in storage.classifier.annotations_for(code))
+    final = storage.classifier.annotations_by_code()
+    present = sum(1 for code, text in rows if text in final.get(code, ()))
     _say(f"  аннотации: добавлено {added} из {len(rows)}")
     rec["annotations"] = (len(rows), present)
 

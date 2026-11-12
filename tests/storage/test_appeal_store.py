@@ -350,6 +350,29 @@ def test_duplicate_create_raises_duplicate_error(storage):
     assert storage.appeals.get_text(UNKNOWN) == "t"
 
 
+@pytest.mark.db
+def test_duplicate_create_inside_transaction_keeps_it_usable(pg_conn):
+    """Дубликат внутри storage.transaction() не обрывает транзакцию вызывающего (savepoint)."""
+    from contextlib import contextmanager
+
+    from storage.base import DuplicateError
+    from storage.pg import PgStorage
+
+    @contextmanager
+    def connect():
+        with pg_conn.transaction():
+            yield pg_conn
+
+    st = PgStorage(connect)
+    with st.transaction() as tx:
+        st.appeals.create("t", appeal_id=UNKNOWN, conn=tx)
+        with pytest.raises(DuplicateError):
+            st.appeals.create("t2", appeal_id=UNKNOWN, conn=tx)
+        other = st.appeals.create("другое", conn=tx)  # запись после дубликата в той же транзакции
+    assert st.appeals.get_text(UNKNOWN) == "t"
+    assert st.appeals.get_text(other) == "другое"
+
+
 def test_duplicate_error_is_value_error():
     from storage.base import DuplicateError
 

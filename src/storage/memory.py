@@ -345,7 +345,8 @@ class MemoryAppealStore:
         # карточки), не-UUID сохраняется как NULL.
         with self._lock:
             self._llm_log.append({
-                "appeal_id": ac.norm_uuid(appeal_id) if appeal_id else None, "success": success, "attempt": attempt,
+                "appeal_id": ac.norm_uuid(appeal_id) if appeal_id else None,
+                "success": success, "attempt": attempt,
                 "elapsed_seconds": elapsed, "confidence": confidence, "error": error,
                 "candidates_count": candidates_count,
                 "created_at": ac.aware(created_at) if created_at else ac.now_aware(),

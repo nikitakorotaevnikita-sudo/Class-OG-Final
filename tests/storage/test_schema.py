@@ -70,8 +70,9 @@ def test_schema_supersedes_extra_active_finetunes_before_unique_index(pg_conn):
     db.apply_schema(pg_conn)  # повторно — без изменений
     rows = dict(pg_conn.execute(
         "SELECT id, status || ':' || coalesce(error, '') FROM jobs ORDER BY id").fetchall())
-    assert rows == {"a" * 32: "error:superseded", "b" * 32: "error:superseded",
-                    "c" * 32: "queued:"}
+    # выполняющееся (running) дообучение сохраняется, даже если оно старше queued
+    assert rows == {"a" * 32: "running:", "b" * 32: "error:superseded",
+                    "c" * 32: "error:superseded"}
     assert pg_conn.execute(
         "SELECT count(*) FROM pg_indexes WHERE indexname = 'one_active_finetune' "
         "AND schemaname = current_schema()").fetchone()[0] == 1

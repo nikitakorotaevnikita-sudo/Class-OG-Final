@@ -85,7 +85,11 @@ HIST_INDEX_SQL = "least(greatest(trunc(round(" + REAL_SQL + " * 10, 6)), 0), 9):
 
 
 def stats_payload(counts: dict) -> dict:
-    """Ответ stats() из {статус: число}; неизвестные статусы не учитываются."""
+    """Ответ stats() из {статус: число}; неизвестные статусы не учитываются (и в total).
+
+    В PostgreSQL неизвестного статуса не бывает: CHECK у appeal_verifications его не пропустит,
+    так что расхождения с прежним sum(counts.values()) на практике нет.
+    """
     c = {s: int(counts.get(s, 0)) for s in STATUSES}
     return {
         "total": sum(c.values()),

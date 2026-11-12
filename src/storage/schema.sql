@@ -119,14 +119,15 @@ CREATE TABLE IF NOT EXISTS jobs (
 CREATE INDEX IF NOT EXISTS jobs_status ON jobs(job_type, status, created_at);
 -- Не больше одного активного дообучения: двойной запуск получает 409 (ActiveJobExists).
 -- БД, созданная до индекса, могла накопить несколько активных дообучений: все, кроме
--- самого нового, закрываются ошибкой 'superseded', иначе индекс не создастся.
+-- выполняющегося (running; при нескольких или без них - самого нового), закрываются
+-- ошибкой 'superseded', иначе индекс не создастся.
 -- Идемпотентно: при одном активном дообучении (или ни одном) ничего не меняется.
 UPDATE jobs SET status = 'error', error = 'superseded',
                 finished_at = coalesce(finished_at, now())
   WHERE job_type = 'finetune' AND status IN ('queued','running')
     AND id <> (SELECT id FROM jobs
                WHERE job_type = 'finetune' AND status IN ('queued','running')
-               ORDER BY created_at DESC, id DESC LIMIT 1);
+               ORDER BY (status = 'running') DESC, created_at DESC, id DESC LIMIT 1);
 CREATE UNIQUE INDEX IF NOT EXISTS one_active_finetune ON jobs ((job_type))
   WHERE job_type = 'finetune' AND status IN ('queued','running');
 
