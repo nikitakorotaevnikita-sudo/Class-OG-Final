@@ -428,6 +428,53 @@ def test_local_finetune_does_not_hold_classify_slot(monkeypatch):
     assert storage.jobs.get(ft_job.id).status == "done"
 
 
+def test_local_dispatcher_shutdown_stops_threads(monkeypatch):
+    """shutdown() дожидается текущих задач и останавливает потоки пула
+    (тесты не оставляют потоков диспетчера после себя)."""
+    from queueing import tasks
+
+    storage = MemoryStorage()
+    jobs = [_new_job(storage) for _ in range(3)]
+
+    def slow(msg, st, agent):
+        time.sleep(0.3)
+        st.jobs.finish(msg["job_id"], result={"ok": 1}, error=None)
+
+    monkeypatch.setattr(tasks, "run_classify_appeal", slow)
+    disp = LocalDispatcher(storage, agent_factory=lambda: "A", max_workers=2)
+    for job in jobs:
+        disp.send("classify_appeal", {"job_id": job.id}, queue="classify")
+    threads = list(disp._threads)
+    assert threads
+
+    disp.shutdown(timeout=5)
+
+    assert not any(t.is_alive() for t in threads)
+    assert all(storage.jobs.get(j.id).status == "done" for j in jobs)
+    with pytest.raises(DispatchError):
+        disp.send("classify_appeal", {"job_id": jobs[0].id}, queue="classify")
+
+
+def test_local_dispatcher_shutdown_waits_for_finetune_thread(monkeypatch):
+    from queueing import tasks
+
+    storage = MemoryStorage()
+    job = _new_job(storage)
+
+    def slow_finetune(msg, st):
+        time.sleep(0.3)
+        st.jobs.finish(msg["job_id"], result={"ok": 1}, error=None)
+
+    monkeypatch.setattr(tasks, "run_finetune", slow_finetune)
+    disp = LocalDispatcher(storage, agent_factory=lambda: "A")
+    disp.send("finetune", {"job_id": job.id}, queue="training")
+
+    disp.shutdown(timeout=5)
+
+    assert storage.jobs.get(job.id).status == "done"
+    assert disp._finetune_threads and not any(t.is_alive() for t in disp._finetune_threads)
+
+
 def test_local_dispatcher_unknown_task():
     disp = LocalDispatcher(MemoryStorage(), agent_factory=lambda: None)
     with pytest.raises(DispatchError):

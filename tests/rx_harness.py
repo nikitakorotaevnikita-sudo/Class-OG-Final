@@ -15,6 +15,7 @@ from queueing.dispatcher import LocalDispatcher
 from storage import get_storage
 
 _open: list = []
+_dispatchers: list = []
 
 
 def _lifespan_factory():
@@ -37,8 +38,10 @@ def make_client(agent, dispatcher=None) -> TestClient:
     waiter_mod.reset_waiter()
     storage = get_storage()
     mp = pytest.MonkeyPatch()
-    mp.setattr(dispatcher_mod, "_dispatcher",
-               dispatcher or LocalDispatcher(storage, agent_factory=lambda: agent))
+    if dispatcher is None:
+        dispatcher = LocalDispatcher(storage, agent_factory=lambda: agent)
+        _dispatchers.append(dispatcher)
+    mp.setattr(dispatcher_mod, "_dispatcher", dispatcher)
     mp.setattr(config, "SYNC_WAIT_TIMEOUT_SEC", 30)
     app = FastAPI(lifespan=_lifespan_factory())
     app.include_router(integration_api.router)
@@ -53,6 +56,8 @@ def cleanup() -> None:
         client, mp = _open.pop()
         client.__exit__(None, None, None)
         mp.undo()
+    while _dispatchers:  # задачи, пережившие тест (504), не доделываются в следующих
+        _dispatchers.pop().shutdown(timeout=10)
     waiter_mod.reset_waiter()
 
 

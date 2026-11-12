@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from queue import SimpleQueue
 from typing import Callable, Optional, Protocol
 
@@ -62,6 +63,7 @@ class LocalDispatcher:
     Не ThreadPoolExecutor: его потоки не daemon, и зависшая задача не дала бы
     процессу (тестам) завершиться. Дообучение (finetune) в пул не входит:
     оно идёт в отдельном daemon-потоке, чтобы не занимать слот классификации.
+    shutdown() дожидается начатых задач и останавливает потоки (тесты).
     """
 
     def __init__(self, storage, agent_factory: Callable[[], object],
@@ -71,19 +73,25 @@ class LocalDispatcher:
         # модели после дообучения и применение .env живут в worker_main.get_agent.
         self._agent_factory = agent_factory
         self.max_workers = max(1, max_workers or config.CLASSIFY_CONCURRENCY or 2)
-        self._queue: "SimpleQueue[tuple[str, dict]]" = SimpleQueue()
+        self._queue: "SimpleQueue[Optional[tuple[str, dict]]]" = SimpleQueue()
         self._threads: list[threading.Thread] = []
+        self._finetune_threads: list[threading.Thread] = []
         self._threads_lock = threading.Lock()
+        self._closed = False
 
     def send(self, task_name: str, msg: dict, queue: str) -> None:
         if task_name not in _LOCAL_TASKS:
             raise DispatchError(f"неизвестная задача: {task_name!r}")
-        if task_name == "finetune":
-            threading.Thread(target=self._run_safe, args=(task_name, msg),
-                             daemon=True, name="local-dispatcher-finetune").start()
-            return
-        self._queue.put((task_name, msg))
         with self._threads_lock:
+            if self._closed:
+                raise DispatchError("локальный диспетчер остановлен")
+            if task_name == "finetune":
+                thread = threading.Thread(target=self._run_safe, args=(task_name, msg),
+                                          daemon=True, name="local-dispatcher-finetune")
+                self._finetune_threads.append(thread)
+                thread.start()
+                return
+            self._queue.put((task_name, msg))
             if len(self._threads) < self.max_workers:
                 thread = threading.Thread(
                     target=self._worker, daemon=True,
@@ -93,8 +101,26 @@ class LocalDispatcher:
 
     def _worker(self) -> None:
         while True:
-            task_name, msg = self._queue.get()
-            self._run_safe(task_name, msg)
+            item = self._queue.get()
+            if item is None:  # сигнал shutdown()
+                return
+            self._run_safe(*item)
+
+    def shutdown(self, timeout: float = 10.0) -> None:
+        """Не принимать новых задач, доделать поставленные и остановить потоки.
+
+        Ждёт не дольше timeout секунд в сумме; зависшая задача не держит
+        процесс (потоки daemon).
+        """
+        with self._threads_lock:
+            self._closed = True
+            threads = list(self._threads)
+            finetune = list(self._finetune_threads)
+        for _ in threads:
+            self._queue.put(None)  # после всех задач: очередь FIFO
+        deadline = time.monotonic() + timeout
+        for thread in threads + finetune:
+            thread.join(max(0.0, deadline - time.monotonic()))
 
     def _run_safe(self, task_name: str, msg: dict) -> None:
         try:
