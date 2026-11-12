@@ -48,15 +48,15 @@ def compute_vectors(storage, model_path: str) -> list[tuple[str, str, str, np.nd
     (уникальный) текст аннотации. Ничего не пишет в хранилище.
     """
     entries = storage.classifier.load_entries()
-    annotated = set(storage.classifier.annotated_codes())
+    # Все аннотации одним запросом (без запроса на каждый код)
+    by_code = storage.classifier.annotations_by_code()
     print(f"Построение векторов: {len(entries)} записей, "
-          f"кодов с аннотациями: {len(annotated)}; модель {model_path}")
+          f"кодов с аннотациями: {len(by_code)}; модель {model_path}")
 
     rows: list[tuple[str, str, str]] = []
     for e in entries:
         # annotations_for отдаёт строки всех версий — один текст берём один раз
-        anns = (list(dict.fromkeys(storage.classifier.annotations_for(e.code)))
-                if e.code in annotated else [])
+        anns = list(dict.fromkeys(by_code.get(e.code, [])))
         rows.append((e.code, "base", build_search_text(e.code, e.name, e.full_path, anns)))
         rows.extend((e.code, "annotation", text) for text in anns)
 

@@ -105,6 +105,9 @@ class PgClassifierStore(_PgBase):
         with self._tx(conn) as c:
             with c.cursor() as cur:
                 cur.execute("SET LOCAL hnsw.ef_search = 400")
+                # <=> — косинусное расстояние (нормирует сам). Векторы прода единичные
+                # (normalize_embeddings=True), поэтому 1 - <=> равно прежнему скалярному
+                # произведению numpy-поиска (паритет: verify_search_parity.py).
                 cur.execute(
                     """SELECT code, max(1 - (embedding <=> %s)) AS similarity
                        FROM classifier_vectors

@@ -367,3 +367,85 @@ def test_agent_metadata_order_equals_classifier_flat(fake_st):
     s.models.register(ModelVersion(0, "base-e5", "intfloat/multilingual-e5-base", True))
     agent = ClassifierAgent(storage=s)
     assert [m["code"] for m in agent.metadata] == [e["code"] for e in flat]
+
+
+# ── WP3: аннотации оператора, N+1, сверка множеств ─────────────────────────
+
+def test_operator_comment_with_legacy_prefix_is_not_a_legacy_field(global_storage):
+    """Комментарий оператора "correct_name: ..." не переименовывает запись."""
+    import annotations_storage as ann
+
+    code = "0001.0001.0001.0001"
+    ann.add_annotation(code, "correct_name: Чужое имя")
+    ann.add_annotation(code, "note: не заметка")
+    assert ann.build_search_text(code, "Вопрос", "Раздел / Вопрос") == "Вопрос. Раздел / Вопрос"
+    texts = ann.get_annotations(code)
+    assert len(texts) == 2 and all("Чужое имя" in t or "не заметка" in t for t in texts)
+    # поле старого формата через save_annotation по-прежнему действует
+    ann.save_annotation(code, "correct_name", "Новое имя")
+    assert ann.build_search_text(code, "Вопрос", "Раздел / Вопрос") == "Новое имя. Раздел / Вопрос"
+
+
+def test_appeals_logger_correct_comment_does_not_rename_code(global_storage):
+    import annotations_storage as ann
+    from appeals_logger import AppealsLogger
+
+    code = "0001.0001.0001.0001"
+    logger = AppealsLogger(storage=global_storage)
+    aid = global_storage.appeals.create("обращение")
+    assert logger.correct(aid, [code], comment="correct_name: Подмена")
+    assert ann.build_search_text(code, "Вопрос", "Раздел / Вопрос") == "Вопрос. Раздел / Вопрос"
+
+
+class _NoPerCodeAnnotations:
+    """Обёртка хранилища: annotations_for запрещён (N+1), остальное — как есть."""
+
+    def __init__(self, storage):
+        self._s = storage
+        self.classifier = self
+
+    def annotations_for(self, code):
+        raise AssertionError(f"annotations_for({code}) — запрос на каждый код")
+
+    def __getattr__(self, name):
+        if hasattr(self._s.classifier, name):
+            return getattr(self._s.classifier, name)
+        return getattr(self._s, name)
+
+
+def test_build_vectordb_reads_annotations_in_bulk(global_storage, monkeypatch):
+    import annotations_storage as ann
+    import build_vectordb
+
+    monkeypatch.setattr(build_vectordb, "SentenceTransformer", FakeST)
+    code = "0001.0001.0001.0001"
+    ann.add_annotation(code, "комментарий")
+    ann.save_annotation(code, "correct_name", "Иное")
+    rows = build_vectordb.compute_vectors(_NoPerCodeAnnotations(global_storage), "m")
+    base = {c: t for c, st, t, _ in rows if st == "base"}
+    assert base[code] == "Иное. Раздел / Тематика / Вопрос"
+    assert sum(1 for r in rows if r[1] == "annotation") == 2
+
+
+def test_finetune_texts_read_annotations_in_bulk(global_storage):
+    import annotations_storage as ann
+    import finetune_model
+
+    code = "0001.0001.0001.0001"
+    ann.save_annotation(code, "correct_name", "Иное")
+    texts = finetune_model._ClassifierTexts(_NoPerCodeAnnotations(global_storage))
+    assert texts.passage(code) == "passage: Иное. Раздел / Тематика / Вопрос"
+
+
+def test_compare_topk_detects_different_code_sets():
+    mod = _parity_mod()
+    np_all = {"A": 0.5, "B": 0.5, "C": 0.4, "D": 0.4}
+    np_top = [("A", 0.5), ("B", 0.5), ("C", 0.4)]
+    # каждая позиция — ничья, но A потерян, B повторён: множества различаются
+    assert "повторяются" in mod.compare_topk(np_top, [("B", 0.5), ("B", 0.5), ("C", 0.4)],
+                                             np_all)
+    # X — ничья по позиции, но A из середины top пропал
+    assert "множеств" in mod.compare_topk(np_top, [("B", 0.5), ("X", 0.5), ("C", 0.4)],
+                                          {**np_all, "X": 0.5})
+    # ничья на границе top-K (C и D по 0.4) — допустимое различие множеств
+    assert mod.compare_topk(np_top, [("B", 0.5), ("A", 0.5), ("D", 0.4)], np_all) is None

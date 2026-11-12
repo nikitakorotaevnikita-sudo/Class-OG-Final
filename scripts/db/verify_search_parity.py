@@ -27,6 +27,9 @@ TOP_K = 50
 def numpy_topk(embeddings: np.ndarray, codes: list[str], query: np.ndarray, k: int):
     """Эталон: косинус по нормированным векторам, max по коду, порядок (-sim, code).
 
+    Нормировка здесь явная: векторы прода (normalize_embeddings=True) уже единичные,
+    и бывший numpy-поиск считал косинус простым скалярным произведением. pgvector
+    (оператор <=>) нормирует сам, поэтому для единичных векторов значения совпадают.
     Возвращает (top-k [(code, sim)], {code: sim} по всем кодам).
     """
     q = np.asarray(query, dtype=np.float32)
@@ -46,6 +49,8 @@ def compare_topk(np_top: list, db_top: list, np_all: dict, tol: float = TOL) -> 
 
     Разный код на позиции допустим только при ничьей (similarity обоих кодов
     в пределах tol) — порядок равных значений зависит от округления float.
+    Множества кодов тоже сверяются: коды без пары допустимы только при ничьей на
+    границе top-K (similarity в пределах tol от последней), повторы в БД — нет.
     """
     if len(np_top) != len(db_top):
         return f"длина top: numpy {len(np_top)}, БД {len(db_top)}"
@@ -56,6 +61,16 @@ def compare_topk(np_top: list, db_top: list, np_all: dict, tol: float = TOL) -> 
             other = np_all.get(dc)
             if other is None or abs(other - ds) >= tol or abs(other - ns) >= tol:
                 return f"позиция {i}: numpy {nc} ({ns:.7f}), БД {dc} ({ds:.7f})"
+    np_codes, db_codes = [c for c, _ in np_top], [c for c, _ in db_top]
+    if len(set(db_codes)) != len(db_codes):
+        return "в top БД повторяются коды"
+    only_np, only_db = set(np_codes) - set(db_codes), set(db_codes) - set(np_codes)
+    if only_np or only_db:
+        edge = np_top[-1][1]
+        if any(np_all.get(c) is None or abs(np_all[c] - edge) >= tol
+               for c in only_np | only_db):
+            return (f"множества кодов top различаются: только numpy {sorted(only_np)}, "
+                    f"только БД {sorted(only_db)}")
     return None
 
 

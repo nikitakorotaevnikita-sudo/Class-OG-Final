@@ -68,8 +68,8 @@ class _ClassifierTexts:
     def __init__(self, storage):
         self.entries = {e.code: e for e in storage.classifier.load_entries()}
         self.annotations = {
-            code: list(dict.fromkeys(storage.classifier.annotations_for(code)))
-            for code in storage.classifier.annotated_codes()
+            code: list(dict.fromkeys(texts))
+            for code, texts in storage.classifier.annotations_by_code().items()
         }
 
     def passage(self, code: str) -> Optional[str]:

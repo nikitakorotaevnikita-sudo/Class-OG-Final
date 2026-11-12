@@ -6,7 +6,9 @@ annotations_storage.py — пользовательские аннотации �
 эмбеддинг считает воркер (embed_annotation) или build_vectordb.
 
 Старые поля-«словарь» (correct_name / category / note) хранятся как тексты
-с префиксом "<поле>: <значение>" и учитываются в build_search_text.
+с префиксом "<поле>: <значение>" и учитываются в build_search_text. Такую форму
+пишут только save_annotation и миграция; свободный текст оператора (add_annotation),
+случайно начинающийся с "<поле>: ", получает префикс OPERATOR_PREFIX и полем не считается.
 
 Используется из finetune_model.py, operator_cli.py, appeals_logger.py, api_server.py.
 """
@@ -19,6 +21,8 @@ from storage import get_storage
 
 # Поля старого словарного формата, которые влияют на search_text
 _LEGACY_FIELDS = ("correct_name", "category", "note")
+# Префикс свободного текста оператора, который иначе читался бы как поле старого формата
+OPERATOR_PREFIX = "Комментарий оператора: "
 
 
 def _store(storage=None):
@@ -43,8 +47,20 @@ def add_annotation(code: str, text: str, case_id: Optional[str] = None,
 
     case_id / operator_code принимаются для совместимости вызовов, в БД не хранятся.
     Возвращает id строки classifier_vectors.
+    Текст вида "<поле старого формата>: ..." сохраняется с префиксом OPERATOR_PREFIX:
+    поля старого формата пишет только save_annotation.
     """
+    if _is_legacy_form(text):
+        text = OPERATOR_PREFIX + text
+    return _add_raw(code, text, storage)
+
+
+def _add_raw(code: str, text: str, storage=None) -> int:
     return _store(storage).add_annotation(code, text, _active_version(storage))
+
+
+def _is_legacy_form(text: str) -> bool:
+    return any(text.startswith(f"{name}: ") for name in _LEGACY_FIELDS)
 
 
 # ── 2. Сохранение поля старого формата ───────────────────────────────────────
@@ -59,7 +75,7 @@ def save_annotation(code: str, field: str, value: str, *, storage=None) -> None:
         value: значение (строка)
     """
     _store(storage).delete_annotations(code, f"{field}: ")
-    add_annotation(code, f"{field}: {value}", storage=storage)
+    _add_raw(code, f"{field}: {value}", storage=storage)
 
 
 # ── 3. Получение всех аннотаций для кода ─────────────────────────────────────
