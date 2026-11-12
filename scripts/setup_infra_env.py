@@ -104,8 +104,9 @@ def choose_port(current: str, default: int, fallbacks: list[int],
 
     Значение из .env остаётся, если порт свободен или его держит свой контейнер.
     Занят чужим процессом: значение по умолчанию (5432 / 5672 / 15672 — так было
-    в старом .env.example) считается незаданным и подбирается запасной порт;
-    любое другое — PortError (его задали осознанно, молча менять нельзя).
+    в старом .env.example) считается незаданным: берётся порт своего контейнера,
+    если он есть, иначе первый свободный запасной; любое другое — PortError
+    (его задали осознанно, молча менять нельзя).
     """
     current = (current or "").strip()
     note = ""
@@ -118,6 +119,10 @@ def choose_port(current: str, default: int, fallbacks: list[int],
         if port != default:
             raise PortError(f"port {port} is busy (another program listens on "
                             f"127.0.0.1:{port})")
+        if ours:
+            # свой контейнер уже публикует другой порт: берём его, а не запасной,
+            # иначе compose пересоздал бы контейнер на новом порту
+            return ours, f"{default} from .env is busy, using this project's container port"
         note = f"{default} from .env is busy, "
     elif ours:
         return ours, "published by this project's container"
@@ -180,7 +185,9 @@ def _clean_value(raw: str) -> str:
     value = raw.strip()
     if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
         return value[1:-1]
-    return re.sub(r"\s+#.*$", "", value).strip()
+    # Комментарий — «#» после пробела; по исходной строке, чтобы «KEY= # текст»
+    # давало пустое значение, а «KEY=#secret» (без пробела) оставалось значением.
+    return re.sub(r"\s+#.*$", "", raw).strip()
 
 
 def parse_env(text: str) -> dict[str, str]:
@@ -222,8 +229,17 @@ def _is_local(url: str) -> bool:
 
 
 def _hostport(url: str) -> str:
-    parts = urlsplit(url)
-    return f"{parts.hostname}:{parts.port}"
+    """host:port для сообщений (без учётных данных); кривой порт — «?»."""
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname
+    except ValueError:
+        return "?"
+    try:
+        port = parts.port
+    except ValueError:
+        port = "?"
+    return f"{host}:{port}"
 
 
 # ── main ────────────────────────────────────────────────────────────────────

@@ -341,3 +341,42 @@ def test_main_does_not_report_replacement_when_url_unchanged(tmp_path, capsys):
 def test_bom_is_written_as_an_escape_in_source():
     assert infra.BOM == chr(0xFEFF)
     assert chr(0xFEFF) not in SCRIPT.read_text(encoding="utf-8")
+
+
+# ── WP2b: повторная проверка ────────────────────────────────────────────────
+
+def test_busy_default_prefers_own_container_port():
+    """.env держит занятый чужим 5432, а свой контейнер уже публикует 5434:
+    берётся 5434 (контейнер не пересоздаётся на новом порту)."""
+    port, why = infra.choose_port("5432", 5432, [5434, 5435],
+                                  is_free=free_except(5432, 5434), ours=5434)
+    assert port == 5434
+    assert "5432" in why and "container" in why
+
+
+def test_value_that_is_only_a_comment_parses_as_empty():
+    env = infra.parse_env("POSTGRES_PORT= # host port\nDATABASE_URL=   # url\n"
+                          "POSTGRES_PASSWORD=#secret\n")
+    assert env["POSTGRES_PORT"] == ""
+    assert env["DATABASE_URL"] == ""
+    assert env["POSTGRES_PASSWORD"] == "#secret"  # без пробела перед # — это значение
+
+
+def test_main_builds_url_when_value_is_only_a_comment(tmp_path):
+    env = tmp_path / ".env"
+    env.write_text("POSTGRES_PORT=5434\nDATABASE_URL= # set by installer\n", encoding="utf-8")
+    assert run_main(env) == 0
+    text = env.read_text(encoding="utf-8")
+    assert ("DATABASE_URL=postgresql://classifier:classifier@localhost:5434/classifier"
+            in text)
+
+
+def test_main_reports_replaced_url_with_bad_port_without_traceback(tmp_path, capsys):
+    env = tmp_path / ".env"
+    env.write_text("POSTGRES_PORT=5434\n"
+                   "DATABASE_URL=postgresql://u:pw@localhost:abc/db\n", encoding="utf-8")
+    assert run_main(env) == 0
+    out = capsys.readouterr().out
+    line = next(l for l in out.splitlines() if "DATABASE_URL" in l)
+    assert "replaced" in line and "localhost" in line
+    assert "pw" not in line.split("(", 1)[1]
