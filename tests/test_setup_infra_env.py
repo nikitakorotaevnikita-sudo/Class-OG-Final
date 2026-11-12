@@ -28,9 +28,35 @@ def free_except(*busy):
 
 # ── Выбор порта ─────────────────────────────────────────────────────────────
 
-def test_existing_value_is_kept_even_if_busy():
-    port, why = infra.choose_port("5440", 5432, [5434], is_free=free_except(5440), ours=None)
-    assert str(port) == "5440" and "env" in why
+def test_existing_free_value_is_kept():
+    port, why = infra.choose_port("5440", 5432, [5434], is_free=free_except(), ours=None)
+    assert port == 5440 and "env" in why
+
+
+def test_existing_value_held_by_own_container_is_kept():
+    port, why = infra.choose_port("5440", 5432, [5434], is_free=free_except(5440), ours=5440)
+    assert port == 5440 and "env" in why
+
+
+def test_existing_default_value_busy_is_treated_as_unset():
+    """.env из старого .env.example держит POSTGRES_PORT=5432; на хосте с «родным»
+    PostgreSQL этот порт занят — выбирается запасной, а не молча сохраняется."""
+    port, why = infra.choose_port("5432", 5432, [5434, 5435], is_free=free_except(5432, 5434),
+                                  ours=None)
+    assert port == 5435
+    assert "5432" in why and "busy" in why
+
+
+def test_existing_custom_value_busy_is_an_error():
+    with pytest.raises(infra.PortError) as err:
+        infra.choose_port("5440", 5432, [5434], is_free=free_except(5440), ours=None)
+    assert "5440" in str(err.value) and "busy" in str(err.value)
+
+
+@pytest.mark.parametrize("value", ["54x2", "0", "70000", "-1", "5432.0"])
+def test_existing_value_must_be_a_port_number(value):
+    with pytest.raises(infra.PortError):
+        infra.choose_port(value, 5432, [5434], is_free=free_except(), ours=None)
 
 
 def test_default_used_when_free():
@@ -194,7 +220,8 @@ def test_main_is_idempotent(tmp_path):
     env.write_text("POSTGRES_PORT=\n", encoding="utf-8")
     assert run_main(env, busy=(5432,)) == 0
     first = env.read_bytes()
-    assert run_main(env, busy=(5432, 5434)) == 0  # теперь 5434 держит наш контейнер
+    # теперь 5434 держит наш контейнер
+    assert run_main(env, busy=(5432, 5434), ours={"POSTGRES_PORT": 5434}) == 0
     assert env.read_bytes() == first
 
 
@@ -220,11 +247,97 @@ def test_main_no_free_port_fails_without_writing(tmp_path):
 def test_cli_runs_as_script_on_a_copy(tmp_path):
     """Запуск как у установщика (интерпретатор venv, без Docker) — на копии .env."""
     env = tmp_path / ".env"
-    env.write_text("POSTGRES_PORT=5434\nRABBITMQ_PORT=5673\nRABBITMQ_MGMT_PORT=15673\n",
+    # Редкие порты: 5434/5673 может держать живой стек проекта, а --no-docker
+    # не узнает в нём «свой» контейнер.
+    env.write_text("POSTGRES_PORT=5451\nRABBITMQ_PORT=5691\nRABBITMQ_MGMT_PORT=15691\n",
                    encoding="utf-8")
     proc = subprocess.run([sys.executable, str(SCRIPT), "--env-file", str(env), "--no-docker"],
                           cwd=str(ROOT), capture_output=True, text=True,
                           encoding="utf-8", errors="replace", timeout=60)
     assert proc.returncode == 0, proc.stderr
-    assert "DATABASE_URL=postgresql://classifier:classifier@localhost:5434/classifier" in \
+    assert "DATABASE_URL=postgresql://classifier:classifier@localhost:5451/classifier" in \
         env.read_text(encoding="utf-8")
+
+
+# ── Fix round 1: занятый порт из .env, кодировка, комментарии, сокет ────────
+
+def test_main_busy_custom_port_from_env_stops_with_clear_error(tmp_path, capsys):
+    env = tmp_path / ".env"
+    original = "POSTGRES_PASSWORD=topsecret\nPOSTGRES_PORT=5440\n"
+    env.write_text(original, encoding="utf-8")
+    assert run_main(env, busy=(5440,)) == 1
+    assert env.read_text(encoding="utf-8") == original
+    out = capsys.readouterr()
+    printed = out.out + out.err
+    assert "POSTGRES_PORT" in printed and "5440" in printed
+    assert "topsecret" not in printed
+
+
+def test_main_busy_default_port_from_old_template_gets_a_fallback(tmp_path, capsys):
+    env = tmp_path / ".env"
+    env.write_text("POSTGRES_PORT=5432\nRABBITMQ_PORT=5672\nRABBITMQ_MGMT_PORT=15672\n"
+                   "DATABASE_URL=postgresql://classifier:classifier@localhost:5432/classifier\n",
+                   encoding="utf-8")
+    assert run_main(env, busy=(5432, 5672, 15672)) == 0
+    values = infra.parse_env(env.read_text(encoding="utf-8"))
+    assert (values["POSTGRES_PORT"], values["RABBITMQ_PORT"],
+            values["RABBITMQ_MGMT_PORT"]) == ("5434", "5673", "15673")
+    assert values["DATABASE_URL"] == "postgresql://classifier:classifier@localhost:5434/classifier"
+    printed = capsys.readouterr().out
+    assert "busy" in printed and "5434" in printed
+
+
+def test_main_invalid_port_value_fails(tmp_path, capsys):
+    env = tmp_path / ".env"
+    env.write_text("POSTGRES_PORT=54x2\n", encoding="utf-8")
+    assert run_main(env) == 1
+    assert "POSTGRES_PORT" in capsys.readouterr().err
+
+
+def test_main_non_utf8_env_gives_one_line_error(tmp_path, capsys):
+    env = tmp_path / ".env"
+    env.write_bytes("POSTGRES_PASSWORD=пароль\n".encode("cp1251"))
+    assert run_main(env) == 2
+    err = capsys.readouterr().err
+    assert "UTF-8" in err and "Traceback" not in err
+    assert len(err.strip().splitlines()) == 1
+
+
+def test_set_keys_keeps_trailing_inline_comment():
+    out = infra.set_keys("POSTGRES_PORT=5432  # host port\n", {"POSTGRES_PORT": "5434"}, "\n")
+    assert out == "POSTGRES_PORT=5434  # host port\n"
+
+
+def test_main_keeps_unix_socket_database_url(tmp_path):
+    """Пустой hostname (unix-сокет) — не «localhost»: такой адрес не переписывается на TCP."""
+    env = tmp_path / ".env"
+    url = "postgresql:///classifier?host=/run/postgresql"
+    env.write_text(f"DATABASE_URL={url}\n", encoding="utf-8")
+    assert run_main(env) == 0
+    assert infra.parse_env(env.read_text(encoding="utf-8"))["DATABASE_URL"] == url
+
+
+def test_main_reports_replaced_local_url_without_secrets(tmp_path, capsys):
+    env = tmp_path / ".env"
+    env.write_text("POSTGRES_PORT=5434\n"
+                   "DATABASE_URL=postgresql://native:n4tivepw@localhost:5432/other\n",
+                   encoding="utf-8")
+    assert run_main(env) == 0
+    printed = capsys.readouterr().out
+    line = next(l for l in printed.splitlines() if "DATABASE_URL" in l)
+    assert "replaced" in line and "localhost:5432" in line
+    assert "n4tivepw" not in printed and "native" not in printed
+
+
+def test_main_does_not_report_replacement_when_url_unchanged(tmp_path, capsys):
+    env = tmp_path / ".env"
+    env.write_text("POSTGRES_PORT=5434\n"
+                   "DATABASE_URL=postgresql://classifier:classifier@localhost:5434/classifier\n",
+                   encoding="utf-8")
+    assert run_main(env) == 0
+    assert "replaced" not in capsys.readouterr().out
+
+
+def test_bom_is_written_as_an_escape_in_source():
+    assert infra.BOM == chr(0xFEFF)
+    assert chr(0xFEFF) not in SCRIPT.read_text(encoding="utf-8")

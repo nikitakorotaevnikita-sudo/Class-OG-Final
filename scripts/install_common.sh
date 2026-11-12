@@ -154,7 +154,7 @@ warn_if_root() {
 pid_cmdline() {
     local pid="$1"
     if [ -r "/proc/$pid/cmdline" ]; then
-        tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null
+        tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true
         return 0
     fi
     ps -o args= -p "$pid" 2>/dev/null || true
@@ -192,7 +192,7 @@ infra_later() {
 setup_infra() {
     local offline="${1:-}"
     if ! "$VENV_PY" scripts/setup_infra_env.py --env-file "$ENV_FILE"; then
-        warn "порты PostgreSQL/RabbitMQ не выбраны — задать POSTGRES_PORT / RABBITMQ_PORT / RABBITMQ_MGMT_PORT в .env вручную"
+        warn "порты PostgreSQL/RabbitMQ не выбраны — см. ошибку выше, исправить POSTGRES_PORT / RABBITMQ_PORT / RABBITMQ_MGMT_PORT в .env и повторить"
         CHECK_FAILED=1
         return 0
     fi

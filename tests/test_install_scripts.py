@@ -255,3 +255,43 @@ def test_launch_sh_default_port_prints_a_real_newline():
         for no, line in enumerate((ROOT / name).read_text(encoding="utf-8").splitlines(), 1):
             if re.search(r"\bprintf\s+'", line):
                 assert line.count("'") >= 2, f"{name}:{no}: строка printf не закрыта: {line}"
+
+
+# ── Строгий режим: set -euo pipefail во всех bash-скриптах установки ────────
+
+STRICT_SCRIPTS = ["install.sh", "install_offline.sh", "launch.sh"]
+
+
+@pytest.mark.parametrize("name", STRICT_SCRIPTS)
+def test_strict_mode(name):
+    assert "set -euo pipefail" in (ROOT / name).read_text(encoding="utf-8")
+
+
+def logical_lines(text: str):
+    buf = ""
+    for line in text.splitlines():
+        if line.rstrip().endswith("\\"):
+            buf += line.rstrip()[:-1] + " "
+            continue
+        yield buf + line
+        buf = ""
+
+
+@pytest.mark.parametrize("name", STRICT_SCRIPTS + ["scripts/install_common.sh"])
+def test_no_bare_test_and_command_under_errexit(name):
+    """`[ -n "$X" ] && cmd` при пустом X возвращает 1: в конце функции или ветки это
+    обрывает скрипт под set -e. Нужно if ... fi или `|| true`."""
+    for stmt in logical_lines((ROOT / name).read_text(encoding="utf-8")):
+        s = stmt.strip()
+        if s.startswith("#"):
+            continue
+        if re.match(r"^\[\s.*\]\s*&&", s) and "||" not in s:
+            pytest.fail(f"{name}: {s}")
+
+
+# launch.sh без venv отказывает раньше --help (test_launch_requires_venv).
+@pytest.mark.parametrize("name", ["install.sh", "install_offline.sh"])
+def test_help_exits_zero_under_strict_mode(name):
+    proc = subprocess.run([BASH, name, "--help"], cwd=str(ROOT), capture_output=True,
+                          text=True, encoding="utf-8", errors="replace", timeout=60)
+    assert proc.returncode == 0, proc.stderr

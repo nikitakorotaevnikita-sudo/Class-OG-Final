@@ -8,7 +8,7 @@
 # Комплект собирается на машине с интернетом:
 #   python scripts/make_offline_bundle.py --python-version 3.11 --platform manylinux2014_x86_64
 
-set -uo pipefail
+set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")"
 
 PORT="${PORT:-8010}"
@@ -71,7 +71,7 @@ ensure_venv
 step "4/7" "Зависимости из offline_bundle/wheels"
 # --no-index гарантирует, что pip не пойдёт в сеть: если колеса не хватает,
 # установка честно падает, а не «тихо» скачивает его с PyPI.
-"$VENV_PY" -m pip install --no-index --find-links=offline_bundle/wheels --upgrade pip --quiet 2>/dev/null
+"$VENV_PY" -m pip install --no-index --find-links=offline_bundle/wheels --upgrade pip --quiet 2>/dev/null || true
 if ! "$VENV_PY" -m pip install --no-index --find-links=offline_bundle/wheels -r requirements.txt; then
     die "установка из колёс не удалась.
    Обычная причина — колёса собраны под другой минор Python.
@@ -113,9 +113,9 @@ case "$LLM_PROVIDER" in
         ask CUSTOM_LLM_BASE_URL "Адрес endpoint (например http://10.0.0.5:8000/v1)" ""
         ask CUSTOM_LLM_MODEL    "Имя модели, как её отдаёт сервер" ""
         ask CUSTOM_LLM_API_KEY  "Ключ (Enter — без ключа)" ""
-        [ -n "${CUSTOM_LLM_BASE_URL:-}" ] && set_env_key CUSTOM_LLM_BASE_URL "$CUSTOM_LLM_BASE_URL"
-        [ -n "${CUSTOM_LLM_MODEL:-}" ]    && set_env_key CUSTOM_LLM_MODEL "$CUSTOM_LLM_MODEL"
-        [ -n "${CUSTOM_LLM_API_KEY:-}" ]  && set_env_key CUSTOM_LLM_API_KEY "$CUSTOM_LLM_API_KEY"
+        if [ -n "${CUSTOM_LLM_BASE_URL:-}" ]; then set_env_key CUSTOM_LLM_BASE_URL "$CUSTOM_LLM_BASE_URL"; fi
+        if [ -n "${CUSTOM_LLM_MODEL:-}" ]; then set_env_key CUSTOM_LLM_MODEL "$CUSTOM_LLM_MODEL"; fi
+        if [ -n "${CUSTOM_LLM_API_KEY:-}" ]; then set_env_key CUSTOM_LLM_API_KEY "$CUSTOM_LLM_API_KEY"; fi
         ;;
     ollama)
         ask OLLAMA_BASE_URL "OLLAMA_BASE_URL" "http://localhost:11434/v1"
@@ -126,7 +126,7 @@ case "$LLM_PROVIDER" in
         ask ARIO_BASE_URL "ARIO_BASE_URL" "https://llm.ario.directum360.ru/v1"
         ask ARIO_API_KEY  "ARIO_API_KEY" ""
         set_env_key ARIO_BASE_URL "$ARIO_BASE_URL"
-        [ -n "${ARIO_API_KEY:-}" ] && set_env_key ARIO_API_KEY "$ARIO_API_KEY"
+        if [ -n "${ARIO_API_KEY:-}" ]; then set_env_key ARIO_API_KEY "$ARIO_API_KEY"; fi
         ;;
 esac
 
@@ -134,9 +134,9 @@ printf '\n   Directum RX — только для вызовов по document_id
 ask RX_ODATA_URL "RX OData URL" ""
 ask RX_USER      "RX пользователь" ""
 ask RX_PASSWORD  "RX пароль" ""
-[ -n "${RX_ODATA_URL:-}" ] && set_env_key RX_ODATA_URL "$RX_ODATA_URL"
-[ -n "${RX_USER:-}" ]      && set_env_key RX_USER "$RX_USER"
-[ -n "${RX_PASSWORD:-}" ]  && set_env_key RX_PASSWORD "$RX_PASSWORD"
+if [ -n "${RX_ODATA_URL:-}" ]; then set_env_key RX_ODATA_URL "$RX_ODATA_URL"; fi
+if [ -n "${RX_USER:-}" ]; then set_env_key RX_USER "$RX_USER"; fi
+if [ -n "${RX_PASSWORD:-}" ]; then set_env_key RX_PASSWORD "$RX_PASSWORD"; fi
 
 # Флаги офлайна и локальная модель — не спрашиваем, это суть офлайн-установки.
 # HF_HUB_OFFLINE читается один раз, при импорте huggingface_hub: без него
@@ -148,7 +148,7 @@ set_env_key EMBEDDING_MODEL offline_bundle/models/multilingual-e5-base
 set_env_key ENABLE_EMBEDDING_ADAPTER false
 [ -f offline_bundle/models/multilingual-e5-base/config.json ] \
     || die "модель отсутствует в offline_bundle/models/ — пересобрать комплект"
-chmod 600 "$ENV_FILE" 2>/dev/null
+chmod 600 "$ENV_FILE" 2>/dev/null || true
 ok ".env настроен на локальную модель и запрет сети"
 
 # ── 6. База + итоговая проверка ───────────────────────────────────────────────

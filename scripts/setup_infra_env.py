@@ -6,7 +6,10 @@
     venv/Scripts/python.exe scripts/setup_infra_env.py [--env-file PATH] [--dry-run] [--no-docker]
 
 Для каждого из POSTGRES_PORT (5432), RABBITMQ_PORT (5672), RABBITMQ_MGMT_PORT (15672):
-- значение уже есть в .env — остаётся как есть;
+- значение уже есть в .env — остаётся, если порт свободен или его держит свой
+  контейнер. Занят чужим процессом: 5432 / 5672 / 15672 (старый .env.example)
+  считаются незаданными — подбирается запасной; иное значение — ошибка (код 1)
+  с именем ключа и порта. Не число 1..65535 — тоже ошибка;
 - иначе порт, который сейчас публикует контейнер ЭТОГО проекта (docker compose ps), —
   он свой, а не «занят»;
 - иначе порт по умолчанию, если на 127.0.0.1 его никто не слушает;
@@ -15,13 +18,15 @@
 
 Затем в .env пишутся DATABASE_URL / RABBITMQ_URL на localhost с этими портами и
 учётными данными POSTGRES_* / RABBITMQ_DEFAULT_* (экранированными). DATABASE_URL /
-RABBITMQ_URL, указывающие на другую машину, не трогаются.
+RABBITMQ_URL, указывающие на другую машину или unix-сокет, не трогаются; локальный
+URL с другими учётными данными или портом заменяется (в выводе: replaced, was different).
 
 Файл правится бережно: UTF-8, BOM (если был), концы строк, комментарии и порядок
 строк сохраняются. Пароли и URL целиком не печатаются. Вывод — ASCII: его
 показывает консоль cmd.exe в любой кодовой странице.
 
-Код возврата: 0 — готово, 1 — нет свободного порта, 2 — нет .env.
+Код возврата: 0 — готово, 1 — порт из .env непригоден или свободного нет,
+2 — нет .env или он не в UTF-8.
 """
 
 from __future__ import annotations
@@ -41,7 +46,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from service_urls import build_database_url, build_rabbitmq_url  # noqa: E402
 
-BOM = "﻿"
+BOM = "\ufeff"
 
 # ключ .env -> (порт по умолчанию, запасные порты по порядку)
 PORTS: dict[str, tuple[int, list[int]]] = {
@@ -57,11 +62,17 @@ _PUBLISHED = {
     ("rabbitmq", 15672): "RABBITMQ_MGMT_PORT",
 }
 
-_LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", ""}
+# Пустой hostname (unix-сокет: postgresql:///db?host=/run/postgresql) — не TCP
+# localhost: такой адрес не переписывается.
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 
 class NoFreePort(RuntimeError):
     pass
+
+
+class PortError(ValueError):
+    """Порт из .env непригоден: не число или занят чужим процессом."""
 
 
 # ── Порты ───────────────────────────────────────────────────────────────────
@@ -88,18 +99,35 @@ def port_is_free(port: int) -> bool:
 
 
 def choose_port(current: str, default: int, fallbacks: list[int],
-                is_free: Callable[[int], bool], ours: Optional[int]) -> tuple[int | str, str]:
-    """(порт, пояснение). current — значение из .env (пусто — не задано)."""
+                is_free: Callable[[int], bool], ours: Optional[int]) -> tuple[int, str]:
+    """(порт, пояснение). current — значение из .env (пусто — не задано).
+
+    Значение из .env остаётся, если порт свободен или его держит свой контейнер.
+    Занят чужим процессом: значение по умолчанию (5432 / 5672 / 15672 — так было
+    в старом .env.example) считается незаданным и подбирается запасной порт;
+    любое другое — PortError (его задали осознанно, молча менять нельзя).
+    """
     current = (current or "").strip()
+    note = ""
     if current:
-        return current, "kept from .env"
-    if ours:
+        if not current.isdigit() or not 1 <= int(current) <= 65535:
+            raise PortError(f"{current!r} is not a port number (1-65535)")
+        port = int(current)
+        if port == ours or is_free(port):
+            return port, "kept from .env"
+        if port != default:
+            raise PortError(f"port {port} is busy (another program listens on "
+                            f"127.0.0.1:{port})")
+        note = f"{default} from .env is busy, "
+    elif ours:
         return ours, "published by this project's container"
-    if is_free(default):
+    elif is_free(default):
         return default, "default, free"
+    else:
+        note = f"{default} is busy, "
     for port in fallbacks:
         if is_free(port):
-            return port, f"{default} is busy, first free fallback"
+            return port, f"{note}picked first free fallback {port}"
     raise NoFreePort(f"{default} and fallbacks {fallbacks[0]}..{fallbacks[-1]} are all busy")
 
 
@@ -173,7 +201,10 @@ def set_keys(text: str, updates: Mapping[str, str], newline: str) -> str:
         match = _KEY_LINE.match(line.rstrip("\r\n"))
         if match and match.group(1) in updates:
             ending = line[len(line.rstrip("\r\n")):]
-            lines[i] = f"{match.group(1)}={updates[match.group(1)]}{ending}"
+            # хвостовой комментарий («POSTGRES_PORT=5434  # порт хоста») сохраняется
+            comment = re.search(r"\s+#.*$", match.group(2))
+            tail = comment.group(0) if comment and match.group(2).strip()[:1] not in "\"'" else ""
+            lines[i] = f"{match.group(1)}={updates[match.group(1)]}{tail}{ending}"
             pending.pop(match.group(1), None)
     out = "".join(lines)
     if pending:
@@ -213,7 +244,12 @@ def main(argv: Optional[list[str]] = None, *,
         print(f"ERROR: {path} not found - create it from .env.example first", file=sys.stderr)
         return 2
 
-    raw = path.read_bytes().decode("utf-8")
+    try:
+        raw = path.read_bytes().decode("utf-8")
+    except UnicodeDecodeError:
+        print(f"ERROR: {path.name} is not UTF-8 text - save it as UTF-8 and rerun",
+              file=sys.stderr)
+        return 2
     has_bom = raw.startswith(BOM)
     text = raw[1:] if has_bom else raw
     newline = "\r\n" if "\r\n" in text else "\n"
@@ -224,24 +260,32 @@ def main(argv: Optional[list[str]] = None, *,
     ours = own_ports()
 
     updates: dict[str, str] = {}
-    try:
-        for key, (default, fallbacks) in PORTS.items():
+    for key, (default, fallbacks) in PORTS.items():
+        try:
             port, why = choose_port(env.get(key, ""), default, fallbacks, is_free, ours.get(key))
-            updates[key] = str(port)
-            print(f"  {key}={port}  ({why})")
-    except NoFreePort as exc:
-        print(f"ERROR: no free port: {exc}", file=sys.stderr)
-        return 1
+        except PortError as exc:
+            print(f"ERROR: {key} in {path.name}: {exc}. Change it, or clear the value "
+                  f"({key}=) to let the installer pick a free port.", file=sys.stderr)
+            return 1
+        except NoFreePort as exc:
+            print(f"ERROR: {key}: no free port: {exc}", file=sys.stderr)
+            return 1
+        updates[key] = str(port)
+        print(f"  {key}={port}  ({why})")
 
     merged = {**env, **updates}
     for key, builder, label in (("DATABASE_URL", build_database_url, "POSTGRES_*"),
                                 ("RABBITMQ_URL", build_rabbitmq_url, "RABBITMQ_DEFAULT_*")):
         current = env.get(key, "")
         if current and not _is_local(current):
-            print(f"  {key}: points to another host - kept as is")
+            print(f"  {key}: not a localhost TCP address - kept as is")
             continue
         updates[key] = builder(merged)
-        print(f"  {key} -> {_hostport(updates[key])}  (credentials from {label})")
+        note = f"credentials from {label}"
+        if current and current != updates[key]:
+            # Только host:port: в старом URL могут быть чужие учётные данные.
+            note += f"; replaced, was different ({_hostport(current)})"
+        print(f"  {key} -> {_hostport(updates[key])}  ({note})")
 
     if args.dry_run:
         print("  dry run: .env not changed")

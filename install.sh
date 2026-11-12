@@ -13,7 +13,7 @@
 #   CUSTOM_LLM_MODEL, CUSTOM_LLM_API_KEY, OLLAMA_BASE_URL,
 #   RX_ODATA_URL, RX_USER, RX_PASSWORD, PORT
 
-set -uo pipefail
+set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")"
 
 TORCH_FLAVOUR=cpu
@@ -99,15 +99,15 @@ case "$LLM_PROVIDER" in
         ask ARIO_BASE_URL "ARIO_BASE_URL" "https://llm.ario.directum360.ru/v1"
         ask ARIO_API_KEY  "ARIO_API_KEY (Enter — оставить как есть)" ""
         set_env_key ARIO_BASE_URL "$ARIO_BASE_URL"
-        [ -n "${ARIO_API_KEY:-}" ] && set_env_key ARIO_API_KEY "$ARIO_API_KEY"
+        if [ -n "${ARIO_API_KEY:-}" ]; then set_env_key ARIO_API_KEY "$ARIO_API_KEY"; fi
         ;;
     custom)
         ask CUSTOM_LLM_BASE_URL "Адрес endpoint (например http://10.0.0.5:8000/v1)" ""
         ask CUSTOM_LLM_MODEL    "Имя модели, как её отдаёт сервер" ""
         ask CUSTOM_LLM_API_KEY  "Ключ (Enter — без ключа)" ""
-        [ -n "${CUSTOM_LLM_BASE_URL:-}" ] && set_env_key CUSTOM_LLM_BASE_URL "$CUSTOM_LLM_BASE_URL"
-        [ -n "${CUSTOM_LLM_MODEL:-}" ]    && set_env_key CUSTOM_LLM_MODEL "$CUSTOM_LLM_MODEL"
-        [ -n "${CUSTOM_LLM_API_KEY:-}" ]  && set_env_key CUSTOM_LLM_API_KEY "$CUSTOM_LLM_API_KEY"
+        if [ -n "${CUSTOM_LLM_BASE_URL:-}" ]; then set_env_key CUSTOM_LLM_BASE_URL "$CUSTOM_LLM_BASE_URL"; fi
+        if [ -n "${CUSTOM_LLM_MODEL:-}" ]; then set_env_key CUSTOM_LLM_MODEL "$CUSTOM_LLM_MODEL"; fi
+        if [ -n "${CUSTOM_LLM_API_KEY:-}" ]; then set_env_key CUSTOM_LLM_API_KEY "$CUSTOM_LLM_API_KEY"; fi
         ;;
     ollama)
         ask OLLAMA_BASE_URL "OLLAMA_BASE_URL" "http://localhost:11434/v1"
@@ -115,11 +115,11 @@ case "$LLM_PROVIDER" in
         ;;
     groq)
         ask GROQ_API_KEY "GROQ_API_KEY (gsk_...)" ""
-        [ -n "${GROQ_API_KEY:-}" ] && set_env_key GROQ_API_KEY "$GROQ_API_KEY"
+        if [ -n "${GROQ_API_KEY:-}" ]; then set_env_key GROQ_API_KEY "$GROQ_API_KEY"; fi
         ;;
     gemini)
         ask GEMINI_API_KEY "GEMINI_API_KEY" ""
-        [ -n "${GEMINI_API_KEY:-}" ] && set_env_key GEMINI_API_KEY "$GEMINI_API_KEY"
+        if [ -n "${GEMINI_API_KEY:-}" ]; then set_env_key GEMINI_API_KEY "$GEMINI_API_KEY"; fi
         ;;
 esac
 
@@ -130,15 +130,15 @@ printf '   Если RX присылает текст обращения в за�
 ask RX_ODATA_URL "RX OData URL" ""
 ask RX_USER      "RX пользователь" ""
 ask RX_PASSWORD  "RX пароль" ""
-[ -n "${RX_ODATA_URL:-}" ] && set_env_key RX_ODATA_URL "$RX_ODATA_URL"
-[ -n "${RX_USER:-}" ]      && set_env_key RX_USER "$RX_USER"
+if [ -n "${RX_ODATA_URL:-}" ]; then set_env_key RX_ODATA_URL "$RX_ODATA_URL"; fi
+if [ -n "${RX_USER:-}" ]; then set_env_key RX_USER "$RX_USER"; fi
 if [ -n "${RX_PASSWORD:-}" ]; then
     set_env_key RX_PASSWORD "$RX_PASSWORD"
 else
     warn "пароль RX пуст — вызовы по document_id вернут 502"
 fi
 
-chmod 600 "$ENV_FILE" 2>/dev/null && ok ".env закрыт правами 600 (в нём ключи)"
+if chmod 600 "$ENV_FILE" 2>/dev/null; then ok ".env закрыт правами 600 (в нём ключи)"; fi
 
 # ── 5. Векторная база ─────────────────────────────────────────────────────────
 step "5/7" "Векторы для переноса в PostgreSQL"

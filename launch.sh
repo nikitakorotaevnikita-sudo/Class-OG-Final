@@ -8,7 +8,7 @@
 #   ./launch.sh operator        режим оператора (верификация)
 #   ./launch.sh classify        разовая классификация из консоли
 
-set -uo pipefail
+set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")"
 
 # shellcheck source=scripts/install_common.sh

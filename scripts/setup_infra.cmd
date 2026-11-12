@@ -26,8 +26,8 @@ set "MODE=%~1"
 
 "%PY%" scripts\setup_infra_env.py
 if errorlevel 1 (
-    echo    WARNING: host ports were not chosen - set POSTGRES_PORT, RABBITMQ_PORT,
-    echo             RABBITMQ_MGMT_PORT in .env by hand.
+    echo    WARNING: host ports were not chosen - see the error above, fix
+    echo             POSTGRES_PORT / RABBITMQ_PORT / RABBITMQ_MGMT_PORT in .env and rerun.
     exit /b 1
 )
 

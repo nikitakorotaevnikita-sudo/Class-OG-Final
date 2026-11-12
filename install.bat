@@ -284,3 +284,5 @@ echo   Full stack in Docker: start.cmd
 echo =====================================================
 echo.
 pause
+:: Same as install_offline.bat: nonzero when the infrastructure step failed.
+exit /b !INFRA_FAILED!

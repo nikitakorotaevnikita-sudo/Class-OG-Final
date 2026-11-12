@@ -274,22 +274,6 @@ def test_env_example_declares_key_once(key):
     assert len(re.findall(rf"^{key}=", text, re.MULTILINE)) == 1, key
 
 
-def test_docker_compose_config_is_valid():
-    if DOCKER is None:
-        pytest.skip("docker CLI недоступен")
-    if not (ROOT / ".env").exists():
-        pytest.skip("нет .env — compose требует его для env_file")
-    proc = subprocess.run([DOCKER, "compose", "config", "-q"], cwd=str(ROOT),
-                          capture_output=True, text=True, encoding="utf-8", errors="replace")
-    if proc.returncode != 0 and "is not a docker command" in proc.stderr:
-        pytest.skip("нет плагина docker compose")
-    assert proc.returncode == 0, proc.stderr
-    proc = subprocess.run([DOCKER, "compose", "--profile", "training", "config", "-q"],
-                          cwd=str(ROOT), capture_output=True, text=True,
-                          encoding="utf-8", errors="replace")
-    assert proc.returncode == 0, proc.stderr
-
-
 # ── Компоновка без .env и мелочи start/stop (follow-up WP2) ─────────────────
 
 def test_docker_compose_config_is_valid_with_env_example(tmp_path):
@@ -425,3 +409,5 @@ def test_bat_installers_run_setup_infra(name, arg):
         assert 'setup_infra.cmd" offline' not in text
     # после настройки .env
     assert text.index("LLM_PROVIDER") < text.index(call)
+    # код выхода — неуспех шага инфраструктуры (оба установщика одинаково)
+    assert "\nexit /b !INFRA_FAILED!\n" in text
