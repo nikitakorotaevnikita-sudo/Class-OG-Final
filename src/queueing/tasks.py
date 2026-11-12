@@ -107,6 +107,20 @@ class _NotOwned(Exception):
     """Задачей владеет другая попытка (повторная доставка) — результат отбрасывается."""
 
 
+def _run_claimed(msg: dict, storage, body) -> None:
+    """Общий пролог и эпилог задач: claim → body(job) → webhook.
+
+    body возвращает, перешла ли задача в конечный статус сейчас (для webhook),
+    или None — попытка больше не владеет задачей, webhook не нужен.
+    """
+    job = _claim(storage, msg["job_id"])
+    if job is None:
+        return
+    transitioned = body(job)
+    if transitioned is not None:
+        _notify_webhook(storage, job, transitioned)
+
+
 def _run(msg: dict, storage, work) -> None:
     """Общий каркас: claim → work(job, conn) в транзакции → finish → webhook.
 
@@ -118,32 +132,31 @@ def _run(msg: dict, storage, work) -> None:
     воркеру (обрыв соединения с RabbitMQ), устаревшая попытка откатывает свою
     транзакцию и ничего не пишет: ни карточку, ни статус, ни webhook.
     """
-    job_id = msg["job_id"]
-    job = _claim(storage, job_id)
-    if job is None:
-        return
+    def body(job) -> Optional[bool]:
+        job_id = job.id
+        try:
+            with storage.transaction() as conn:
+                if not storage.jobs.lock_owned(job_id, job.attempts, conn=conn):
+                    raise _NotOwned
+                result = work(job, conn)
+                transitioned = storage.jobs.finish(job_id, result=result, error=None,
+                                                   conn=conn, attempts=job.attempts)
+                if not transitioned:
+                    raise _NotOwned  # откат карточки этой попытки
+            return transitioned
+        except _NotOwned:
+            log.warning("Задача %s: попытка %d больше не владеет задачей "
+                        "(повторная доставка); результат отброшен", job_id, job.attempts)
+            return None
+        except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, INFRA_ERRORS) and job.attempts < config.JOB_MAX_ATTEMPTS:
+                log.warning("Задача %s: сбой инфраструктуры (попытка %d/%d): %s",
+                            job_id, job.attempts, config.JOB_MAX_ATTEMPTS, exc)
+                raise RetryableError(_error_text(exc)) from exc
+            log.exception("Задача %s завершилась с ошибкой", job_id)
+            return _finish_error(storage, job_id, _error_text(exc), attempts=job.attempts)
 
-    try:
-        with storage.transaction() as conn:
-            if not storage.jobs.lock_owned(job_id, job.attempts, conn=conn):
-                raise _NotOwned
-            result = work(job, conn)
-            transitioned = storage.jobs.finish(job_id, result=result, error=None, conn=conn,
-                                               attempts=job.attempts)
-            if not transitioned:
-                raise _NotOwned  # откат карточки этой попытки
-    except _NotOwned:
-        log.warning("Задача %s: попытка %d больше не владеет задачей "
-                    "(повторная доставка); результат отброшен", job_id, job.attempts)
-        return
-    except Exception as exc:  # noqa: BLE001
-        if isinstance(exc, INFRA_ERRORS) and job.attempts < config.JOB_MAX_ATTEMPTS:
-            log.warning("Задача %s: сбой инфраструктуры (попытка %d/%d): %s",
-                        job_id, job.attempts, config.JOB_MAX_ATTEMPTS, exc)
-            raise RetryableError(_error_text(exc)) from exc
-        log.exception("Задача %s завершилась с ошибкой", job_id)
-        transitioned = _finish_error(storage, job_id, _error_text(exc), attempts=job.attempts)
-    _notify_webhook(storage, job, transitioned)
+    _run_claimed(msg, storage, body)
 
 
 class JobDataError(Exception):
@@ -201,30 +214,29 @@ def run_embed_annotation(msg: dict, storage, agent) -> None:
 
 
 def run_finetune(msg: dict, storage) -> None:
-    job_id = msg["job_id"]
-    job = _claim(storage, job_id)
-    if job is None:
-        return
-    payload = job.payload or {}
-    try:
-        from finetune_model import run_training  # Task 11; тяжёлый импорт — лениво
+    """Дообучение идёт вне транзакции (долго); повторов при сбое нет."""
 
-        status = run_training(storage, source=payload.get("source", "combined"),
-                              force=payload.get("force", False))
-    except Exception as exc:  # noqa: BLE001 — дообучение не повторяется автоматически
-        log.exception("Дообучение (задача %s) упало", job_id)
-        transitioned = _finish_error(storage, job_id, _error_text(exc), attempts=job.attempts)
-    else:
+    def body(job) -> bool:
+        payload = job.payload or {}
+        try:
+            from finetune_model import run_training  # тяжёлый импорт — лениво
+
+            status = run_training(storage, source=payload.get("source", "combined"),
+                                  force=payload.get("force", False))
+        except Exception as exc:  # noqa: BLE001 — дообучение не повторяется автоматически
+            log.exception("Дообучение (задача %s) упало", job.id)
+            return _finish_error(storage, job.id, _error_text(exc), attempts=job.attempts)
         error: Optional[str] = None
         if isinstance(status, dict) and status.get("status") == "failed":
             error = str(status.get("message") or "дообучение не удалось")
         try:
             with storage.transaction() as conn:
-                transitioned = storage.jobs.finish(job_id, result=status, error=error,
-                                                   conn=conn, attempts=job.attempts)
+                return storage.jobs.finish(job.id, result=status, error=error,
+                                           conn=conn, attempts=job.attempts)
         except INFRA_ERRORS as exc:
             raise RetryableError(_error_text(exc)) from exc
-    _notify_webhook(storage, job, transitioned)
+
+    _run_claimed(msg, storage, body)
 
 
 # ── Celery-обёртки ───────────────────────────────────────────────────────────
@@ -242,11 +254,8 @@ def fail_without_agent(msg: dict, storage, exc: BaseException) -> None:
     кэшируется (worker_main.get_agent), следующая задача попробует снова.
     """
     log.error("Задача %s: агент не создан: %s", msg.get("job_id"), exc)
-    job = _claim(storage, msg["job_id"])
-    if job is None:
-        return
-    transitioned = _finish_error(storage, job.id, _error_text(exc), attempts=job.attempts)
-    _notify_webhook(storage, job, transitioned)
+    _run_claimed(msg, storage, lambda job: _finish_error(
+        storage, job.id, _error_text(exc), attempts=job.attempts))
 
 
 def _retry_countdown(retries: int) -> int:

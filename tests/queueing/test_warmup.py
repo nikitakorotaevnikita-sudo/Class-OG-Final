@@ -112,7 +112,7 @@ def test_tasks_module_wires_warmup_without_loading_the_model():
         "import sys; sys.path.insert(0, 'src')\n"
         "import queueing.tasks\n"
         "bad = [m for m in ('worker_main', 'classifier_agent', 'torch', "
-        "'sentence_transformers') if m in sys.modules]\n"
+        "'sentence_transformers', 'finetune_model') if m in sys.modules]\n"
         "print('WIRED' if 'queueing.warmup' in sys.modules else 'NOT_WIRED', bad)\n"
         "sys.exit(1 if bad else 0)\n"
     )
