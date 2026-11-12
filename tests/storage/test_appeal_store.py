@@ -317,3 +317,105 @@ def test_ip_addresses_per_card(storage):
     b = storage.appeals.create("b")
     got = storage.appeals.ip_addresses([a, b, UNKNOWN])
     assert got == {a: "10.0.0.1", b: None}
+
+
+# --- WP3: паритет memory/pg и общие хелперы ----------------------------------------------
+
+def test_as_log_entries_ties_ordered_by_id(storage):
+    """Одинаковый created_at: порядок по id в обоих бэкендах."""
+    when = datetime(2026, 5, 1, 12, 0, 0)
+    ids = [str(__import__("uuid").uuid4()) for _ in range(6)]
+    for aid in ids:
+        storage.appeals.create("t", appeal_id=aid, created_at=when)
+    assert [e["id"] for e in storage.appeals.as_log_entries()] == sorted(ids)
+
+
+def test_as_log_entries_filter_keeps_questions_of_selected_cards(storage):
+    a = classified(storage)
+    b = storage.appeals.create("b")
+    storage.appeals.save_result(b, result(questions=[q(1), q(2)]))
+    storage.appeals.set_verification(b, "confirmed", None, None)
+    [e] = storage.appeals.as_log_entries(("confirmed",))
+    assert e["id"] == b and len(e["agent_questions"]) == 2
+    assert storage.appeals.as_log_entries(("rejected",)) == []
+    assert {x["id"] for x in storage.appeals.as_log_entries(("pending",))} == {a}
+
+
+def test_duplicate_create_raises_duplicate_error(storage):
+    from storage.base import DuplicateError
+
+    storage.appeals.create("t", appeal_id=UNKNOWN)
+    with pytest.raises(DuplicateError):
+        storage.appeals.create("t2", appeal_id=UNKNOWN)
+    assert storage.appeals.get_text(UNKNOWN) == "t"
+
+
+def test_duplicate_error_is_value_error():
+    from storage.base import DuplicateError
+
+    assert issubclass(DuplicateError, ValueError)  # старые вызовы ловили ValueError
+
+
+def test_log_llm_request_unknown_or_bad_appeal_id_same_on_both(storage, request):
+    """llm_request_log.appeal_id без FK: неизвестный UUID пишется как есть, не-UUID -> NULL."""
+    storage.appeals.log_llm_request(UNKNOWN, True, 1, 1.0, 0.5, None, 3)
+    storage.appeals.log_llm_request("not-a-uuid", True, 1, 1.0, 0.5, None, 3)
+    if "pg_conn" in request.fixturenames:
+        rows = request.getfixturevalue("pg_conn").execute(
+            "SELECT appeal_id::text FROM llm_request_log ORDER BY id"
+        ).fetchall()
+        got = [r[0] for r in rows]
+    else:
+        got = [r["appeal_id"] for r in storage.appeals._llm_log]
+    assert got == [UNKNOWN, None]
+    assert storage.appeals.llm_log_count() == 2
+
+
+def test_set_request_meta_only_missing_keeps_live_values(storage):
+    aid = storage.appeals.create("t", ip_address="10.0.0.1")
+    storage.appeals.set_request_meta(aid, None, 2.0)
+    storage.appeals.set_request_meta(aid, "10.9.9.9", 7.0, only_missing=True)
+    assert storage.appeals.ip_addresses([aid]) == {aid: "10.0.0.1"}
+    b = storage.appeals.create("b")
+    storage.appeals.set_request_meta(b, "10.0.0.2", 3.0, only_missing=True)
+    assert storage.appeals.ip_addresses([b]) == {b: "10.0.0.2"}
+    assert storage.appeals.backoffice_stats()["ip_stats"] == [
+        {"ip": "10.0.0.1", "count": 1}, {"ip": "10.0.0.2", "count": 1}]
+
+
+def test_set_request_meta_only_missing_elapsed(storage, request):
+    aid = storage.appeals.create("t")
+    storage.appeals.set_request_meta(aid, None, 2.0)
+    storage.appeals.set_request_meta(aid, None, 7.0, only_missing=True)
+    if "pg_conn" in request.fixturenames:
+        got = request.getfixturevalue("pg_conn").execute(
+            "SELECT elapsed_seconds FROM appeal_classifications WHERE id = %s", (aid,)
+        ).fetchone()[0]
+    else:
+        got = storage.appeals._cards[aid]["elapsed_seconds"]
+    assert got == 2.0
+
+
+def test_backoffice_stats_mixed_statuses_and_repeated_codes(storage):
+    now = datetime.now()
+    a = storage.appeals.create("a", ip_address="10.0.0.3", created_at=now - timedelta(days=2))
+    storage.appeals.save_result(a, result(conf=0.35, questions=[q(1, CODE), q(2, CODE)]))
+    storage.appeals.set_verification(a, "corrected", [CODE], None)
+    b = storage.appeals.create("b", ip_address="10.0.0.3")
+    storage.appeals.save_result(b, result(conf=0.1, questions=[q(1, "0002.0002.0002.0002")]))
+    storage.appeals.set_verification(b, "confirmed", None, None)
+    c = storage.appeals.create("c", ip_address="10.0.0.1")
+    storage.appeals.save_result(c, result(conf=0.0, questions=[q(1, CODE)]))
+    storage.appeals.set_verification(c, "rejected", None, None)
+    old = storage.appeals.create("old", created_at=now - timedelta(days=100))
+    storage.appeals.save_result(old, result(conf=0.99, questions=[]))
+    r = storage.appeals.backoffice_stats(days=5)
+    assert r["total_classifications"] == 4
+    assert (r["confirmed"], r["corrected"], r["rejected"], r["pending"]) == (1, 1, 1, 1)
+    assert r["top_codes"] == [{"code": CODE, "count": 2},
+                              {"code": "0002.0002.0002.0002", "count": 1}]
+    assert r["ip_stats"] == [{"ip": "10.0.0.3", "count": 2}, {"ip": "10.0.0.1", "count": 1}]
+    h = r["confidence_histogram"]
+    assert (h["0.0-0.1"], h["0.1-0.2"], h["0.3-0.4"], h["0.9-1.0"]) == (1, 1, 1, 1)
+    assert r["avg_confidence"] == round((0.35 + 0.1 + 0.0 + 0.99) / 4, 2)
+    assert [d["count"] for d in r["daily_usage"]] == [0, 0, 1, 0, 2]

@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 import numpy as np
 
 from . import appeal_common as ac
+from .base import DuplicateError
 from .models import (STATUS_DONE, STATUS_ERROR, STATUS_QUEUED, STATUS_RUNNING,
                      ActiveJobExists, AppealResult, ClassifierEntry, Job, ModelVersion,
                      ModelVersionExists, QueueFull, Storage)
@@ -208,7 +209,7 @@ class MemoryAppealStore:
             raise ValueError(f"appeal_id не UUID: {appeal_id!r}")
         with self._lock:
             if aid in self._cards:
-                raise ValueError(f"обращение {aid} уже существует")
+                raise DuplicateError(f"обращение {aid} уже существует")
             self._cards[aid] = {
                 "id": aid,
                 "document_id": document_id,
@@ -261,52 +262,34 @@ class MemoryAppealStore:
 
     def as_log_entries(self, statuses=None):
         with self._lock:
-            cards = sorted(self._cards.values(), key=lambda c: c["created_at"])
+            cards = sorted(self._cards.values(),
+                           key=lambda c: (c["created_at"], c["id"]))  # как ORDER BY created_at, id
             out = []
             for c in cards:
                 v = c["verification"]
                 if statuses is not None and v["status"] not in statuses:
                     continue
                 r = c["result"]
-                questions = []
-                if r:
-                    for q in sorted(r.questions, key=lambda q: q.ordinal):
-                        questions.append({
-                            "question_text": q.question_text,
-                            "selected_code": q.selected_code,
-                            "confidence": q.confidence,
-                            "alternative_codes": list(q.alternative_codes),
-                        })
-                out.append({
-                    "id": c["id"],
-                    "timestamp": ac.local_iso(c["created_at"]),
-                    "appeal_text": c["appeal_text"],
-                    "candidates": copy.deepcopy(r.candidates) if r else [],
-                    "agent_questions": questions,
-                    "overall_confidence": (r.overall_confidence if r else None) or 0.0,
-                    "verification": {
-                        "status": v["status"],
-                        "verified_at": ac.local_iso(v["verified_at"]),
-                        "operator_codes": None if v["operator_codes"] is None
-                        else list(v["operator_codes"]),
-                        "comment": v["comment"],
-                    },
-                })
+                questions = [
+                    ac.question_entry(q.question_text, q.selected_code, q.confidence,
+                                      q.alternative_codes)
+                    for q in sorted(r.questions, key=lambda q: q.ordinal)
+                ] if r else []
+                out.append(ac.log_entry(
+                    c["id"], c["created_at"], c["appeal_text"],
+                    copy.deepcopy(r.candidates) if r else [],
+                    r.overall_confidence if r else None, questions,
+                    v["status"], v["verified_at"], v["operator_codes"], v["comment"],
+                ))
             return out
 
     def stats(self):
         with self._lock:
-            counts = {s: 0 for s in ac.STATUSES}
+            counts: dict[str, int] = {}
             for c in self._cards.values():
-                counts[c["verification"]["status"]] += 1
-            return {
-                "total": len(self._cards),
-                "verified": counts["confirmed"] + counts["corrected"],
-                "pending": counts["pending"],
-                "confirmed": counts["confirmed"],
-                "corrected": counts["corrected"],
-                "rejected": counts["rejected"],
-            }
+                s = c["verification"]["status"]
+                counts[s] = counts.get(s, 0) + 1
+            return ac.stats_payload(counts)
 
     def backoffice_stats(self, days=30):
         """Агрегаты для бэк-офиса.
@@ -344,23 +327,27 @@ class MemoryAppealStore:
 
     def log_llm_request(self, appeal_id, success, attempt, elapsed, confidence, error,
                         candidates_count, created_at=None):
+        # Как в PostgreSQL: у llm_request_log.appeal_id нет FK (журнал пишется и без
+        # карточки), не-UUID сохраняется как NULL.
         with self._lock:
             self._llm_log.append({
-                "appeal_id": appeal_id, "success": success, "attempt": attempt,
+                "appeal_id": ac.norm_uuid(appeal_id) if appeal_id else None, "success": success, "attempt": attempt,
                 "elapsed_seconds": elapsed, "confidence": confidence, "error": error,
                 "candidates_count": candidates_count,
                 "created_at": ac.aware(created_at) if created_at else ac.now_aware(),
             })
 
-    def set_request_meta(self, appeal_id, ip_address, elapsed_seconds):
+    def set_request_meta(self, appeal_id, ip_address, elapsed_seconds, only_missing=False):
+        """only_missing: заполнить только пустые поля (живые значения не перетираются)."""
         with self._lock:
             card = self._cards.get(ac.norm_uuid(appeal_id))
             if card is None:
                 return
             ip = ac.norm_ip(ip_address)
-            if ip is not None:
+            if ip is not None and not (only_missing and card["ip_address"] is not None):
                 card["ip_address"] = ip
-            if elapsed_seconds is not None:
+            if elapsed_seconds is not None and not (
+                    only_missing and card["elapsed_seconds"] is not None):
                 card["elapsed_seconds"] = elapsed_seconds
 
 

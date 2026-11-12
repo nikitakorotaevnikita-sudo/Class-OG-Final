@@ -13,6 +13,7 @@ from psycopg.types.json import Jsonb
 
 from . import appeal_common as ac
 from . import db
+from .base import DuplicateError
 from .models import (ActiveJobExists, ClassifierEntry, Job, ModelVersion, ModelVersionExists,
                      QueueFull, Storage)
 
@@ -276,12 +277,17 @@ class PgAppealStore(_PgBase):
             aid = str(uuid.uuid4())
         created = ac.aware(created_at) if created_at else ac.now_aware()
         with self._tx(conn) as c:
-            c.execute(
-                """INSERT INTO appeal_classifications
-                   (id, document_id, appeal_text, ip_address, created_at)
-                   VALUES (%s, %s, %s, %s::inet, %s)""",
-                (aid, document_id, appeal_text, ac.norm_ip(ip_address), created),
-            )
+            try:
+                # Точка сохранения: дубль не обрывает транзакцию вызывающего.
+                with c.transaction():
+                    c.execute(
+                        """INSERT INTO appeal_classifications
+                           (id, document_id, appeal_text, ip_address, created_at)
+                           VALUES (%s, %s, %s, %s::inet, %s)""",
+                        (aid, document_id, appeal_text, ac.norm_ip(ip_address), created),
+                    )
+            except psycopg.errors.UniqueViolation as exc:
+                raise DuplicateError(f"обращение {aid} уже существует") from exc
             c.execute(
                 "INSERT INTO appeal_verifications (appeal_id, status) VALUES (%s, 'pending')",
                 (aid,),
@@ -372,72 +378,76 @@ class PgAppealStore(_PgBase):
                 sql += " WHERE v.status = ANY(%s)"
                 params = (list(statuses),)
             rows = c.execute(sql + " ORDER BY a.created_at, a.id", params).fetchall()
+            # Вопросы только выбранных карточек (фильтр по статусам уже применён).
             qrows = c.execute(
                 """SELECT q.appeal_id, q.question_text, q.selected_code, q.confidence,
                           q.alternative_codes
-                   FROM appeal_questions q ORDER BY q.appeal_id, q.ordinal"""
+                   FROM appeal_questions q
+                   WHERE q.appeal_id = ANY(%s::uuid[])
+                   ORDER BY q.appeal_id, q.ordinal""",
+                ([r[0] for r in rows],),
             ).fetchall() if rows else []
         by_appeal: dict[str, list] = {}
         for aid, text, code, conf, alts in qrows:
-            by_appeal.setdefault(str(aid), []).append({
-                "question_text": text,
-                "selected_code": code,
-                "confidence": ac.real(conf),
-                "alternative_codes": alts or [],
-            })
-        out = []
-        for aid, created, text, cands, conf, status, vat, ops, comment in rows:
-            out.append({
-                "id": str(aid),
-                "timestamp": ac.local_iso(created),
-                "appeal_text": text,
-                "candidates": cands or [],
-                "agent_questions": by_appeal.get(str(aid), []),
-                "overall_confidence": ac.real(conf) or 0.0,
-                "verification": {
-                    "status": status,
-                    "verified_at": ac.local_iso(vat),
-                    "operator_codes": ops,
-                    "comment": comment,
-                },
-            })
-        return out
+            by_appeal.setdefault(str(aid), []).append(ac.question_entry(text, code, conf, alts))
+        return [
+            ac.log_entry(aid, created, text, cands, conf, by_appeal.get(str(aid), []),
+                         status, vat, ops, comment)
+            for aid, created, text, cands, conf, status, vat, ops, comment in rows
+        ]
 
     def stats(self, conn=None):
         with self._tx(conn) as c:
             rows = c.execute(
                 "SELECT status, count(*) FROM appeal_verifications GROUP BY status"
             ).fetchall()
-        counts = {s: 0 for s in ac.STATUSES}
-        counts.update({s: n for s, n in rows})
-        return {
-            "total": sum(counts.values()),
-            "verified": counts["confirmed"] + counts["corrected"],
-            "pending": counts["pending"],
-            "confirmed": counts["confirmed"],
-            "corrected": counts["corrected"],
-            "rejected": counts["rejected"],
-        }
+        return ac.stats_payload(dict(rows))
 
     def backoffice_stats(self, days=30, conn=None):
-        """Агрегаты для бэк-офиса.
+        """Агрегаты для бэк-офиса (считаются в SQL, карточки целиком не читаются).
 
         Карточки с NULL overall_confidence (ещё не классифицированы) входят в
         total_classifications и в статусы, но не в гистограмму и не в avg_confidence.
         top_codes считаются только по confirmed/corrected; ip_stats - только по
-        карточкам с известным ip (NULL исключается).
+        карточкам с известным ip (NULL исключается). daily_usage - по created_at
+        карточек за окно (группировка по локальной дате процесса, как в memory).
         """
+        real_conf = ac.REAL_SQL.format(col="overall_confidence")
+        hist_idx = ac.HIST_INDEX_SQL.format(col="overall_confidence")
         with self._tx(conn) as c:
-            rows = c.execute(
-                """SELECT a.created_at, a.overall_confidence, v.status, host(a.ip_address),
-                          coalesce(array_agg(q.selected_code)
-                                   FILTER (WHERE q.selected_code IS NOT NULL), '{}')
-                   FROM appeal_classifications a
-                   JOIN appeal_verifications v ON v.appeal_id = a.id
-                   LEFT JOIN appeal_questions q ON q.appeal_id = a.id
-                   GROUP BY a.id, v.status"""
-            ).fetchall()
-        return ac.compute_backoffice_stats(rows, days)
+            status_counts = dict(c.execute(
+                "SELECT status, count(*) FROM appeal_verifications GROUP BY status"
+            ).fetchall())
+            # sum в float8: та же арифметика, что сумма float в memory (граница округления)
+            conf_sum, conf_n = c.execute(
+                f"""SELECT coalesce(sum({real_conf}::float8), 0), count(overall_confidence)
+                    FROM appeal_classifications"""
+            ).fetchone()
+            hist_counts = dict(c.execute(
+                f"""SELECT {hist_idx}, count(*) FROM appeal_classifications
+                    WHERE overall_confidence IS NOT NULL GROUP BY 1"""
+            ).fetchall())
+            code_counts = dict(c.execute(
+                """SELECT q.selected_code, count(*)
+                   FROM appeal_questions q
+                   JOIN appeal_verifications v ON v.appeal_id = q.appeal_id
+                   WHERE v.status IN ('confirmed', 'corrected')
+                     AND q.selected_code IS NOT NULL AND q.selected_code <> ''
+                   GROUP BY q.selected_code"""
+            ).fetchall())
+            ip_counts = dict(c.execute(
+                """SELECT host(ip_address), count(*) FROM appeal_classifications
+                   WHERE ip_address IS NOT NULL GROUP BY 1"""
+            ).fetchall())
+            recent = [r[0] for r in c.execute(
+                "SELECT created_at FROM appeal_classifications WHERE created_at >= %s",
+                (ac.window_start(days),),
+            ).fetchall()]
+        return ac.backoffice_payload(
+            status_counts=status_counts, conf_sum=conf_sum, conf_n=conf_n,
+            hist_counts=hist_counts, code_counts=code_counts, ip_counts=ip_counts,
+            recent_created=recent, days=days,
+        )
 
     def log_llm_request(self, appeal_id, success, attempt, elapsed, confidence, error,
                         candidates_count, created_at=None, conn=None):
@@ -466,16 +476,21 @@ class PgAppealStore(_PgBase):
         with self._tx(conn) as c:
             return c.execute("SELECT count(*) FROM llm_request_log").fetchone()[0]
 
-    def set_request_meta(self, appeal_id, ip_address, elapsed_seconds, conn=None):
+    def set_request_meta(self, appeal_id, ip_address, elapsed_seconds, only_missing=False,
+                         conn=None):
+        """only_missing: заполнить только пустые поля (живые значения не перетираются)."""
         aid = ac.norm_uuid(appeal_id)
         if aid is None:
             return
+        if only_missing:
+            sets = ("coalesce(ip_address, %s::inet)", "coalesce(elapsed_seconds, %s)")
+        else:
+            sets = ("coalesce(%s::inet, ip_address)", "coalesce(%s, elapsed_seconds)")
         with self._tx(conn) as c:
             c.execute(
-                """UPDATE appeal_classifications
-                   SET ip_address = coalesce(%s::inet, ip_address),
-                       elapsed_seconds = coalesce(%s, elapsed_seconds)
-                   WHERE id = %s""",
+                f"""UPDATE appeal_classifications
+                    SET ip_address = {sets[0]}, elapsed_seconds = {sets[1]}
+                    WHERE id = %s""",
                 (ac.norm_ip(ip_address), elapsed_seconds, aid),
             )
 

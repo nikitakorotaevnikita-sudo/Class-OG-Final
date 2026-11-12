@@ -11,6 +11,13 @@ from datetime import datetime
 from .models import AppealResult, ClassifierEntry, Job, ModelVersion
 
 
+class DuplicateError(ValueError):
+    """Запись с таким ключом уже есть (memory и PostgreSQL бросают одинаково).
+
+    Наследует ValueError: прежние вызовы, ловившие ValueError, работают как раньше.
+    """
+
+
 class ClassifierStore(Protocol):
     def upsert_entries(self, entries: list[ClassifierEntry]) -> int: ...
     def load_entries(self) -> list[ClassifierEntry]: ...
@@ -80,7 +87,8 @@ class AppealStore(Protocol):
     def ip_addresses(self, appeal_ids: list[str]) -> dict[str, Optional[str]]: ...
     def llm_log_count(self) -> int: ...
     def set_request_meta(
-        self, appeal_id: str, ip_address: Optional[str], elapsed_seconds: Optional[float]
+        self, appeal_id: str, ip_address: Optional[str], elapsed_seconds: Optional[float],
+        only_missing: bool = False,
     ) -> None: ...
 
 
