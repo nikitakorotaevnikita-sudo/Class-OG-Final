@@ -527,7 +527,7 @@ Directum RX / UI ──HTTP──► API (FastAPI, без модели)
 | `start.cmd` / `./start.sh` | весь стек в Docker: `docker compose up -d --build`, затем ожидание `GET /health` (до 2 минут) |
 | `start.cmd --training` | то же + воркер дообучения |
 | `start.cmd local` / `./start.sh local` | PostgreSQL и RabbitMQ в Docker, миграция, затем API и воркеры из `venv`. Windows: отдельные окна `classifier-api`, `classifier-worker-N` (пул `solo`, `CLASSIFY_WORKERS` процессов). Linux: фоновые процессы, pid и логи в `run/` |
-| `start.cmd local --port 9100` | локальный режим на другом порту (иначе `API_PORT` из `.env`) |
+| `start.cmd local --port 9100` | локальный режим на другом порту (иначе `API_PORT` из `.env`). В режиме docker `--port` не действует (предупреждение): порт там задаёт `HOST_PORT` |
 | `start.cmd migrate` | только схема + импорт файлов (БД должна быть запущена) |
 | `stop.cmd` / `./stop.sh` | `docker compose down` — контейнеры удаляются, **том `pgdata` остаётся** |
 | `stop.cmd local` / `./stop.sh local` | Windows: завершить процессы `python.exe` этого проекта (API и воркеры Celery — по командной строке и пути к интерпретатору, в том числе из консоли администратора), затем закрыть оставшиеся окна `classifier-*`; Linux: процессы из `run/*.pid`. Затем остановить PostgreSQL и RabbitMQ |
@@ -535,6 +535,16 @@ Directum RX / UI ──HTTP──► API (FastAPI, без модели)
 Если `.env` нет, скрипт создаёт его из `.env.example` и предупреждает: заполнить ключи LLM и
 пароли до первого запуска (пароль PostgreSQL запоминается томом при его создании).
 `launch.bat server` / `./launch.sh server` теперь вызывают `start.* local`.
+
+**Docker-стек и локальный режим одновременно не работают на одном порту:** `api` из
+`start.cmd` / `./start.sh` публикует `HOST_PORT` (8010), а `start.* local` поднимает API на
+`API_PORT` (тоже 8010). Если порт занят, `start.* local` останавливается с ошибкой до запуска API —
+сначала `stop.cmd` / `./stop.sh` (или `start.* local --port N`). Шаги выводятся как `[1/4]`…`[4/4]`
+(local) и `[1/2]`, `[2/2]` (migrate).
+
+`./stop.sh local` и повторный `./start.sh local` проверяют командную строку процесса из
+`run/*.pid`: после перезагрузки номер может достаться чужому процессу — его не трогают, а
+устаревший pid-файл удаляется.
 
 **Скрипты остановки никогда не удаляют том `pgdata`** (в нём тексты обращений — персональные
 данные по 59-ФЗ). Удалить его можно только вручную (`docker volume rm`) и только после выгрузки данных.
@@ -557,13 +567,25 @@ Directum RX / UI ──HTTP──► API (FastAPI, без модели)
 
 ### Эксплуатация
 
-- **Порты заняты родными PostgreSQL/RabbitMQ.** Если на хосте уже работают свои PostgreSQL (5432) или RabbitMQ (5672/15672), задать в `.env` другие `POSTGRES_PORT` / `RABBITMQ_PORT` / `RABBITMQ_MGMT_PORT` (например 5434 / 5673 / 15673) и те же порты в `DATABASE_URL` / `RABBITMQ_URL` — иначе локальный режим подключится к чужим серверам.
-- **Адреса БД и брокера в `start.* local` / `start.* migrate`.** Если `DATABASE_URL` / `RABBITMQ_URL`
-  не заданы ни в окружении, ни в `.env`, скрипт собирает их из `POSTGRES_USER/PASSWORD/DB` +
+- **Порты заняты родными PostgreSQL/RabbitMQ.** Установщик выбирает порты сам
+  (`scripts/setup_infra_env.py`, см. «Быстрый старт»): если на хосте уже работают свои PostgreSQL
+  (5432) или RabbitMQ (5672/15672), в `.env` попадут первые свободные из 5434, 5435, … / 5673, … /
+  15673, … вместе с `DATABASE_URL` / `RABBITMQ_URL` на эти порты. Вручную — задать в `.env`
+  `POSTGRES_PORT` / `RABBITMQ_PORT` / `RABBITMQ_MGMT_PORT` и те же порты в `DATABASE_URL` /
+  `RABBITMQ_URL` (или оставить URL пустыми — они соберутся из портов), иначе локальный режим
+  подключится к чужим серверам. Повторный запуск помощника на любом `.env` безопасен:
+  `venv\Scripts\python.exe scripts\setup_infra_env.py [--dry-run]`.
+- **Адреса БД и брокера.** Если `DATABASE_URL` / `RABBITMQ_URL` не заданы (или пусты) ни в
+  окружении, ни в `.env`, и `start.* local` / `start.* migrate`, и `config.py` (а значит
+  `launch check`, `operator_cli`, `test_agent`) собирают их из `POSTGRES_USER/PASSWORD/DB` +
   `localhost` + `POSTGRES_PORT` (по умолчанию 5432) и из `RABBITMQ_DEFAULT_USER/PASS` +
   `RABBITMQ_PORT` (5672). Если они заданы, но порт в URL не совпадает с `POSTGRES_PORT` /
-  `RABBITMQ_PORT`, скрипт останавливается с ошибкой. Перед запуском печатаются используемые
+  `RABBITMQ_PORT`, start-скрипт останавливается с ошибкой. Перед запуском печатаются используемые
   `хост:порт` (пароли — никогда).
+- **Пароли с `@ / : #`.** `config.py` и установщик экранируют учётные данные в собранных
+  `DATABASE_URL` / `RABBITMQ_URL` (`%40` и т. п.). Но внутри docker compose (адреса сервисов
+  `postgres` / `rabbitmq`) и в URL, которые собирают сами `start.*`, пароль подставляется как есть —
+  поэтому надёжнее пароли без этих символов.
 - **Готовность после запуска.** `GET /health` всегда отвечает `200`, поэтому `start.*` ждут в теле
   `"db":true` и `"broker":true`; если за 120 с этого нет, сообщают, что недоступно — БД или брокер.
 - **Долгие задачи и RabbitMQ.** Задачи подтверждаются после выполнения (`acks_late`), а
@@ -624,8 +646,8 @@ Directum RX / UI ──HTTP──► API (FastAPI, без модели)
 - PostgreSQL и RabbitMQ остаются общими (одна машина или отдельные серверы). По умолчанию compose
   публикует их только на `127.0.0.1` (`POSTGRES_BIND`, `RABBITMQ_BIND`); для доступа с других хостов
   задать `0.0.0.0` (или адрес нужного интерфейса) — **только после смены** `POSTGRES_PASSWORD` и
-  `RABBITMQ_DEFAULT_PASS` и, желательно, с ограничением доступа файрволом. Пароли без символов
-  `@ / :` — они подставляются в `DATABASE_URL`/`RABBITMQ_URL` без экранирования;
+  `RABBITMQ_DEFAULT_PASS` и, желательно, с ограничением доступа файрволом. Пароли лучше без
+  символов `@ / : #` (см. «Эксплуатация»);
 - на каждом хосте воркера — свой `.env`, в котором `DATABASE_URL` и `RABBITMQ_URL` указывают на
   общие сервисы (не на `localhost`);
 - каталог `models/` — общая сетевая папка (NFS/SMB), смонтированная на всех хостах по одному
@@ -662,10 +684,24 @@ Directum RX / UI ──HTTP──► API (FastAPI, без модели)
 2. Создаст виртуальное окружение (`venv`)
 3. Установит зависимости
 4. **Спросит провайдера LLM** и ключ именно к нему — всё сохранит в `.env`
-5. Построит векторную базу (~5–15 минут при первом запуске)
+5. Проверит файлы векторной базы (источник переноса в PostgreSQL)
+6. **Поднимет инфраструктуру** (нужен запущенный Docker Desktop):
+   - выберет порты хоста для PostgreSQL / RabbitMQ / веб-консоли RabbitMQ и запишет их в `.env`
+     вместе с `DATABASE_URL` / `RABBITMQ_URL`. Уже заданные в `.env` порты не меняются; иначе
+     берётся 5432 / 5672 / 15672, а если порт занят (например, «родным» PostgreSQL) — первый
+     свободный из 5434, 5435, … / 5673, … / 15673, …; порт, который держит контейнер этого же
+     проекта, считается своим;
+   - `docker compose up -d --wait postgres rabbitmq` — ждёт healthcheck;
+   - `start.cmd migrate` — схема и перенос данных (повторная установка: отметка в БД, код 0).
+
+   Docker не установлен или не запущен — установка всё равно завершается, с подсказкой выполнить
+   `start.cmd migrate` позже (или сразу `launch.bat server`: `start.cmd local` поднимет
+   PostgreSQL и RabbitMQ сам).
+
+После этого `launch.bat` → `[1]` (или `launch.bat server`) запускает API и воркеры без ручных правок.
 
 ```
-[4/5] Checking .env configuration...
+[4/6] Checking .env configuration...
    Select LLM provider:
      [1] Gemini   [2] Ollama   [3] Ario   [4] Groq
 
@@ -680,7 +716,10 @@ Directum RX / UI ──HTTP──► API (FastAPI, без модели)
 > задаётся строкой `LLM_PROVIDER=custom` в `.env` либо в бэк-офисе. В `install.sh` на Linux
 > выбор `custom` есть, вместе с запросом адреса endpoint.
 
-На Linux то же самое делают `./install.sh` и `./install_offline.sh` (стенд без интернета).
+На Linux то же самое делают `./install.sh` и `./install_offline.sh` (стенд без интернета), затем
+`./launch.sh server`. Офлайн-установщики (`install_offline.*`) образы не скачивают: если
+`pgvector/pgvector:pg16` и `rabbitmq:3.13-management` не загружены, печатают, как перенести их
+(`docker save` на машине с интернетом → `docker load -i infra-images.tar`), и пропускают шаг.
 По умолчанию ставится CPU-сборка torch — около 200 МБ вместо 2.5 ГБ с CUDA, бесполезных на
 сервере без видеокарты; для машины с GPU есть флаг `--gpu`. Подробности —
 [DEPLOY.md](docs/DEPLOY.md) и [OFFLINE-INSTALL.md](docs/OFFLINE-INSTALL.md).
@@ -727,7 +766,9 @@ stop.cmd               :: остановить (том с данными сох�
 
 Установщики (`install.bat`, `setup.ps1`, `install.sh`, `install_offline.*`) векторную базу больше
 не строят: векторы переносятся в PostgreSQL из файлов `VECTOR_DB_DIR` командой `start.cmd migrate` /
-`./start.sh migrate` (`start.* local` делает это сам, в Docker — сервис `migrate`).
+`./start.sh migrate` (её вызывают `install.bat`, `install.sh`, `install_offline.*` на последнем шаге;
+`start.* local` делает это сам, в Docker — сервис `migrate`). `setup.ps1` шаг инфраструктуры не
+выполняет — после него `start.cmd migrate` или сразу `launch.bat server`.
 
 ---
 

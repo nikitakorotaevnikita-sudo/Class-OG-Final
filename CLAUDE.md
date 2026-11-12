@@ -11,6 +11,12 @@ AI agent that classifies Russian citizen appeals (обращения гражд�
 All commands run from the **project root**, not from `src/`.
 
 ```bash
+# One-shot install: venv, deps, .env dialog, then free host ports -> .env
+# (scripts/setup_infra_env.py), docker compose up postgres rabbitmq, start.* migrate.
+# No Docker running -> install still finishes, run start.* migrate later.
+install.bat                     # Linux: ./install.sh   (offline: install_offline.*)
+launch.bat server               # = start.cmd local;     Linux: ./launch.sh server
+
 # Whole stack in Docker (postgres+pgvector, rabbitmq, migrate, api, classify workers)
 ./start.sh                      # Windows: start.cmd      (+ --training for the fine-tuning worker)
 ./stop.sh                       # Windows: stop.cmd       (docker compose down, never -v)
@@ -115,7 +121,8 @@ ClassificationResult → appeal card / questions in PostgreSQL
 
 ### Key files
 
-- **`src/config.py`** — all constants from `.env`. Single source of truth for paths, model names, `DATABASE_URL`, `RABBITMQ_URL`.
+- **`src/config.py`** — all constants from `.env`. Single source of truth for paths, model names, `DATABASE_URL`, `RABBITMQ_URL` (defaults built by `src/service_urls.py` from `POSTGRES_*` / `RABBITMQ_*` + ports).
+- **`scripts/setup_infra_env.py`** — installer helper: picks free host ports for PostgreSQL/RabbitMQ, writes them and the URLs to `.env` (keeps BOM/line endings, never prints passwords). Used by `scripts/setup_infra.cmd` and `setup_infra` in `scripts/install_common.sh`.
 - **`src/storage/`** — persistence layer: `db.py` (psycopg pool, pgvector), `schema.sql` (canonical DDL, byte-identical copy in `deploy/db/init/002_schema.sql`), repos for classifier/vectors, appeals, jobs, historical, models; `memory.py` in-memory twins for tests; `get_storage()` picks by `STORAGE_BACKEND`.
 - **`src/queueing/`** — `celery_app.py` (broker, quorum queues, acks_late), `tasks.py` (classify, search, annotation embedding, finetune), `dispatcher.py` + `waiter.py` (API side: send_task, LISTEN job_done), `webhook.py`.
 - **`src/worker_main.py`** — worker bootstrap: one `ClassifierAgent` per process, model-change and `.env` hot reload.
@@ -159,8 +166,11 @@ TOP_K_CANDIDATES=10
 MIN_CONFIDENCE=0.65      # below this → needs_verification=True
 FINETUNE_THRESHOLD=50    # verified entries needed to trigger fine-tuning
 STORAGE_BACKEND=postgres # memory in tests
-DATABASE_URL=postgresql://classifier:classifier@localhost:5432/classifier
-RABBITMQ_URL=amqp://classifier:classifier@localhost:5672//
+POSTGRES_PORT=           # host ports; empty = 5432/5672/15672; the installer picks free
+RABBITMQ_PORT=           #   ones (fallbacks 5434.., 5673.., 15673..) and writes them here
+RABBITMQ_MGMT_PORT=
+DATABASE_URL=            # empty -> built from POSTGRES_USER/PASSWORD/DB + POSTGRES_PORT
+RABBITMQ_URL=            #   (src/service_urls.py, credentials URL-encoded)
 CLASSIFY_CONCURRENCY=2   # per worker; CLASSIFY_WORKERS=2 processes for start.cmd local
 SYNC_WAIT_TIMEOUT_SEC=1800
 WEBHOOK_ALLOWED_HOSTS=   # exact hostnames, comma-separated; empty = webhooks off
