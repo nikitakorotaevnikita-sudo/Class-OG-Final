@@ -40,3 +40,18 @@ def test_broker_heartbeat_from_config_default_disabled():
 
     assert config.BROKER_HEARTBEAT_SEC == 0
     assert app.conf.broker_heartbeat == config.BROKER_HEARTBEAT_SEC
+
+
+def test_worker_proc_alive_timeout_from_config():
+    """Страховка prefork: дочерний процесс не убивается за долгую инициализацию."""
+    import config
+
+    assert config.WORKER_PROC_ALIVE_TIMEOUT_SEC == 300
+    assert app.conf.worker_proc_alive_timeout == config.WORKER_PROC_ALIVE_TIMEOUT_SEC
+
+
+def test_env_example_documents_worker_proc_alive_timeout():
+    from pathlib import Path
+
+    text = (Path(__file__).resolve().parents[2] / ".env.example").read_text(encoding="utf-8")
+    assert "WORKER_PROC_ALIVE_TIMEOUT_SEC=300" in text.splitlines()

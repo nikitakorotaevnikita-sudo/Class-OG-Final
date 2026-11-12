@@ -52,8 +52,13 @@ def test_worker_ready_warms_in_solo_and_threads(monkeypatch, pool_module):
     assert len(created) == 1
 
 
-def test_worker_process_init_resets_inherited_state_then_warms(monkeypatch):
-    """Дочерний процесс: пул родителя забыт (не закрыт), storage и агент — заново."""
+def test_worker_process_init_resets_inherited_state_without_warming(monkeypatch):
+    """Дочерний процесс prefork: пул родителя забыт (не закрыт), storage и агент сброшены.
+
+    Модель в worker_process_init НЕ грузится: Celery убивает дочерний процесс,
+    если обработчик дольше worker_proc_alive_timeout (по умолчанию 4 с), —
+    агент создаётся лениво первой задачей.
+    """
     from storage import db, factory
 
     class ParentPool:
@@ -72,14 +77,16 @@ def test_worker_process_init_resets_inherited_state_then_warms(monkeypatch):
     created = []
     monkeypatch.setattr(worker_main, "ClassifierAgent", _fake_agent_cls(created))
     monkeypatch.setattr(worker_main, "embed_pending_annotations", lambda a: 0)
+    calls = []
+    monkeypatch.setattr(worker_main, "get_agent", lambda: calls.append(1))
 
     warmup.on_worker_process_init(sender="host")
 
     assert db._pool is None
     assert ParentPool.closed is False
-    assert len(created) == 1 and worker_main._agent is created[0]
-    assert created[0].storage is not parent_storage
-    assert factory._storage is created[0].storage
+    assert factory._storage is None
+    assert worker_main._agent is None
+    assert calls == [] and created == []
 
 
 def test_warm_signals_are_connected():

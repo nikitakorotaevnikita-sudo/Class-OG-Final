@@ -237,6 +237,9 @@ RABBITMQ_URL: str = os.getenv("RABBITMQ_URL", "amqp://classifier:classifier@loca
 # и RabbitMQ рвал бы соединение долгой классификации (повторная доставка).
 BROKER_HEARTBEAT_SEC: int = int(os.getenv("BROKER_HEARTBEAT_SEC", "0"))
 CLASSIFY_CONCURRENCY: int = int(os.getenv("CLASSIFY_CONCURRENCY", "2"))
+# Сколько секунд Celery (prefork) ждёт инициализации дочернего процесса,
+# прежде чем убить его. Модель грузится лениво, это страховка.
+WORKER_PROC_ALIVE_TIMEOUT_SEC: int = int(os.getenv("WORKER_PROC_ALIVE_TIMEOUT_SEC", "300"))
 CLASSIFY_WORKERS: int = int(os.getenv("CLASSIFY_WORKERS", "2"))
 SYNC_WAIT_TIMEOUT_SEC: int = int(os.getenv("SYNC_WAIT_TIMEOUT_SEC", "1800"))
 JOB_MAX_ATTEMPTS: int = max(1, int(os.getenv("JOB_MAX_ATTEMPTS", "2")))

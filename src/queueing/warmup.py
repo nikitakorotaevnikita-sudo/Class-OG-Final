@@ -4,10 +4,15 @@
 импортируется только внутри обработчиков, в процессе, который будет
 выполнять задачи.
 
-- worker_process_init — в каждом дочернем процессе prefork (и в самом
-  процессе solo-пула). Сначала сбрасывается состояние, унаследованное от
-  родителя через fork (пул соединений БД, storage, агент), затем прогрев.
-- worker_ready — прогрев только для solo/threads. В prefork этот сигнал
+- worker_process_init — в каждом дочернем процессе prefork. Только сброс
+  состояния, унаследованного от родителя через fork (пул соединений БД,
+  storage, агент). Модель здесь НЕ грузится: Celery убивает дочерний
+  процесс, если обработчик не уложился в worker_proc_alive_timeout
+  (по умолчанию 4 с, у нас WORKER_PROC_ALIVE_TIMEOUT_SEC), а загрузка
+  SentenceTransformer занимает 15+ с → бесконечный цикл перезапуска детей.
+  Агент создаётся лениво первой задачей (worker_main.get_agent).
+- worker_ready — прогрев только для solo/threads (там worker_process_init
+  не приходит, задачи выполняются в этом же процессе). В prefork этот сигнал
   приходит в РОДИТЕЛЕ: открытый там пул psycopg (сокеты, фоновые потоки) и
   загруженные torch/SentenceTransformer унаследовали бы дочерние процессы →
   PoolTimeout, зависшие задачи, взаимоблокировки OpenMP.
@@ -53,15 +58,16 @@ def reset_inherited_state() -> None:
 
 
 def on_worker_process_init(sender=None, **_kwargs) -> None:
+    # Без прогрева: см. docstring модуля (worker_proc_alive_timeout).
     reset_inherited_state()
-    _warm()
 
 
 def on_worker_ready(sender=None, **_kwargs) -> None:
     if pool_is_in_process(sender):
         _warm()
     else:
-        log.info("Пул воркера с fork: прогрев — в дочерних процессах (worker_process_init)")
+        log.info("Пул воркера с fork: модель загрузится в дочернем процессе "
+                 "при первой задаче")
 
 
 worker_process_init.connect(on_worker_process_init, weak=False)

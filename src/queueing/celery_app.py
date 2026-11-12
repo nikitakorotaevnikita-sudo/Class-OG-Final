@@ -47,6 +47,10 @@ app.conf.update(
     # RabbitMQ закрыл бы соединение через 60-120 с и доставил задачу второму
     # воркеру (см. BROKER_HEARTBEAT_SEC в .env.example).
     broker_heartbeat=config.BROKER_HEARTBEAT_SEC,
+    # prefork: сколько ждать инициализации дочернего процесса (по умолчанию
+    # Celery 4 с, затем SIGKILL). Модель грузится лениво первой задачей —
+    # это страховка от цикла перезапусков (см. queueing.warmup).
+    worker_proc_alive_timeout=config.WORKER_PROC_ALIVE_TIMEOUT_SEC,
     # Короткие таймауты отправки: при недоступном RabbitMQ запрос API не должен
     # висеть — диспетчер превращает сбой в DispatchError (503).
     broker_connection_timeout=3,
