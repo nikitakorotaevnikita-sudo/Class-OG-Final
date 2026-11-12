@@ -456,4 +456,10 @@ def main(argv: Optional[list[str]] = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        exit_code = main()
+    finally:
+        # Явно, не дожидаясь atexit: потоки пула psycopg не держат выход процесса.
+        from storage import db
+        db.close_pool()
+    sys.exit(exit_code)

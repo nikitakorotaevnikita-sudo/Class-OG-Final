@@ -1,10 +1,14 @@
 """Пул соединений PostgreSQL и применение схемы.
 
-Пул создаётся лениво: импорт модуля к БД не подключается.
+Пул создаётся лениво: импорт модуля к БД не подключается. При создании пула
+close_pool() регистрируется в atexit: без явного close() интерпретатор при выходе
+ждал потоки пула по 5 с на каждый ("couldn't stop thread pool-1-worker-N"), и
+CLI-скрипты (миграция, auto_finetune, operator_cli, build_vectordb) висели ~20 с.
 """
 
 from __future__ import annotations
 
+import atexit
 import threading
 from contextlib import contextmanager
 from pathlib import Path
@@ -20,6 +24,7 @@ SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
 _pool: Optional[ConnectionPool] = None
 _lock = threading.Lock()
+_atexit_registered = False
 
 
 def _configure(conn: psycopg.Connection) -> None:
@@ -30,10 +35,13 @@ def _configure(conn: psycopg.Connection) -> None:
 
 def get_pool() -> ConnectionPool:
     """Ленивый singleton пула; pgvector регистрируется на каждом соединении."""
-    global _pool
+    global _pool, _atexit_registered
     if _pool is None:
         with _lock:
             if _pool is None:
+                if not _atexit_registered:
+                    atexit.register(close_pool)
+                    _atexit_registered = True
                 _pool = ConnectionPool(
                     config.DATABASE_URL,
                     min_size=1,
@@ -58,6 +66,7 @@ def apply_schema(conn: psycopg.Connection) -> None:
 
 
 def close_pool() -> None:
+    """Закрыть пул (идемпотентно); следующий get_pool() создаст новый."""
     global _pool
     with _lock:
         if _pool is not None:
