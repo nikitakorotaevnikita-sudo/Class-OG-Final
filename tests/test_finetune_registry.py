@@ -273,7 +273,8 @@ def test_auto_import_saves_valid_records_to_db(monkeypatch, tmp_path):
 
     result = aih.process_file(src)
 
-    assert result["success"] is True and result["saved_to"] == "database"
+    assert result["success"] is True and result["saved_to"] == "historical_appeals"
+    assert result["records_saved"] == 1
     assert result["report_path"] is None
     assert get_storage().historical.count() == 1
     assert not src.exists() and len(list((hist / "processed").iterdir())) == 1

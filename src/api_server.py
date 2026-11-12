@@ -602,12 +602,15 @@ async def confirm_historical(request: dict):
     from historical_loader import save_to_historical_db
     filename = _last_historical_upload.get("filename", "unknown")
     try:
-        await asyncio.to_thread(save_to_historical_db, preview, filename, get_storage())
+        inserted = await asyncio.to_thread(save_to_historical_db, preview, filename,
+                                           get_storage())
     except psycopg.Error as exc:
         raise HTTPException(status_code=503, detail=job_api.DB_UNAVAILABLE) from exc
 
     _last_historical_upload = {}
-    return {"status": "ok", "records_saved": len(preview)}
+    # records_saved — реально добавленные строки; дубли (hist_dedup) пропускаются
+    return {"status": "ok", "records_saved": inserted,
+            "duplicates_skipped": len(preview) - inserted}
 
 
 @app.get("/api/historical-count")

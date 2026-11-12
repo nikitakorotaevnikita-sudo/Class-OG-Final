@@ -392,3 +392,17 @@ def test_search_timeout_504_does_not_point_to_jobs_endpoint(env, client, monkeyp
     detail = resp.json()["detail"]
     assert "/integration/jobs" not in detail
     assert detail == "Поиск по классификатору не завершился за 0.2 с, повторите запрос позже"
+
+
+def test_confirm_historical_reports_actually_inserted(env, client, monkeypatch):
+    rec = {"appeal_text": "т", "assigned_code": CODE}
+    env.storage.historical.add([rec], "f.xlsx")  # уже есть: дубль не вставится
+    import api_server
+
+    monkeypatch.setattr(api_server, "_last_historical_upload", {
+        "valid_records": [rec, {"appeal_text": "новое", "assigned_code": CODE}],
+        "filename": "f.xlsx"})
+    resp = client.post("/api/confirm-historical", json={})
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"status": "ok", "records_saved": 1, "duplicates_skipped": 1}
+    assert env.storage.historical.count() == 2

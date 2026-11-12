@@ -25,6 +25,7 @@ HISTORICAL_DIR = Path("data/historical")
 PROCESSED_DIR = HISTORICAL_DIR / "processed"
 ERRORS_DIR = HISTORICAL_DIR / "errors"
 SUPPORTED_EXTENSIONS = {".xlsx", ".xls", ".csv", ".json"}
+HISTORICAL_TABLE = "historical_appeals"  # куда сохраняются валидные записи (saved_to)
 
 
 def ensure_dirs():
@@ -82,13 +83,16 @@ def process_file(file_path: Path) -> dict:
     Парсит, валидирует файл и раскладывает по папкам.
 
     Returns:
-        dict с ключами: success (bool), source_file, stats, saved_to, report_path
+        dict с ключами: success (bool), source_file, stats, saved_to (таблица БД или None),
+        records_saved (реально добавлено, дубли пропущены — как в /api/confirm-historical),
+        report_path
     """
     result = {
         "success": False,
         "source_file": file_path.name,
         "stats": {"total": 0, "valid": 0, "invalid": 0},
         "saved_to": None,
+        "records_saved": 0,
         "report_path": None
     }
 
@@ -115,8 +119,9 @@ def process_file(file_path: Path) -> dict:
 
     # valid_records / errors — списки (не числа)
     if validation_result.valid_records:
-        save_to_historical_db(validation_result.valid_records, file_path.name)
-        result["saved_to"] = "database"
+        result["records_saved"] = save_to_historical_db(
+            validation_result.valid_records, file_path.name)
+        result["saved_to"] = HISTORICAL_TABLE
         result["success"] = True
 
     if validation_result.errors:
@@ -150,7 +155,8 @@ def run_once(verbose: bool = True) -> list[dict]:
             stats = result["stats"]
             print(f"  -> total={stats['total']}, valid={stats['valid']}, invalid={stats['invalid']}")
             if result["saved_to"]:
-                print(f"  -> saved to: {result['saved_to']}")
+                print(f"  -> saved to: {result['saved_to']} "
+                      f"(records_saved={result['records_saved']})")
             if result["report_path"]:
                 print(f"  -> error report: {result['report_path']}")
 
@@ -179,7 +185,8 @@ def run_watch(interval: int = 30, verbose: bool = True):
                 stats = result["stats"]
                 print(f"  -> total={stats['total']}, valid={stats['valid']}, invalid={stats['invalid']}")
                 if result["saved_to"]:
-                    print(f"  -> saved to: {result['saved_to']}")
+                    print(f"  -> saved to: {result['saved_to']} "
+                          f"(records_saved={result['records_saved']})")
                 if result["report_path"]:
                     print(f"  -> error report: {result['report_path']}")
                 print(f"  -> moved to: {'processed/' if result['success'] else 'errors/'}")
