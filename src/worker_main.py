@@ -44,6 +44,26 @@ def _current_env_mtime() -> Optional[int]:
 _env_mtime: Optional[int] = _current_env_mtime()
 
 
+def _differs_from_config(key: str, value: str) -> bool:
+    """Отличается ли значение из .env от текущего в config.
+
+    В config числа — числами (SYNC_WAIT_TIMEOUT_SEC=1800), в .env — строки
+    ("1800", "01800"); незаданное значение (None) равно пустой строке.
+    Сравниваем приведённые к типу config значения, иначе — строки.
+    """
+    current = getattr(config, key, None)
+    if current is None:
+        current = ""
+    value = value.strip()
+    try:
+        typed = settings_store._typed(key, value)
+    except ValueError:  # не число — сравнить как строки
+        typed = value
+    if typed == current:
+        return False
+    return str(typed) != str(current).strip()
+
+
 def refresh_settings_if_env_changed() -> bool:
     """Если .env изменился — применить изменённые настройки в этом процессе.
 
@@ -56,10 +76,12 @@ def refresh_settings_if_env_changed() -> bool:
         if mtime is None or mtime == _env_mtime:
             return False
         values = dotenv_values(settings_store.ENV_PATH)
-        updates = {}
-        for key, value in values.items():
-            if key in settings_store.FIELDS_BY_KEY and value is not None                     and str(getattr(config, key, "")) != value:
-                updates[key] = value
+        updates = {
+            key: value
+            for key, value in values.items()
+            if key in settings_store.FIELDS_BY_KEY and value is not None
+            and _differs_from_config(key, value)
+        }
         if updates:
             settings_store.apply_runtime(updates, _agent)
             log.info("Настройки из .env применены: %s", ", ".join(sorted(updates)))

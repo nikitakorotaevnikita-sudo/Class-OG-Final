@@ -35,6 +35,64 @@ def test_env_change_triggers_refresh(monkeypatch, tmp_path):
     assert worker_main.refresh_settings_if_env_changed() is False
 
 
+def test_typed_config_equal_to_env_value_is_not_reported_as_changed(monkeypatch, tmp_path):
+    """Числа в config и строки в .env сравниваются по значению: без ложных «изменений»."""
+    env = _setup(monkeypatch, tmp_path)
+    monkeypatch.setattr(config, "LLM_PROVIDER", "groq")
+    monkeypatch.setattr(config, "SYNC_WAIT_TIMEOUT_SEC", 1800)
+    applied = []
+    monkeypatch.setattr(worker_main.settings_store, "apply_runtime",
+                        lambda updates, agent=None: applied.append(dict(updates)) or list(updates))
+    _bump(env, "LLM_PROVIDER=groq\nSYNC_WAIT_TIMEOUT_SEC=01800\n")
+    assert worker_main.refresh_settings_if_env_changed() is True
+    assert applied == []
+    _bump(env, "LLM_PROVIDER=groq\nSYNC_WAIT_TIMEOUT_SEC=900\n")
+    st = env.stat()  # вторая запись в тот же тик ФС: mtime мог не сдвинуться
+    os.utime(env, ns=(st.st_atime_ns, st.st_mtime_ns + 5_000_000_000))
+    assert worker_main.refresh_settings_if_env_changed() is True
+    assert applied == [{"SYNC_WAIT_TIMEOUT_SEC": "900"}]
+
+
+def test_unset_config_value_equals_empty_env_value(monkeypatch, tmp_path):
+    env = _setup(monkeypatch, tmp_path)
+    monkeypatch.setattr(config, "LLM_PROVIDER", "groq")
+    monkeypatch.setattr(config, "RX_USER", None, raising=False)
+    applied = []
+    monkeypatch.setattr(worker_main.settings_store, "apply_runtime",
+                        lambda updates, agent=None: applied.append(dict(updates)) or list(updates))
+    _bump(env, "LLM_PROVIDER=groq\nRX_USER=\n")
+    assert worker_main.refresh_settings_if_env_changed() is True
+    assert applied == []
+
+
+def test_module_level_baseline_is_env_mtime_at_import(monkeypatch, tmp_path):
+    """Базовая отметка берётся при импорте модуля: правка до первого вызова не теряется."""
+    import importlib
+
+    env = tmp_path / ".env"
+    env.write_text("LLM_PROVIDER=ario\n", encoding="utf-8")
+    monkeypatch.setattr(settings_store, "ENV_PATH", env)
+    # reload перепривязывает имена модуля — monkeypatch вернёт прежние значения
+    for name in ("_env_mtime", "_agent", "_lock"):
+        monkeypatch.setattr(worker_main, name, getattr(worker_main, name))
+    monkeypatch.setattr(config, "LLM_PROVIDER", "ario")
+
+    importlib.reload(worker_main)
+    assert worker_main._env_mtime == env.stat().st_mtime_ns
+    assert worker_main.refresh_settings_if_env_changed() is False  # без изменений
+
+    applied = []
+    monkeypatch.setattr(worker_main.settings_store, "apply_runtime",
+                        lambda updates, agent=None: applied.append(dict(updates)) or list(updates))
+    _bump(env, "LLM_PROVIDER=gemini\n")
+    assert worker_main.refresh_settings_if_env_changed() is True
+    assert applied == [{"LLM_PROVIDER": "gemini"}]
+
+    env.unlink()
+    importlib.reload(worker_main)
+    assert worker_main._env_mtime is None
+
+
 def test_failed_apply_does_not_fail_get_agent_and_is_retried(monkeypatch, tmp_path):
     env = _setup(monkeypatch, tmp_path)
 
