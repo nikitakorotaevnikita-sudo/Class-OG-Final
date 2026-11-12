@@ -70,6 +70,18 @@ STATUS_RUNNING = "running"
 STATUS_DONE = "done"
 STATUS_ERROR = "error"
 
+# Допустимые значения — как CHECK таблицы jobs в schema.sql.
+JOB_TYPES = ("classify", "search", "finetune", "embed_annotation")
+JOB_STATUSES = (STATUS_QUEUED, STATUS_RUNNING, STATUS_DONE, STATUS_ERROR)
+
+
+def check_job_values(job_type: str, status: str = STATUS_QUEUED) -> None:
+    """ValueError, если job_type/status вне CHECK-ограничений jobs (одинаково в обоих бэкендах)."""
+    if job_type not in JOB_TYPES:
+        raise ValueError(f"неизвестный тип задачи: {job_type!r}")
+    if status not in JOB_STATUSES:
+        raise ValueError(f"неизвестный статус задачи: {status!r}")
+
 
 class QueueFull(RuntimeError):
     """Очередь заполнена — вызывающей стороне нужно повторить позже."""

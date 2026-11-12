@@ -15,7 +15,7 @@ from . import appeal_common as ac
 from . import db
 from .base import DuplicateError
 from .models import (ActiveJobExists, ClassifierEntry, Job, ModelVersion, ModelVersionExists,
-                     QueueFull, Storage)
+                     QueueFull, Storage, check_job_values)
 
 _ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
@@ -512,6 +512,7 @@ def _job(r) -> Job:
 class PgJobStore(_PgBase):
     def create(self, job_type, payload, appeal_id=None, document_id=None, webhook_url=None,
                max_queued=None, queue_class="classify", conn=None):
+        check_job_values(job_type)
         job_id = uuid.uuid4().hex
         aid = ac.norm_uuid(appeal_id) if appeal_id else None
         with self._tx(conn) as c:
@@ -660,6 +661,7 @@ class PgJobStore(_PgBase):
             return cur.rowcount
 
     def import_job(self, job, conn=None):
+        check_job_values(job.job_type, job.status)
         with self._tx(conn) as c:
             c.execute(
                 """INSERT INTO jobs (id, job_type, status, appeal_id, document_id, webhook_url,

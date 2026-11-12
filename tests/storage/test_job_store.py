@@ -329,3 +329,112 @@ def test_active_finetune_violation_keeps_outer_transaction_usable(pg_conn):
             st.jobs.create("finetune", {}, queue_class="training", conn=conn)
         st.jobs.create("classify", {}, conn=conn)  # транзакция не прервана
     assert st.jobs.stats()["queued"] == 2
+
+
+# ── WP3: CHECK-ограничения, параллельный доступ, NOTIFY ─────────────────────
+
+def _job(**kw):
+    now = datetime.now(timezone.utc)
+    base = dict(id="e" * 32, job_type="classify", status=STATUS_DONE, appeal_id=None,
+                document_id=None, webhook_url=None, payload={}, result=None, error=None,
+                attempts=0, created_at=now)
+    return Job(**{**base, **kw})
+
+
+def test_create_rejects_unknown_job_type(storage):
+    with pytest.raises(ValueError):
+        storage.jobs.create("bogus", {})
+    assert storage.jobs.stats() == {"queued": 0, "running": 0, "done": 0, "error": 0}
+
+
+@pytest.mark.parametrize("field,value", [("job_type", "bogus"), ("status", "weird")])
+def test_import_job_rejects_values_outside_check(storage, field, value):
+    with pytest.raises(ValueError):
+        storage.jobs.import_job(_job(**{field: value}))
+    assert storage.jobs.get("e" * 32) is None
+
+
+def test_memory_stats_tolerates_unexpected_status():
+    from storage.memory import MemoryStorage
+
+    st = MemoryStorage()
+    job = st.jobs.create("classify", {})
+    st.jobs._jobs[job.id].status = "weird"  # в обход проверок: stats не должен падать
+    assert st.jobs.stats() == {"queued": 0, "running": 0, "done": 0, "error": 0, "weird": 1}
+
+
+def _pg_store_factory(pg_conn):
+    """PgStorage, где каждый вызов — своё соединение (как пул в проде)."""
+    import psycopg
+    from pgvector.psycopg import register_vector
+
+    from storage.pg import PgStorage
+
+    url = os.environ["TEST_DATABASE_URL"]
+    search_path = pg_conn.execute("SHOW search_path").fetchone()[0]
+
+    @contextmanager
+    def connect():
+        with psycopg.connect(url) as c:
+            c.execute(f"SET search_path TO {search_path}")
+            register_vector(c)
+            with c.transaction():
+                yield c
+
+    return PgStorage(connect)
+
+
+def _run_parallel(fn, n):
+    import threading
+
+    barrier = threading.Barrier(n)
+    results: list = [None] * n
+
+    def worker(i):
+        barrier.wait()
+        try:
+            results[i] = fn()
+        except Exception as exc:  # noqa: BLE001
+            results[i] = exc
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(30)
+    return results
+
+
+@pytest.mark.db
+def test_concurrent_create_respects_queued_limit_pg(pg_conn):
+    store = _pg_store_factory(pg_conn).jobs
+    results = _run_parallel(lambda: store.create("classify", {}, max_queued=3), 8)
+    created = [r for r in results if isinstance(r, Job)]
+    full = [r for r in results if isinstance(r, QueueFull)]
+    assert len(created) == 3 and len(full) == 5, results
+    assert store.stats()["queued"] == 3
+
+
+@pytest.mark.db
+def test_concurrent_finish_exactly_one_wins_pg(pg_conn):
+    store = _pg_store_factory(pg_conn).jobs
+    job = store.create("classify", {})
+    claimed = store.claim(job.id)
+    results = _run_parallel(
+        lambda: store.finish(job.id, {"ok": True}, None, attempts=claimed.attempts), 8)
+    assert results.count(True) == 1 and results.count(False) == 7, results
+
+
+@pytest.mark.db
+def test_noop_finish_sends_no_notify_pg(pg_conn):
+    import psycopg
+
+    store = _pg_store_factory(pg_conn).jobs
+    job = store.create("classify", {})
+    store.finish(job.id, {"ok": True}, None)
+    with psycopg.connect(os.environ["TEST_DATABASE_URL"], autocommit=True) as listener:
+        listener.execute("LISTEN job_done")
+        assert store.finish(job.id, {"again": True}, None) is False
+        assert store.finish("f" * 32, None, "нет такой", attempts=1) is False
+        got = [n.payload for n in listener.notifies(timeout=1, stop_after=1)]
+    assert got == []

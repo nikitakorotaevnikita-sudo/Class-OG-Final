@@ -16,7 +16,7 @@ from . import appeal_common as ac
 from .base import DuplicateError
 from .models import (STATUS_DONE, STATUS_ERROR, STATUS_QUEUED, STATUS_RUNNING,
                      ActiveJobExists, AppealResult, ClassifierEntry, Job, ModelVersion,
-                     ModelVersionExists, QueueFull, Storage)
+                     ModelVersionExists, QueueFull, Storage, check_job_values)
 
 logger = logging.getLogger(__name__)
 
@@ -387,6 +387,7 @@ class MemoryJobStore:
 
     def create(self, job_type, payload, appeal_id=None, document_id=None, webhook_url=None,
                max_queued=None, queue_class="classify"):
+        check_job_values(job_type)
         with self._lock:
             if max_queued is not None:
                 queued = sum(
@@ -485,7 +486,7 @@ class MemoryJobStore:
         with self._lock:
             counts = {STATUS_QUEUED: 0, STATUS_RUNNING: 0, STATUS_DONE: 0, STATUS_ERROR: 0}
             for j in self._jobs.values():
-                counts[j.status] += 1
+                counts[j.status] = counts.get(j.status, 0) + 1  # как GROUP BY в PostgreSQL
             return counts
 
     def latest(self, job_type):
@@ -514,6 +515,7 @@ class MemoryJobStore:
             return len(stale)
 
     def import_job(self, job):
+        check_job_values(job.job_type, job.status)
         with self._lock:
             if job.id not in self._jobs:
                 self._store(copy.deepcopy(job))
