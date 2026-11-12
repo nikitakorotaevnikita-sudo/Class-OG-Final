@@ -6,6 +6,7 @@
 #   ./start.sh migrate              только схема БД + импорт файлов (БД уже должна работать)
 #
 #   --training                      дополнительно поднять воркер дообучения
+#   (--port только для local; в docker порт API задаёт HOST_PORT в .env)
 #
 # Остановка: ./stop.sh [docker|local]. Логи локального режима — run/*.log.
 
@@ -19,15 +20,14 @@ MODE="docker"
 TRAINING=0
 PORT_ARG=""
 
-usage() { sed -n '2,10p' "$0"; }
+usage() { sed -n '2,11p' "$0"; }
 
 while [ $# -gt 0 ]; do
     case "$1" in
         docker|local|migrate) MODE="$1" ;;
         --training) TRAINING=1 ;;
         --port)
-            [ $# -ge 2 ] || { printf 'После --port нужен номер порта
-' >&2; exit 2; }
+            [ $# -ge 2 ] || { printf 'После --port нужен номер порта\n' >&2; exit 2; }
             shift; PORT_ARG="$1" ;;
         -h|--help) usage; exit 0 ;;
         *) printf 'Неизвестный аргумент: %s (см. --help)\n' "$1" >&2; exit 2 ;;
@@ -148,25 +148,41 @@ export_pythonpath() {
     export PYTHONPATH="$PWD/src${PYTHONPATH:+:$PYTHONPATH}"
 }
 
+# run_migrate ПЕРВЫЙ_ШАГ ВСЕГО_ШАГОВ — два шага: схема и импорт (номера в выводе
+# сквозные: local — 2/4 и 3/4, migrate — 1/2 и 2/2).
 run_migrate() {
+    local first="${1:-1}" total="${2:-2}"
     require_venv
     export_pythonpath
     resolve_service_urls
-    step 1 "Схема БД"
+    step "$first/$total" "Схема БД"
     "$VENV_PY" scripts/db/init_db.py
-    step 2 "Импорт файлового хранилища в БД (после успешного переноса — пропуск)"
+    first=$((first + 1))
+    step "$first/$total" "Импорт файлового хранилища в БД (после успешного переноса — пропуск)"
     "$VENV_PY" scripts/db/migrate_from_files.py \
         || die "сверка миграции не сошлась — смотреть таблицу выше; сервис не запускаю"
+}
+
+# Кто-то уже слушает 127.0.0.1:ПОРТ (например, api docker-стека на 8010)?
+port_in_use() {
+    (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null
+}
+
+# Наш процесс из pid-файла жив (номер не перешёл чужому процессу)?
+pidfile_alive() {
+    [ -f "run/$1.pid" ] && pid_is_classifier "$(cat "run/$1.pid" 2>/dev/null)"
 }
 
 # start_bg ИМЯ команда...: фоновый процесс, pid в run/ИМЯ.pid, лог в run/ИМЯ.log.
 start_bg() {
     local name="$1" pidfile="run/$1.pid"
     shift
-    if [ -f "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
+    if [ -f "$pidfile" ] && pid_is_classifier "$(cat "$pidfile" 2>/dev/null)"; then
         warn "$name уже запущен (pid $(cat "$pidfile")) — пропускаю"
         return 0
     fi
+    # pid-файл от прошлого запуска: процесса нет или номер занят чужим процессом.
+    rm -f "$pidfile"
     nohup "$@" >>"run/$name.log" 2>&1 &
     echo $! >"$pidfile"
     say "$name: pid $!, лог run/$name.log"
@@ -178,6 +194,9 @@ start_docker() {
     local profile=()
     if [ "$TRAINING" = "1" ]; then profile=(--profile training); fi
     banner "Запуск стека в Docker"
+    if [ -n "$PORT_ARG" ]; then
+        warn "--port $PORT_ARG в режиме docker не действует: порт API задаёт HOST_PORT в .env ($(env_value HOST_PORT 8010))"
+    fi
     docker compose ${profile[@]+"${profile[@]}"} up -d --build
     wait_health "$(env_value HOST_PORT 8010)"
     say "бэк-офис: http://localhost:$(env_value HOST_PORT 8010)/backoffice"
@@ -189,9 +208,9 @@ start_local() {
     ensure_env
     banner "Локальный запуск: инфраструктура в Docker, сервис из venv"
     resolve_service_urls  # до docker compose: ошибка портов — сразу
-    step 0 "PostgreSQL и RabbitMQ"
+    step "1/4" "PostgreSQL и RabbitMQ"
     docker compose up -d --wait postgres rabbitmq
-    run_migrate
+    run_migrate 2 4
 
     local port host concurrency
     port="${PORT_ARG:-$(env_value API_PORT 8010)}"
@@ -199,7 +218,12 @@ start_local() {
     concurrency="$(env_value CLASSIFY_CONCURRENCY 2)"
     mkdir -p run
 
-    step 3 "API и воркеры"
+    step "4/4" "API и воркеры"
+    # Порт занят не нашим API (обычно — api docker-стека: ./start.sh публикует
+    # HOST_PORT=8010): uvicorn упал бы в фоне, а /health ответил бы чужой сервис.
+    if ! pidfile_alive api && port_in_use "$port"; then
+        die "порт $port уже занят. Если запущен docker-стек — остановить: ./stop.sh; иначе другой порт: ./start.sh local --port N"
+    fi
     start_bg api "$VENV_PY" -m uvicorn src.api_server:app --host "$host" --port "$port"
     # prefork: один процесс-мастер, CLASSIFY_CONCURRENCY дочерних классификаций.
     start_bg worker-classify "$VENV_PY" -m celery -A queueing.celery_app worker \
@@ -220,5 +244,5 @@ fi
 case "$MODE" in
     docker) start_docker ;;
     local) start_local ;;
-    migrate) ensure_env; run_migrate; ok "миграция завершена" ;;
+    migrate) ensure_env; run_migrate 1 2; ok "миграция завершена" ;;
 esac

@@ -20,8 +20,7 @@ cd "$(dirname "$(readlink -f "$0")")"
 default_port() {
     local configured
     configured="$(get_env_key API_PORT)"
-    printf '%s
-' "${configured:-8010}"
+    printf '%s\n' "${configured:-8010}"
 }
 
 # Векторы классификатора теперь в PostgreSQL, классифицируют Celery-воркеры:

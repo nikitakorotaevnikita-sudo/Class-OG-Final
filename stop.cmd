@@ -42,8 +42,9 @@ exit /b %errorlevel%
 ::    elevated console prefixes them ("Administrator: classifier-api").
 ::    /T also ends children (the venv launcher starts the real interpreter).
 ::    A task killed mid-classification is not lost: acks_late re-queues it.
+::    $root ends with a backslash, so D:\proj does not match D:\proj-old\...
 set "PROJ=%~dp0"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$root = $env:PROJ.TrimEnd('\'); Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'python.exe' -and $_.CommandLine -match 'queueing\.celery_app|src\.api_server:app|uvicorn' -and ((($_.ExecutablePath) -and $_.ExecutablePath.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) -or $_.CommandLine.IndexOf($root, [StringComparison]::OrdinalIgnoreCase) -ge 0) } | ForEach-Object { taskkill /F /T /PID $_.ProcessId 2>$null | Out-Null; Write-Output ('  stopped PID ' + $_.ProcessId) }"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$root = $env:PROJ.TrimEnd('\') + '\'; Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'python.exe' -and $_.CommandLine -match 'queueing\.celery_app|src\.api_server:app|uvicorn' -and ((($_.ExecutablePath) -and $_.ExecutablePath.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) -or $_.CommandLine.IndexOf($root, [StringComparison]::OrdinalIgnoreCase) -ge 0) } | ForEach-Object { taskkill /F /T /PID $_.ProcessId 2>$null | Out-Null; Write-Output ('  stopped PID ' + $_.ProcessId) }"
 :: 2) Leftover cmd windows of start.cmd local (titles start with "classifier-").
 taskkill /F /T /FI "WINDOWTITLE eq classifier-*" >nul 2>&1
 echo   OK: classifier processes and windows closed ^(if any were open^).

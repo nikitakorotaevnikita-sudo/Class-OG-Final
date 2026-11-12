@@ -15,7 +15,7 @@ echo.
 :: =============================================================
 :: STEP 1: Find Python 3.11 / 3.12 / 3.13
 :: =============================================================
-echo [1/5] Checking Python (3.11 / 3.12 / 3.13)...
+echo [1/6] Checking Python (3.11 / 3.12 / 3.13)...
 
 set PYTHON=
 for %%T in (3.13 3.12 3.11) do (
@@ -64,7 +64,7 @@ if not defined PYTHON (
 :: STEP 2: Create virtual environment
 :: =============================================================
 echo.
-echo [2/5] Setting up virtual environment...
+echo [2/6] Setting up virtual environment...
 
 if exist "venv\Scripts\python.exe" (
     echo    OK: venv already exists, skipping
@@ -82,7 +82,7 @@ if exist "venv\Scripts\python.exe" (
 :: STEP 3: Install dependencies
 :: =============================================================
 echo.
-echo [3/5] Installing dependencies...
+echo [3/6] Installing dependencies...
 
 venv\Scripts\pip.exe install --upgrade pip --quiet
 venv\Scripts\pip.exe install -r requirements.txt
@@ -98,7 +98,7 @@ echo    OK: Dependencies installed
 :: STEP 4: Configure .env
 :: =============================================================
 echo.
-echo [4/5] Checking .env configuration...
+echo [4/6] Checking .env configuration...
 
 if not exist ".env" (
     copy ".env.example" ".env" >nul
@@ -254,17 +254,33 @@ echo    OK: .env configured
 :: Vectors live in PostgreSQL now. They are imported from the VECTOR_DB_DIR
 :: files (shipped in Git) by "start.cmd migrate" - nothing to build here.
 echo.
-echo [5/5] Vector database
-echo    Vectors are imported into PostgreSQL by "start.cmd migrate"
-echo    (start.cmd local does it automatically; Docker: compose service migrate).
+echo [5/6] Vector database
+echo    Vectors are imported into PostgreSQL on step 6 (retry: start.cmd migrate).
+
+:: =============================================================
+:: STEP 6: PostgreSQL + RabbitMQ in Docker, migration
+:: =============================================================
+:: Free host ports go to .env (values already there are kept), then
+:: docker compose up postgres rabbitmq and start.cmd migrate. No Docker or the
+:: engine is stopped: not a failure - run "start.cmd migrate" later.
+echo.
+echo [6/6] PostgreSQL and RabbitMQ in Docker, data migration
+set "INFRA_FAILED=0"
+call "%PROJECT%\scripts\setup_infra.cmd"
+if errorlevel 1 set "INFRA_FAILED=1"
 
 :: =============================================================
 :: DONE
 :: =============================================================
 echo.
 echo =====================================================
-echo   Installation complete! Run launch.bat to start.
-echo   Full stack: start.cmd (Docker) or start.cmd local (venv + DB in Docker)
+if "!INFRA_FAILED!"=="1" (
+    echo   Installation finished, but the infrastructure step failed - see above.
+) else (
+    echo   Installation complete! Run launch.bat to start.
+)
+echo   launch.bat server = start.cmd local ^(API + workers from venv, DB in Docker^)
+echo   Full stack in Docker: start.cmd
 echo =====================================================
 echo.
 pause

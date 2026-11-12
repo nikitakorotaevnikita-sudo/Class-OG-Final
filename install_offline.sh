@@ -38,12 +38,12 @@ warn_if_root
        python scripts/make_offline_bundle.py --python-version 3.11 --platform manylinux2014_x86_64"
 
 # ── 1. Python ─────────────────────────────────────────────────────────────────
-step "1/6" "Поиск Python 3.11 / 3.12 / 3.13"
+step "1/7" "Поиск Python 3.11 / 3.12 / 3.13"
 find_python || die "не найден Python 3.11, 3.12 или 3.13"
 ok "$PYTHON ($PYTHON_VERSION)"
 
 # ── 2. Проверка комплекта ДО установки ────────────────────────────────────────
-step "2/6" "Проверка комплекта"
+step "2/7" "Проверка комплекта"
 # Колёса скомпилированных пакетов привязаны к ABI интерпретатора: комплект,
 # собранный под 3.13, на 3.11 не встанет. Ловим это здесь, а не в середине pip.
 if ! "$PYTHON" scripts/check_offline.py --stage pre; then
@@ -64,11 +64,11 @@ if ! "$PYTHON" scripts/check_offline.py --stage pre; then
 fi
 
 # ── 3. venv ───────────────────────────────────────────────────────────────────
-step "3/6" "Виртуальное окружение"
+step "3/7" "Виртуальное окружение"
 ensure_venv
 
 # ── 4. Зависимости из локальных колёс ─────────────────────────────────────────
-step "4/6" "Зависимости из offline_bundle/wheels"
+step "4/7" "Зависимости из offline_bundle/wheels"
 # --no-index гарантирует, что pip не пойдёт в сеть: если колеса не хватает,
 # установка честно падает, а не «тихо» скачивает его с PyPI.
 "$VENV_PY" -m pip install --no-index --find-links=offline_bundle/wheels --upgrade pip --quiet 2>/dev/null
@@ -81,7 +81,7 @@ fi
 ok "зависимости установлены, сеть не использовалась"
 
 # ── 5. .env: офлайн-флаги, локальная модель, LLM в своей сети ────────────────
-step "5/6" "Настройки (.env)"
+step "5/7" "Настройки (.env)"
 if [ ! -f "$ENV_FILE" ]; then
     if [ -f offline_bundle/env.stand.example ]; then
         cp offline_bundle/env.stand.example "$ENV_FILE"
@@ -152,7 +152,7 @@ chmod 600 "$ENV_FILE" 2>/dev/null
 ok ".env настроен на локальную модель и запрет сети"
 
 # ── 6. База + итоговая проверка ───────────────────────────────────────────────
-step "6/6" "Векторная база и проверка"
+step "6/7" "Векторная база и проверка"
 VDB="$(vdb_dir)"
 if [ -f "$VDB/embeddings.npy" ]; then
     ok "база на месте: $VDB"
@@ -164,16 +164,21 @@ elif [ -f offline_bundle/vector_db_prebuilt/embeddings.npy ]; then
 else
     warn "нет файлов векторов в $VDB — перенос в PostgreSQL (./start.sh migrate) не пройдёт"
 fi
-say "векторы переносятся в PostgreSQL командой ./start.sh migrate"
-say "(./start.sh local делает это сам; в Docker — сервис migrate)"
+say "векторы переносятся в PostgreSQL на шаге 7 (повторить: ./start.sh migrate)"
 
 "$VENV_PY" scripts/check_offline.py --stage post || {
     warn "проверка нашла проблемы — см. выше"
     CHECK_FAILED=1
 }
 
+# ── 7. PostgreSQL + RabbitMQ ──────────────────────────────────────────────────
+# Как в install.sh, но образы без интернета не скачать: нет их локально —
+# подсказка, как загрузить (docker save / docker load), и пропуск шага.
+step "7/7" "PostgreSQL и RabbitMQ в Docker, перенос данных"
+setup_infra --offline
+
 banner "Установка завершена"
-printf '   Запуск:      ./start.sh local --port %s  (или ./start.sh — весь стек в Docker)\n' "$PORT"
+printf '   Запуск:      ./launch.sh server %s  (= ./start.sh local; весь стек в Docker: ./start.sh)\n' "$PORT"
 printf '   Остановка:   ./stop.sh local\n'
 printf '   Проверка:    curl http://127.0.0.1:%s/health\n\n' "$PORT"
 exit "${CHECK_FAILED:-0}"

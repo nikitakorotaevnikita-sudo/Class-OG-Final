@@ -1,0 +1,259 @@
+"""Порты PostgreSQL / RabbitMQ на хосте и адреса подключения в .env.
+
+Вызывается установщиками (install.bat / install.sh / install_offline.*) перед
+`docker compose up postgres rabbitmq` и миграцией:
+
+    venv/Scripts/python.exe scripts/setup_infra_env.py [--env-file PATH] [--dry-run] [--no-docker]
+
+Для каждого из POSTGRES_PORT (5432), RABBITMQ_PORT (5672), RABBITMQ_MGMT_PORT (15672):
+- значение уже есть в .env — остаётся как есть;
+- иначе порт, который сейчас публикует контейнер ЭТОГО проекта (docker compose ps), —
+  он свой, а не «занят»;
+- иначе порт по умолчанию, если на 127.0.0.1 его никто не слушает;
+- иначе первый свободный из фиксированного списка (5434, 5435, ...; 5673, ...;
+  15673, ...). 5433 пропущен: там тестовый PostgreSQL (TEST_DATABASE_URL).
+
+Затем в .env пишутся DATABASE_URL / RABBITMQ_URL на localhost с этими портами и
+учётными данными POSTGRES_* / RABBITMQ_DEFAULT_* (экранированными). DATABASE_URL /
+RABBITMQ_URL, указывающие на другую машину, не трогаются.
+
+Файл правится бережно: UTF-8, BOM (если был), концы строк, комментарии и порядок
+строк сохраняются. Пароли и URL целиком не печатаются. Вывод — ASCII: его
+показывает консоль cmd.exe в любой кодовой странице.
+
+Код возврата: 0 — готово, 1 — нет свободного порта, 2 — нет .env.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import socket
+import subprocess
+import sys
+from pathlib import Path
+from typing import Callable, Mapping, Optional
+from urllib.parse import urlsplit
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "src"))
+
+from service_urls import build_database_url, build_rabbitmq_url  # noqa: E402
+
+BOM = "﻿"
+
+# ключ .env -> (порт по умолчанию, запасные порты по порядку)
+PORTS: dict[str, tuple[int, list[int]]] = {
+    "POSTGRES_PORT": (5432, list(range(5434, 5454))),
+    "RABBITMQ_PORT": (5672, list(range(5673, 5693))),
+    "RABBITMQ_MGMT_PORT": (15672, list(range(15673, 15693))),
+}
+
+# (сервис compose, порт в контейнере) -> ключ .env
+_PUBLISHED = {
+    ("postgres", 5432): "POSTGRES_PORT",
+    ("rabbitmq", 5672): "RABBITMQ_PORT",
+    ("rabbitmq", 15672): "RABBITMQ_MGMT_PORT",
+}
+
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", ""}
+
+
+class NoFreePort(RuntimeError):
+    pass
+
+
+# ── Порты ───────────────────────────────────────────────────────────────────
+
+def port_is_free(port: int) -> bool:
+    """Свободен, если на 127.0.0.1:port никто не слушает и порт можно занять."""
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        probe.settimeout(1.0)
+        if probe.connect_ex(("127.0.0.1", port)) == 0:
+            return False
+    except OSError:
+        pass
+    finally:
+        probe.close()
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.bind(("127.0.0.1", port))
+        return True
+    except OSError:
+        return False
+    finally:
+        sock.close()
+
+
+def choose_port(current: str, default: int, fallbacks: list[int],
+                is_free: Callable[[int], bool], ours: Optional[int]) -> tuple[int | str, str]:
+    """(порт, пояснение). current — значение из .env (пусто — не задано)."""
+    current = (current or "").strip()
+    if current:
+        return current, "kept from .env"
+    if ours:
+        return ours, "published by this project's container"
+    if is_free(default):
+        return default, "default, free"
+    for port in fallbacks:
+        if is_free(port):
+            return port, f"{default} is busy, first free fallback"
+    raise NoFreePort(f"{default} and fallbacks {fallbacks[0]}..{fallbacks[-1]} are all busy")
+
+
+def parse_compose_ps(output: str) -> dict[str, int]:
+    """Порты хоста, которые публикуют postgres / rabbitmq проекта (ключ .env -> порт)."""
+    output = (output or "").strip()
+    if not output:
+        return {}
+    try:
+        data = json.loads(output)
+        items = data if isinstance(data, list) else [data]
+    except ValueError:
+        items = []
+        for line in output.splitlines():
+            try:
+                items.append(json.loads(line))
+            except ValueError:
+                return {}
+    found: dict[str, int] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        for pub in item.get("Publishers") or []:
+            key = _PUBLISHED.get((item.get("Service"), pub.get("TargetPort")))
+            published = pub.get("PublishedPort") or 0
+            if key and published:
+                found[key] = int(published)
+    return found
+
+
+def compose_own_ports() -> dict[str, int]:
+    """docker compose ps в корне проекта; Docker нет или не запущен — пусто."""
+    try:
+        proc = subprocess.run(["docker", "compose", "ps", "--format", "json"], cwd=str(ROOT),
+                              capture_output=True, text=True, encoding="utf-8",
+                              errors="replace", timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    if proc.returncode != 0:
+        return {}
+    return parse_compose_ps(proc.stdout)
+
+
+# ── .env ────────────────────────────────────────────────────────────────────
+
+_KEY_LINE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
+
+
+def _clean_value(raw: str) -> str:
+    value = raw.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        return value[1:-1]
+    return re.sub(r"\s+#.*$", "", value).strip()
+
+
+def parse_env(text: str) -> dict[str, str]:
+    """Активные строки KEY=value (первое вхождение), без хвостовых комментариев."""
+    values: dict[str, str] = {}
+    for line in text.lstrip(BOM).splitlines():
+        match = _KEY_LINE.match(line.strip())
+        if match and match.group(1) not in values:
+            values[match.group(1)] = _clean_value(match.group(2))
+    return values
+
+
+def set_keys(text: str, updates: Mapping[str, str], newline: str) -> str:
+    """Заменяет активные строки KEY=..., недостающие дописывает в конец."""
+    pending = dict(updates)
+    lines = text.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        match = _KEY_LINE.match(line.rstrip("\r\n"))
+        if match and match.group(1) in updates:
+            ending = line[len(line.rstrip("\r\n")):]
+            lines[i] = f"{match.group(1)}={updates[match.group(1)]}{ending}"
+            pending.pop(match.group(1), None)
+    out = "".join(lines)
+    if pending:
+        if out and not out.endswith(("\n", "\r")):
+            out += newline
+        out += "".join(f"{key}={value}{newline}" for key, value in pending.items())
+    return out
+
+
+def _is_local(url: str) -> bool:
+    try:
+        return (urlsplit(url).hostname or "") in _LOCAL_HOSTS
+    except ValueError:
+        return False
+
+
+def _hostport(url: str) -> str:
+    parts = urlsplit(url)
+    return f"{parts.hostname}:{parts.port}"
+
+
+# ── main ────────────────────────────────────────────────────────────────────
+
+def main(argv: Optional[list[str]] = None, *,
+         is_free: Callable[[int], bool] = port_is_free,
+         own_ports: Optional[Callable[[], dict[str, int]]] = None) -> int:
+    parser = argparse.ArgumentParser(description="Pick host ports for PostgreSQL/RabbitMQ "
+                                                 "and write them with the URLs to .env")
+    parser.add_argument("--env-file", default=str(ROOT / ".env"))
+    parser.add_argument("--dry-run", action="store_true", help="print the plan, do not write")
+    parser.add_argument("--no-docker", action="store_true",
+                        help="do not ask docker compose which ports are ours")
+    args = parser.parse_args(argv)
+
+    path = Path(args.env_file)
+    if not path.is_file():
+        print(f"ERROR: {path} not found - create it from .env.example first", file=sys.stderr)
+        return 2
+
+    raw = path.read_bytes().decode("utf-8")
+    has_bom = raw.startswith(BOM)
+    text = raw[1:] if has_bom else raw
+    newline = "\r\n" if "\r\n" in text else "\n"
+    env = parse_env(text)
+
+    if own_ports is None:
+        own_ports = (lambda: {}) if args.no_docker else compose_own_ports
+    ours = own_ports()
+
+    updates: dict[str, str] = {}
+    try:
+        for key, (default, fallbacks) in PORTS.items():
+            port, why = choose_port(env.get(key, ""), default, fallbacks, is_free, ours.get(key))
+            updates[key] = str(port)
+            print(f"  {key}={port}  ({why})")
+    except NoFreePort as exc:
+        print(f"ERROR: no free port: {exc}", file=sys.stderr)
+        return 1
+
+    merged = {**env, **updates}
+    for key, builder, label in (("DATABASE_URL", build_database_url, "POSTGRES_*"),
+                                ("RABBITMQ_URL", build_rabbitmq_url, "RABBITMQ_DEFAULT_*")):
+        current = env.get(key, "")
+        if current and not _is_local(current):
+            print(f"  {key}: points to another host - kept as is")
+            continue
+        updates[key] = builder(merged)
+        print(f"  {key} -> {_hostport(updates[key])}  (credentials from {label})")
+
+    if args.dry_run:
+        print("  dry run: .env not changed")
+        return 0
+    new_text = set_keys(text, updates, newline)
+    if new_text != text:
+        path.write_bytes(((BOM if has_bom else "") + new_text).encode("utf-8"))
+        print(f"  OK: ports and URLs written to {path.name}")
+    else:
+        print(f"  OK: {path.name} already up to date")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

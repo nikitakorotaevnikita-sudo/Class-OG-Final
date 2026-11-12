@@ -25,7 +25,7 @@ if not exist "offline_bundle\wheels" (
 :: =============================================================
 :: STEP 1: Find Python 3.11 / 3.12 / 3.13
 :: =============================================================
-echo [1/6] Checking Python (3.11 / 3.12 / 3.13)...
+echo [1/7] Checking Python (3.11 / 3.12 / 3.13)...
 
 set PYTHON=
 for %%T in (3.13 3.12 3.11) do (
@@ -68,7 +68,7 @@ if not defined PYTHON (
 :: STEP 2: Preflight -- do the bundled wheels match this Python?
 :: =============================================================
 echo.
-echo [2/6] Preflight check of the bundle...
+echo [2/7] Preflight check of the bundle...
 
 :: Compiled wheels (torch, numpy, scipy) are tied to the interpreter ABI.
 :: A bundle built for 3.13 CANNOT be installed on 3.11 -- fail here with a
@@ -88,7 +88,7 @@ if !errorlevel! neq 0 (
 :: STEP 3: Create venv
 :: =============================================================
 echo.
-echo [3/6] Creating virtual environment...
+echo [3/7] Creating virtual environment...
 
 :: A venv copied from another machine is broken: the launchers in Scripts\
 :: hardcode the absolute path of the interpreter that created them.
@@ -116,7 +116,7 @@ if not exist "venv\Scripts\python.exe" (
 :: STEP 4: Install from local wheels (NO INTERNET)
 :: =============================================================
 echo.
-echo [4/6] Installing dependencies from offline wheels...
+echo [4/7] Installing dependencies from offline wheels...
 
 :: python -m pip, never pip.exe: the launcher may be stale after a copy.
 venv\Scripts\python.exe -m pip install --no-index --find-links=offline_bundle\wheels --upgrade pip --quiet 2>nul
@@ -137,7 +137,7 @@ echo    OK: Dependencies installed (offline)
 :: STEP 5: Configure .env
 :: =============================================================
 echo.
-echo [5/6] Configuring .env...
+echo [5/7] Configuring .env...
 
 if not exist ".env" (
     if exist "offline_bundle\env.stand.example" (
@@ -234,7 +234,7 @@ echo    OK: .env configured
 :: STEP 6: Vector DB + final check
 :: =============================================================
 echo.
-echo [6/6] Vector database...
+echo [6/7] Vector database...
 
 :: The bundle ships the vector files. They are the source that "start.cmd migrate"
 :: imports into PostgreSQL; nothing is built on the stand.
@@ -270,16 +270,31 @@ if !errorlevel! neq 0 (
     exit /b 1
 )
 
+:: =============================================================
+:: STEP 7: PostgreSQL + RabbitMQ in Docker, migration
+:: =============================================================
+:: As in install.bat, but images cannot be pulled without internet: when they
+:: are not loaded, setup_infra.cmd explains docker save / docker load and skips.
+echo.
+echo [7/7] PostgreSQL and RabbitMQ in Docker, data migration
+set "INFRA_FAILED=0"
+call "%PROJECT%\scripts\setup_infra.cmd" offline
+if errorlevel 1 set "INFRA_FAILED=1"
+
 echo.
 echo =====================================================
-echo   OFFLINE Installation complete!
+if "!INFRA_FAILED!"=="1" (
+    echo   OFFLINE installation finished, but the infrastructure step failed - see above.
+) else (
+    echo   OFFLINE Installation complete!
+)
 echo   Start the service ^(PostgreSQL + RabbitMQ in Docker, API and workers^):
-echo     start.cmd local      ^(stop: stop.cmd local^)
+echo     launch.bat server  =  start.cmd local      ^(stop: stop.cmd local^)
 echo   Or run launch.bat for the interactive menu.
 echo =====================================================
 echo.
 pause
-exit /b 0
+exit /b !INFRA_FAILED!
 
 :: =============================================================
 :: setenv KEY VALUE -- replace the line in .env or append it

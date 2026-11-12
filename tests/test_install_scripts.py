@@ -5,6 +5,7 @@
 случайно не задеть настоящий `.env` проекта.
 """
 
+import re
 import shutil
 import subprocess
 import textwrap
@@ -134,3 +135,123 @@ def test_launch_requires_venv(tmp_path):
     proc = run_bash("bash launch.sh server 8010", tmp_path)
     assert proc.returncode != 0
     assert "install.sh" in (proc.stdout + proc.stderr)
+
+
+# ── pid из run/*.pid: проверка командной строки перед kill ──────────────────
+
+def test_pid_is_classifier_checks_command_line(sandbox):
+    """После перезагрузки pid из run/*.pid может принадлежать чужому процессу:
+    start.sh / stop.sh не должны его «узнавать» (и убивать)."""
+    # Маркер собирается из частей: пока дочерний процесс не сделал exec, его
+    # командная строка — текст этого скрипта, и цельный маркер дал бы ложное «наш».
+    proc = run_bash(env_helper(f'''
+        sleep 30 & other=$!
+        M1=queueing; bash -c 'sleep 30; :' "$M1.celery_app" & ours=$!
+        sleep 1
+        pid_is_classifier "$other" && echo "OTHER=yes" || echo "OTHER=no"
+        pid_is_classifier "$ours" && echo "OURS=yes" || echo "OURS=no"
+        pid_is_classifier 999999 && echo "DEAD=yes" || echo "DEAD=no"
+        pid_is_classifier "" && echo "EMPTY=yes" || echo "EMPTY=no"
+        kill "$other" "$ours" 2>/dev/null
+    '''), sandbox)
+    assert "OTHER=no" in proc.stdout, proc.stdout + proc.stderr
+    assert "OURS=yes" in proc.stdout, proc.stdout + proc.stderr
+    assert "DEAD=no" in proc.stdout and "EMPTY=no" in proc.stdout
+
+
+# ── setup_infra: порты, PostgreSQL + RabbitMQ в Docker, миграция ────────────
+
+def infra_sandbox(sandbox, docker_body: str):
+    """Заглушки: venv/bin/python, docker и start.sh пишут вызовы в calls.log."""
+    calls = sandbox / "calls.log"
+    bindir = sandbox / "bin"
+    bindir.mkdir()
+    (sandbox / "venv" / "bin").mkdir(parents=True)
+    stubs = {
+        sandbox / "venv" / "bin" / "python": 'echo "python $*" >> calls.log\n',
+        bindir / "docker": f'echo "docker $*" >> calls.log\n{docker_body}\n',
+        sandbox / "start.sh": 'echo "start.sh $*" >> calls.log\n',
+    }
+    for path, body in stubs.items():
+        path.write_text("#!/bin/sh\n" + body, encoding="utf-8", newline="\n")
+        path.chmod(0o755)
+    (sandbox / ".env").write_text("A=1\n", encoding="utf-8")
+    return calls, bindir
+
+
+def run_setup_infra(sandbox, bindir, args="", only_stubs=False):
+    # $PWD/bin, а не путь Windows: «C:/...» в PATH разрезалось бы по двоеточию.
+    # only_stubs: в PATH только заглушки — настоящий docker хоста не виден.
+    rest = "" if only_stubs else ":$PATH"
+    script = env_helper(f'export PATH="$PWD/{bindir.name}{rest}"; setup_infra {args}; '
+                        'echo "RC=$?"; echo "FAILED=${CHECK_FAILED:-0}"')
+    return run_bash(script, sandbox)
+
+
+def test_setup_infra_happy_path(sandbox):
+    calls, bindir = infra_sandbox(sandbox, "exit 0")
+    proc = run_setup_infra(sandbox, bindir)
+    log = calls.read_text(encoding="utf-8")
+    assert "RC=0" in proc.stdout and "FAILED=0" in proc.stdout, proc.stdout + proc.stderr
+    assert "python scripts/setup_infra_env.py --env-file .env" in log
+    assert "docker compose up -d --wait postgres rabbitmq" in log
+    assert "start.sh migrate" in log
+    # порты выбираются до запуска контейнеров, миграция — после
+    assert log.index("setup_infra_env.py") < log.index("compose up") < log.index("start.sh migrate")
+
+
+def test_setup_infra_without_docker_is_soft(sandbox):
+    calls, bindir = infra_sandbox(sandbox, "exit 0")
+    (bindir / "docker").unlink()
+    proc = run_setup_infra(sandbox, bindir, only_stubs=True)
+    out = proc.stdout + proc.stderr
+    assert "RC=0" in proc.stdout and "FAILED=0" in proc.stdout, out
+    assert "./start.sh migrate" in out
+    log = calls.read_text(encoding="utf-8")
+    assert "setup_infra_env.py" in log  # порты пишутся и без Docker
+    assert "start.sh migrate" not in log
+
+
+def test_setup_infra_engine_not_running_is_soft(sandbox):
+    calls, bindir = infra_sandbox(sandbox, '[ "$1" = "info" ] && exit 1; exit 0')
+    proc = run_setup_infra(sandbox, bindir)
+    out = proc.stdout + proc.stderr
+    assert "RC=0" in proc.stdout and "FAILED=0" in proc.stdout, out
+    assert "Docker" in out and "./start.sh migrate" in out
+    assert "compose up" not in calls.read_text(encoding="utf-8")
+
+
+def test_setup_infra_offline_without_images_skips(sandbox):
+    calls, bindir = infra_sandbox(sandbox, '[ "$1" = "image" ] && exit 1; exit 0')
+    proc = run_setup_infra(sandbox, bindir, "--offline")
+    out = proc.stdout + proc.stderr
+    assert "RC=0" in proc.stdout and "FAILED=0" in proc.stdout, out
+    assert "docker load" in out and "docker save" in out
+    log = calls.read_text(encoding="utf-8")
+    assert "docker image inspect pgvector/pgvector:pg16 rabbitmq:3.13-management" in log
+    assert "compose up" not in log
+
+
+def test_setup_infra_compose_failure_marks_install(sandbox):
+    calls, bindir = infra_sandbox(sandbox, '[ "$2" = "up" ] && exit 1; exit 0')
+    proc = run_setup_infra(sandbox, bindir)
+    assert "RC=0" in proc.stdout and "FAILED=1" in proc.stdout, proc.stdout + proc.stderr
+    assert "start.sh migrate" not in calls.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("name,offline", [("install.sh", False), ("install_offline.sh", True)])
+def test_installers_run_setup_infra(name, offline):
+    text = (ROOT / name).read_text(encoding="utf-8")
+    assert ("setup_infra --offline" in text) is offline
+    assert "setup_infra" in text
+    # шаг инфраструктуры — после настройки .env
+    assert text.index("set_env_key LLM_PROVIDER") < text.index("setup_infra")
+
+
+def test_launch_sh_default_port_prints_a_real_newline():
+    r"""printf '%s<перевод строки>' — перевод строки должен быть \n, а не разрыв строки в кавычках."""
+    for name in ("launch.sh", "start.sh", "stop.sh", "install.sh", "install_offline.sh",
+                 "scripts/install_common.sh"):
+        for no, line in enumerate((ROOT / name).read_text(encoding="utf-8").splitlines(), 1):
+            if re.search(r"\bprintf\s+'", line):
+                assert line.count("'") >= 2, f"{name}:{no}: строка printf не закрыта: {line}"

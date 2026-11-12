@@ -288,3 +288,140 @@ def test_docker_compose_config_is_valid():
                           cwd=str(ROOT), capture_output=True, text=True,
                           encoding="utf-8", errors="replace")
     assert proc.returncode == 0, proc.stderr
+
+
+# ── Компоновка без .env и мелочи start/stop (follow-up WP2) ─────────────────
+
+def test_docker_compose_config_is_valid_with_env_example(tmp_path):
+    """Без .env проверка не пропускается: compose-файл и .env.example копируются
+    во временный каталог (.env.example → .env, его же читает env_file)."""
+    if DOCKER is None:
+        pytest.skip("docker CLI недоступен")
+    shutil.copy(COMPOSE_PATH, tmp_path / "docker-compose.yml")
+    shutil.copy(ROOT / ".env.example", tmp_path / ".env")
+    for extra in ([], ["--profile", "training"]):
+        proc = subprocess.run([DOCKER, "compose", "--env-file", str(tmp_path / ".env"), *extra,
+                               "config", "-q"], cwd=str(tmp_path), capture_output=True,
+                              text=True, encoding="utf-8", errors="replace")
+        if proc.returncode != 0 and "is not a docker command" in proc.stderr:
+            pytest.skip("нет плагина docker compose")
+        assert proc.returncode == 0, proc.stderr
+
+
+def test_env_example_leaves_ports_and_urls_to_the_installer():
+    """Порты и URL пусты: установщик выбирает свободные порты и пишет их сам,
+    а без него действуют 5432 / 5672 / 15672 (compose ${...:-...}, config.py)."""
+    text = (ROOT / ".env.example").read_text(encoding="utf-8")
+    for key in ("POSTGRES_PORT", "RABBITMQ_PORT", "RABBITMQ_MGMT_PORT",
+                "DATABASE_URL", "RABBITMQ_URL"):
+        assert re.search(rf"^{key}=\r?$", text, re.MULTILINE), key
+
+
+def body_of_sh(text: str, name: str) -> str:
+    part = text[text.index(f"{name}() {{"):]
+    return part[:part.index("\n}\n")]
+
+
+def body_of_cmd(text: str, label: str, end_label: str) -> str:
+    return text[text.index(f"\n:{label}\n"):text.index(f"\n:{end_label}\n")]
+
+
+def test_step_labels_are_numbered_consistently():
+    sh = START_SH.read_text(encoding="utf-8")
+    cmd = START_CMD.read_text(encoding="utf-8")
+    local_sh = body_of_sh(sh, "start_local")
+    assert 'step "1/4"' in local_sh and 'step "4/4"' in local_sh
+    assert "run_migrate 2 4" in local_sh
+    assert "run_migrate 1 2" in sh  # режим migrate
+    migrate_sh = body_of_sh(sh, "run_migrate")
+    assert 'step "$first/$total"' in migrate_sh
+    local_cmd = body_of_cmd(cmd, "local", "migrate_only")
+    assert "[1/4]" in local_cmd and "[4/4]" in local_cmd
+    assert "call :run_migrate 2 4" in local_cmd
+    assert "call :run_migrate 1 2" in body_of_cmd(cmd, "migrate_only", "run_migrate")
+    for old in ("echo [0] ", "echo [1] ", "echo [2] ", "echo [3] ", 'step 0 ', 'step 3 '):
+        assert old not in cmd and old not in sh, old
+
+
+def test_port_flag_in_docker_mode_warns_it_is_ignored():
+    sh = body_of_sh(START_SH.read_text(encoding="utf-8"), "start_docker")
+    assert "PORT_ARG" in sh and "HOST_PORT" in sh and "warn" in sh
+    cmd = body_of_cmd(START_CMD.read_text(encoding="utf-8"), "docker", "local")
+    assert "if defined PORT_ARG" in cmd and "HOST_PORT" in cmd
+
+
+def test_local_mode_refuses_a_busy_api_port():
+    """Работающий docker-стек (api на 8010) и локальный API не уживаются на одном
+    порту: вместо падения uvicorn в фоне — понятная ошибка до запуска."""
+    sh = body_of_sh(START_SH.read_text(encoding="utf-8"), "start_local")
+    assert "port_in_use" in sh
+    assert sh.index("port_in_use") < sh.index("start_bg api")
+    cmd = body_of_cmd(START_CMD.read_text(encoding="utf-8"), "local", "migrate_only")
+    assert "netstat" in cmd and "LISTENING" in cmd
+    assert cmd.index("netstat") < cmd.index('start "classifier-api"')
+
+
+@pytest.mark.skipif(BASH is None, reason="bash недоступен")
+def test_port_in_use_detects_a_listener():
+    import socket
+
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    busy = server.getsockname()[1]
+    probe = socket.socket()
+    probe.bind(("127.0.0.1", 0))
+    free = probe.getsockname()[1]
+    probe.close()
+    try:
+        script = (f"source ./start.sh; port_in_use {busy} && echo BUSY=yes || echo BUSY=no; "
+                  f"port_in_use {free} && echo FREE=busy || echo FREE=free")
+        proc = subprocess.run([BASH, "-c", script], cwd=str(ROOT), capture_output=True,
+                              text=True, encoding="utf-8", errors="replace", timeout=60)
+    finally:
+        server.close()
+    assert "BUSY=yes" in proc.stdout, proc.stdout + proc.stderr
+    assert "FREE=free" in proc.stdout, proc.stdout + proc.stderr
+
+
+def test_pidfiles_are_checked_against_the_command_line():
+    """Номер из run/*.pid после перезагрузки может принадлежать чужому процессу."""
+    start = START_SH.read_text(encoding="utf-8")
+    assert "pid_is_classifier" in body_of_sh(start, "start_bg")
+    assert "pid_is_classifier" in body_of_sh(STOP_SH.read_text(encoding="utf-8"), "stop_pidfile")
+
+
+def test_stop_cmd_compares_paths_with_a_trailing_separator():
+    r"""D:\proj не должен совпадать с D:\proj-old\venv\... — сравнение с разделителем."""
+    text = STOP_CMD.read_text(encoding="utf-8")
+    assert r"$root = $env:PROJ.TrimEnd('\') + '\'" in text
+    assert "StartsWith($root" in text
+
+
+SETUP_INFRA_CMD = ROOT / "scripts" / "setup_infra.cmd"
+
+
+def test_setup_infra_cmd_flow():
+    text = SETUP_INFRA_CMD.read_text(encoding="utf-8")
+    order = ["setup_infra_env.py", "docker info", "docker compose version",
+             "docker image inspect pgvector/pgvector:pg16 rabbitmq:3.13-management",
+             "docker compose up -d --wait postgres rabbitmq", 'start.cmd" migrate']
+    code = text[text.index('cd /d "%~dp0.."'):]  # без шапки-комментария
+    positions = [code.index(item) for item in order]
+    assert positions == sorted(positions), order
+    assert "docker load" in text and "docker save" in text
+    assert "start.cmd migrate" in text  # подсказка «позже»
+    raw = SETUP_INFRA_CMD.read_bytes()
+    assert raw.isascii()
+    assert b"\r\n" in raw and re.search(rb"[^\r]\n", raw) is None
+
+
+@pytest.mark.parametrize("name,arg", [("install.bat", ""), ("install_offline.bat", " offline")])
+def test_bat_installers_run_setup_infra(name, arg):
+    text = (ROOT / name).read_text(encoding="utf-8", errors="replace")
+    call = 'call "%PROJECT%\\scripts\\setup_infra.cmd"' + arg
+    assert call in text
+    if not arg:
+        assert 'setup_infra.cmd" offline' not in text
+    # после настройки .env
+    assert text.index("LLM_PROVIDER") < text.index(call)

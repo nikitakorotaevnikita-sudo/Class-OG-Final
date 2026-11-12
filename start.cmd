@@ -5,6 +5,7 @@ setlocal enabledelayedexpansion
 ::
 ::   start.cmd [docker]            whole stack in Docker (default)
 ::   start.cmd local [--port N]    PostgreSQL + RabbitMQ in Docker, API and workers from venv
+::                                 (--port is local only; docker mode uses HOST_PORT)
 ::   start.cmd migrate             schema + file import only (the DB must be running)
 ::
 ::   --training                    also start the fine-tuning worker
@@ -64,6 +65,10 @@ set "PROFILE="
 if "%TRAINING%"=="1" set "PROFILE=--profile training"
 echo.
 echo === Starting the stack in Docker ===
+if defined PORT_ARG (
+    call :read_env HOST_PORT 8010 HPORT
+    echo WARNING: --port !PORT_ARG! is ignored in docker mode - the API port is HOST_PORT in .env ^(!HPORT!^).
+)
 docker compose %PROFILE% up -d --build
 if errorlevel 1 (
     echo ERROR: docker compose up failed. See: docker compose logs migrate api
@@ -81,13 +86,13 @@ call :require_venv || exit /b 1
 echo.
 echo === Local mode: infrastructure in Docker, service from venv ===
 call :resolve_urls || exit /b 1
-echo [0] PostgreSQL and RabbitMQ
+echo [1/4] PostgreSQL and RabbitMQ
 docker compose up -d --wait postgres rabbitmq
 if errorlevel 1 (
     echo ERROR: postgres/rabbitmq did not become healthy. See: docker compose logs postgres rabbitmq
     exit /b 1
 )
-call :run_migrate || exit /b 1
+call :run_migrate 2 4 || exit /b 1
 
 call :read_env API_PORT 8010 PORT
 if defined PORT_ARG set "PORT=%PORT_ARG%"
@@ -99,7 +104,17 @@ if !WORKERS! LSS 1 set "WORKERS=1"
 :: Child windows inherit this environment (PYTHONPATH) and the working dir.
 :: Window titles start with "classifier-": stop.cmd local closes them by title.
 :: cmd /k keeps a window open after a crash so the error stays readable.
-echo [3] API and !WORKERS! classify worker^(s^)
+echo [4/4] API and !WORKERS! classify worker^(s^)
+:: A busy API port usually means the Docker stack is running (its api publishes
+:: HOST_PORT=8010) or an earlier start.cmd local: uvicorn would die in its window
+:: and /health would be answered by the other service. Stop with a clear error.
+netstat -ano -p TCP | findstr /R /C:"^ *TCP *[0-9.]*:!PORT! .*LISTENING" >nul 2>&1
+if not errorlevel 1 (
+    echo ERROR: port !PORT! is already in use.
+    echo        Docker stack running? Stop it: stop.cmd   Earlier local start? stop.cmd local
+    echo        Or use another port: start.cmd local --port N
+    exit /b 1
+)
 start "classifier-api" /D "%PROJECT%" cmd /k %PY% -m uvicorn src.api_server:app --host !HOST! --port !PORT!
 :: The solo pool runs one task per process (prefork does not work on Windows),
 :: so parallelism comes from CLASSIFY_WORKERS separate processes.
@@ -116,22 +131,29 @@ exit /b 0
 :: ---------------------------------------------------------------- migrate
 :migrate_only
 call :require_venv || exit /b 1
-call :run_migrate || exit /b 1
+call :run_migrate 1 2 || exit /b 1
 echo   OK: migration finished
 exit /b 0
 
 :: ================================================================ helpers
 
+:: run_migrate FIRST TOTAL - two steps (schema, import) numbered FIRST/TOTAL
+:: and FIRST+1/TOTAL: local mode 2/4 and 3/4, migrate mode 1/2 and 2/2.
 :run_migrate
+set "S_NO=%~1"
+set "S_TOTAL=%~2"
+if not defined S_NO set "S_NO=1"
+if not defined S_TOTAL set "S_TOTAL=2"
 set "PYTHONPATH=%PROJECT%\src"
 call :resolve_urls || exit /b 1
-echo [1] Database schema
+echo [!S_NO!/!S_TOTAL!] Database schema
 %PY% scripts\db\init_db.py
 if errorlevel 1 (
     echo ERROR: schema was not applied - is PostgreSQL reachable at DATABASE_URL?
     exit /b 1
 )
-echo [2] Import of file storage into the DB ^(skipped once done; --force to redo^)
+set /a S_NO=S_NO+1
+echo [!S_NO!/!S_TOTAL!] Import of file storage into the DB ^(skipped once done; --force to redo^)
 %PY% scripts\db\migrate_from_files.py
 if errorlevel 1 (
     echo ERROR: migration reconciliation failed - see the table above. Service not started.

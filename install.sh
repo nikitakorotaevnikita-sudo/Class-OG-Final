@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Установка прототипа классификатора обращений на Linux.
-# Аналог install.bat: venv, зависимости, диалог по .env, проверка.
+# Аналог install.bat: venv, зависимости, диалог по .env, проверка, затем
+# PostgreSQL + RabbitMQ в Docker на свободных портах (пишутся в .env) и миграция.
 #
 #   ./install.sh                    обычная установка (torch для CPU)
 #   ./install.sh --gpu              torch с CUDA (образ втрое тяжелее)
@@ -43,17 +44,17 @@ require_project_root
 warn_if_root
 
 # ── 1. Python ─────────────────────────────────────────────────────────────────
-step "1/6" "Поиск Python 3.11 / 3.12 / 3.13"
+step "1/7" "Поиск Python 3.11 / 3.12 / 3.13"
 find_python || die "не найден Python 3.11, 3.12 или 3.13.
    Установить, например:  sudo apt install python3.11 python3.11-venv"
 ok "$PYTHON ($PYTHON_VERSION)"
 
 # ── 2. venv ───────────────────────────────────────────────────────────────────
-step "2/6" "Виртуальное окружение"
+step "2/7" "Виртуальное окружение"
 ensure_venv
 
 # ── 3. Зависимости ────────────────────────────────────────────────────────────
-step "3/6" "Зависимости"
+step "3/7" "Зависимости"
 "$VENV_PY" -m pip install --upgrade pip --quiet || warn "pip не обновился, продолжаю"
 
 if [ "$TORCH_FLAVOUR" = "cpu" ]; then
@@ -68,7 +69,7 @@ fi
 ok "зависимости установлены"
 
 # ── 4. .env ───────────────────────────────────────────────────────────────────
-step "4/6" "Настройки (.env)"
+step "4/7" "Настройки (.env)"
 if [ ! -f "$ENV_FILE" ]; then
     cp .env.example "$ENV_FILE"
     say "создан .env из .env.example"
@@ -140,7 +141,7 @@ fi
 chmod 600 "$ENV_FILE" 2>/dev/null && ok ".env закрыт правами 600 (в нём ключи)"
 
 # ── 5. Векторная база ─────────────────────────────────────────────────────────
-step "5/6" "Векторы для переноса в PostgreSQL"
+step "5/7" "Векторы для переноса в PostgreSQL"
 VDB="$(vdb_dir)"
 if [ -f "$VDB/embeddings.npy" ]; then
     ok "база на месте: $VDB"
@@ -152,18 +153,23 @@ elif [ -f offline_bundle/vector_db_prebuilt/embeddings.npy ]; then
 else
     warn "нет файлов векторов в $VDB — перенос в PostgreSQL (./start.sh migrate) не пройдёт"
 fi
-say "векторы переносятся в PostgreSQL командой ./start.sh migrate"
-say "(./start.sh local делает это сам; в Docker — сервис migrate)"
+say "векторы переносятся в PostgreSQL на шаге 7 (повторить: ./start.sh migrate)"
 
 # ── 6. Проверка ───────────────────────────────────────────────────────────────
-step "6/6" "Проверка установки"
+step "6/7" "Проверка установки"
 "$VENV_PY" scripts/check_offline.py --stage post --online || {
     warn "проверка нашла проблемы — см. выше"
     CHECK_FAILED=1
 }
 
+# ── 7. PostgreSQL + RabbitMQ ──────────────────────────────────────────────────
+# Свободные порты хоста → .env, контейнеры postgres и rabbitmq, миграция.
+# Нет Docker или он не запущен — не ошибка: подсказка запустить позже.
+step "7/7" "PostgreSQL и RabbitMQ в Docker, перенос данных"
+setup_infra
+
 banner "Установка завершена"
-printf '   Запуск:      ./start.sh local --port %s  (или ./start.sh — весь стек в Docker)\n' "$PORT"
+printf '   Запуск:      ./launch.sh server %s  (= ./start.sh local; весь стек в Docker: ./start.sh)\n' "$PORT"
 printf '   Остановка:   ./stop.sh local\n'
 printf '   Проверка:    curl http://127.0.0.1:%s/health\n' "$PORT"
 printf '   Бэк-офис:    http://<адрес-машины>:%s/backoffice\n\n' "$PORT"

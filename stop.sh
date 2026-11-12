@@ -26,6 +26,13 @@ stop_pidfile() {
         rm -f "$pidfile"
         return 0
     fi
+    # Номер из pid-файла после перезагрузки мог достаться чужому процессу:
+    # убиваем только наш API / воркер (по командной строке).
+    if ! pid_is_classifier "$pid"; then
+        warn "$name: pid $pid принадлежит другому процессу — не трогаю, pid-файл удалён"
+        rm -f "$pidfile"
+        return 0
+    fi
     kill -TERM "$pid" 2>/dev/null || true
     for i in $(seq 1 30); do
         kill -0 "$pid" 2>/dev/null || break
