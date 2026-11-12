@@ -9,6 +9,8 @@ from typing import Optional
 
 from dotenv import load_dotenv
 
+import service_urls
+
 # Загружаем .env из корня проекта
 load_dotenv(Path(__file__).parent.parent / ".env")
 
@@ -228,11 +230,13 @@ def _flag(name: str, default: str = "false") -> bool:
 
 
 STORAGE_BACKEND: str = os.getenv("STORAGE_BACKEND", "postgres")  # "postgres" | "memory" (тесты)
-DATABASE_URL: str = os.getenv(
-    "DATABASE_URL", "postgresql://classifier:classifier@localhost:5432/classifier"
-)
+# Не заданы (или пусты) — собираются из POSTGRES_USER/PASSWORD/DB/PORT и
+# RABBITMQ_DEFAULT_USER/PASS + RABBITMQ_PORT, как в start-скриптах: иначе
+# operator_cli / test_agent ушли бы на localhost:5432/5672 (там может быть
+# «родной» PostgreSQL / RabbitMQ, а не контейнеры проекта).
+DATABASE_URL: str = service_urls.database_url(os.environ)
 DB_POOL_MAX: int = int(os.getenv("DB_POOL_MAX", "10"))
-RABBITMQ_URL: str = os.getenv("RABBITMQ_URL", "amqp://classifier:classifier@localhost:5672//")
+RABBITMQ_URL: str = service_urls.rabbitmq_url(os.environ)
 # Heartbeat AMQP, с. 0 — выключен: solo-пул не шлёт heartbeat во время задачи,
 # и RabbitMQ рвал бы соединение долгой классификации (повторная доставка).
 BROKER_HEARTBEAT_SEC: int = int(os.getenv("BROKER_HEARTBEAT_SEC", "0"))
