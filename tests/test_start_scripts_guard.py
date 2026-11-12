@@ -152,3 +152,20 @@ def test_stop_cmd_kills_project_python_by_command_line():
     assert "%~dp0" in text and "PROJ" in local
     # заголовок окна — запасной шаг для оставшихся окон cmd
     assert local.index("Win32_Process") < local.index("WINDOWTITLE eq classifier-*")
+
+
+# ── .gitattributes: пакетные файлы всегда с CRLF ────────────────────────────
+
+def test_batch_files_checked_out_with_crlf_regardless_of_autocrlf():
+    """eol=crlf в .gitattributes: клон с core.autocrlf=false и zip-архив GitHub
+    тоже получают CRLF (cmd.exe с LF ошибается в метках и goto)."""
+    git = shutil.which("git")
+    if git is None:
+        pytest.skip("git недоступен")
+    files = ["start.cmd", "stop.cmd", "launch.bat", "install.bat",
+             "install_offline.bat", "scripts/setup_infra.cmd"]
+    out = subprocess.run([git, "check-attr", "text", "eol", "--", *files], cwd=ROOT,
+                         capture_output=True, text=True, check=True).stdout
+    for name in files:
+        assert f"{name}: eol: crlf" in out, out
+        assert f"{name}: text: set" in out, out
