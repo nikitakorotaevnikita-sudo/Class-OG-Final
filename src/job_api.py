@@ -118,7 +118,6 @@ async def wait_job(job_id: str, timeout: float, *,
 
 # ── Готовность воркеров классификации (/health, GET /integration/jobs) ────────
 
-CLASSIFY_QUEUES = frozenset({"classify_sync", "classify"})
 _PING_CACHE_SEC = 2.0
 _ping_cache: dict = {"at": None, "value": (False, False), "task": None}
 
@@ -130,12 +129,13 @@ def _ping_workers() -> tuple[bool, bool]:
     ping тоже отвечает, но классификацию не выполняет.
     """
     try:
-        from queueing.celery_app import app as celery_app
+        from queueing.celery_app import QUEUE_NAMES, app as celery_app
         replies = celery_app.control.inspect(timeout=1).active_queues() or {}
     except Exception as exc:  # noqa: BLE001 — /health не должен падать
         log.warning("Опрос воркеров Celery не удался: %s", exc)
         return False, False
-    ready = any(q.get("name") in CLASSIFY_QUEUES
+    classify_queues = set(QUEUE_NAMES) - {"training"}
+    ready = any(q.get("name") in classify_queues
                 for queues in replies.values() for q in (queues or []))
     return ready, True
 

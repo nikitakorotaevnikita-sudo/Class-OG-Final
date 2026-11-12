@@ -382,6 +382,13 @@ def _train(storage, source: str, force: bool, train_fn: TrainFn, result: dict, s
         # Папку создал этот запуск, а версии в реестре нет: удаляем, иначе сирота
         # (модель + training_report.json) повторно зарегистрировалась бы миграцией.
         shutil.rmtree(output_path, ignore_errors=True)
+        if output_path.exists():
+            # Windows: файлы, отображённые в память, могут не удалиться; следующий
+            # запуск упрётся в «уже существует» — пишем причину в лог результата.
+            say(f"  Не удалось удалить папку {output_path}: удалите её вручную "
+                f"перед следующим дообучением.")
+        else:
+            result["model_path"] = None  # папки больше нет
         raise
     result.update(recall5_before=recall_before, recall5_after=recall_after)
 

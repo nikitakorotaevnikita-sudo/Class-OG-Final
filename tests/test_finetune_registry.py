@@ -477,6 +477,22 @@ def test_failed_train_removes_model_dir(store):
 
     assert result["status"] == "failed"
     assert not (Path(config.MODELS_DIR) / "e5-finetuned-v1").exists()
+    assert result["model_path"] is None  # папки уже нет — не указываем на неё
+
+
+def test_cleanup_failure_is_logged_and_path_kept(store, monkeypatch):
+    storage = seed(store)
+
+    # Windows: файлы, отображённые в память, не удаляются — папка остаётся.
+    monkeypatch.setattr(finetune_model.shutil, "rmtree", lambda *a, **kw: None)
+
+    result = finetune_model.run_training(
+        storage, train_fn=FakeTrain(error=RuntimeError("CUDA OOM")))
+
+    assert result["status"] == "failed"
+    assert "e5-finetuned-v1" in result["log_tail"]
+    assert "Не удалось удалить" in result["log_tail"]
+    assert result["model_path"] is not None  # папка осталась — путь сохранён
 
 
 def test_lost_registration_race_removes_own_model_dir(store):
@@ -528,7 +544,7 @@ def test_model_dir_is_created_exclusively(monkeypatch):
 @pytest.mark.parametrize("base, expected", [
     ("intfloat/multilingual-e5-base", "e5-finetuned-v1"),
     ("models/e5-finetuned-v3", "e5-finetuned-v1"),
-    ("D:\models\multilingual-e5-large", "e5-finetuned-v1"),
+    (r"D:\models\multilingual-e5-large", "e5-finetuned-v1"),
     ("BAAI/bge-m3", "bge-m3-finetuned-v1"),
     ("models/bge-m3-finetuned-v2", "bge-m3-finetuned-v1"),
     ("sergeyzh/rubert-tiny 2", "rubert-tiny-2-finetuned-v1"),
