@@ -44,7 +44,7 @@ python src/cli/operator_cli.py
 # Queue a fine-tuning job (threshold applies to every source unless --force)
 python src/training/auto_finetune.py [--force]
 
-# Processes by hand (PYTHONPATH=src: modules are imported top-level)
+# Processes by hand (PYTHONPATH=src: src is the import root, packages api, core, queueing, ...)
 uvicorn api.api_server:app --app-dir src --host 0.0.0.0 --port 8010
 PYTHONPATH=src celery -A queueing.celery_app worker -Q classify_sync,classify -c 2 --loglevel=INFO
 PYTHONPATH=src celery -A queueing.celery_app worker -Q training -c 1      # Windows: --pool=solo

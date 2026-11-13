@@ -39,7 +39,7 @@ COPY models/adapter_v1.json ./models/adapter_v1.json
 COPY models/ltr_v1.json ./models/ltr_v1.json
 COPY .env.example .env
 
-# Модули из src/ импортируются верхним уровнем (`from core import config`,
+# src/ — корень импорта, модули разложены по пакетам (`from core import config`,
 # `queueing.celery_app`) — нужно и celery-воркерам, и скриптам миграции.
 ENV PYTHONPATH=/app/src
 

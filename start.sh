@@ -143,7 +143,7 @@ resolve_service_urls() {
     say "PostgreSQL: $db_hp   RabbitMQ: $mq_hp"
 }
 
-# Модули из src/ импортируются верхним уровнем (from core import config, queueing.celery_app).
+# src/ — корень импорта, модули разложены по пакетам (from core import config, queueing.celery_app).
 export_pythonpath() {
     export PYTHONPATH="$PWD/src${PYTHONPATH:+:$PYTHONPATH}"
 }

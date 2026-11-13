@@ -133,3 +133,14 @@ def test_entry_script_bootstraps_src_root(script):
     text = (SRC / script).read_text(encoding="utf-8")
     assert "_SRC = Path(__file__).resolve().parents[1]" in text
     assert "sys.path[0] = str(_SRC)" in text
+
+
+def test_entry_script_runs_from_its_package_folder():
+    """Реальный запуск `python src/training/auto_finetune.py --help` из корня проекта."""
+    proc = subprocess.run(
+        [sys.executable, str(SRC / "training" / "auto_finetune.py"), "--help"],
+        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=120,
+        env={**os.environ, "PYTHONUTF8": "1", "PYTHONPATH": ""},
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "--force" in proc.stdout
