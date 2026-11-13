@@ -185,7 +185,7 @@ def test_dockerfile_copies_scripts_and_deploy():
     assert re.search(r"^COPY\s+scripts/\s+\./scripts/", text, re.MULTILINE)
     assert re.search(r"^COPY\s+deploy/\s+\./deploy/", text, re.MULTILINE)
     assert "ARG PYTHON_VERSION" in text
-    assert 'CMD ["uvicorn", "src.api_server:app"' in text
+    assert 'CMD ["uvicorn", "api.api_server:app", "--app-dir", "src"' in text
 
 
 # ── Скрипты запуска ─────────────────────────────────────────────────────────

@@ -37,8 +37,8 @@ case "${1:-menu}" in
     server)   run_server "${2:-}" ;;
     check)    exec "$VENV_PY" scripts/check_offline.py --stage post --online ;;
     tests)    exec "$VENV_PY" -m pytest tests/ -q --ignore=tests/e2e ;;
-    operator) exec "$VENV_PY" src/operator_cli.py ;;
-    classify) exec "$VENV_PY" src/classify_manual.py ;;
+    operator) exec "$VENV_PY" src/cli/operator_cli.py ;;
+    classify) exec "$VENV_PY" src/cli/classify_manual.py ;;
     menu)
         banner "Классификатор обращений граждан"
         printf '   [1] Запустить сервис (порт 8010)\n'
@@ -52,8 +52,8 @@ case "${1:-menu}" in
             2) ask SRV_PORT "Порт" "8010"; run_server "$SRV_PORT" ;;
             3) exec "$VENV_PY" scripts/check_offline.py --stage post --online ;;
             4) exec "$VENV_PY" -m pytest tests/ -q --ignore=tests/e2e ;;
-            5) exec "$VENV_PY" src/operator_cli.py ;;
-            6) exec "$VENV_PY" src/classify_manual.py ;;
+            5) exec "$VENV_PY" src/cli/operator_cli.py ;;
+            6) exec "$VENV_PY" src/cli/classify_manual.py ;;
             *) run_server 8010 ;;
         esac
         ;;

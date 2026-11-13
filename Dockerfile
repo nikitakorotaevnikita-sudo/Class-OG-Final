@@ -39,11 +39,11 @@ COPY models/adapter_v1.json ./models/adapter_v1.json
 COPY models/ltr_v1.json ./models/ltr_v1.json
 COPY .env.example .env
 
-# Модули из src/ импортируются верхним уровнем (`import config`,
+# Модули из src/ импортируются верхним уровнем (`from core import config`,
 # `queueing.celery_app`) — нужно и celery-воркерам, и скриптам миграции.
 ENV PYTHONPATH=/app/src
 
 EXPOSE 8005
 
 # По умолчанию — API. Воркеры и migrate переопределяют command в docker-compose.yml.
-CMD ["uvicorn", "src.api_server:app", "--host", "0.0.0.0", "--port", "8005"]
+CMD ["uvicorn", "api.api_server:app", "--app-dir", "src", "--host", "0.0.0.0", "--port", "8005"]

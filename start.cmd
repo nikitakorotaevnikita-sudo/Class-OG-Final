@@ -115,7 +115,7 @@ if not errorlevel 1 (
     echo        Or use another port: start.cmd local --port N
     exit /b 1
 )
-start "classifier-api" /D "%PROJECT%" cmd /k %PY% -m uvicorn src.api_server:app --host !HOST! --port !PORT!
+start "classifier-api" /D "%PROJECT%" cmd /k %PY% -m uvicorn api.api_server:app --app-dir src --host !HOST! --port !PORT!
 :: The solo pool runs one task per process (prefork does not work on Windows),
 :: so parallelism comes from CLASSIFY_WORKERS separate processes.
 for /L %%i in (1,1,!WORKERS!) do (

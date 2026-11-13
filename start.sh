@@ -143,7 +143,7 @@ resolve_service_urls() {
     say "PostgreSQL: $db_hp   RabbitMQ: $mq_hp"
 }
 
-# Модули из src/ импортируются верхним уровнем (import config, queueing.celery_app).
+# Модули из src/ импортируются верхним уровнем (from core import config, queueing.celery_app).
 export_pythonpath() {
     export PYTHONPATH="$PWD/src${PYTHONPATH:+:$PYTHONPATH}"
 }
@@ -224,7 +224,7 @@ start_local() {
     if ! pidfile_alive api && port_in_use "$port"; then
         die "порт $port уже занят. Если запущен docker-стек — остановить: ./stop.sh; иначе другой порт: ./start.sh local --port N"
     fi
-    start_bg api "$VENV_PY" -m uvicorn src.api_server:app --host "$host" --port "$port"
+    start_bg api "$VENV_PY" -m uvicorn api.api_server:app --app-dir src --host "$host" --port "$port"
     # prefork: один процесс-мастер, CLASSIFY_CONCURRENCY дочерних классификаций.
     start_bg worker-classify "$VENV_PY" -m celery -A queueing.celery_app worker \
         -Q classify_sync,classify --pool=prefork -c "$concurrency" -n "classify@%h" --loglevel=INFO

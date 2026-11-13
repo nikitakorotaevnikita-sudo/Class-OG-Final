@@ -28,16 +28,16 @@ data/historical/              # пользователь кладёт файлы
 
 ```bash
 # Однократный прогон — обрабатывает все файлы в папке
-python src/auto_import_historical.py
+python src/training/auto_import_historical.py
 
 # Режим наблюдения — автоматически обрабатывает новые файлы каждые 30 сек
-python src/auto_import_historical.py --watch
+python src/training/auto_import_historical.py --watch
 
 # Кастомный интервал (например 60 секунд)
-python src/auto_import_historical.py --watch --interval 60
+python src/training/auto_import_historical.py --watch --interval 60
 
 # Справка
-python src/auto_import_historical.py --help
+python src/training/auto_import_historical.py --help
 ```
 
 ## Что делает скрипт

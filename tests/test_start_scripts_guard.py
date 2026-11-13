@@ -147,7 +147,7 @@ def test_stop_cmd_kills_project_python_by_command_line():
     text = STOP_CMD.read_text(encoding="utf-8")
     local = text[text.index("\n:local\n"):text.index("\n:help\n")]
     assert "Win32_Process" in local
-    assert "queueing\\.celery_app|src\\.api_server:app|uvicorn" in local
+    assert "queueing\\.celery_app|api\\.api_server:app|uvicorn" in local
     assert "taskkill /F /T /PID" in local
     assert "%~dp0" in text and "PROJ" in local
     # заголовок окна — запасной шаг для оставшихся окон cmd

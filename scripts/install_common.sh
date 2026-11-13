@@ -168,7 +168,7 @@ pid_is_classifier() {
     kill -0 "$pid" 2>/dev/null || return 1
     cmd="$(pid_cmdline "$pid")"
     case "$cmd" in
-        *src.api_server:app*|*queueing.celery_app*) return 0 ;;
+        *api.api_server:app*|*queueing.celery_app*) return 0 ;;
     esac
     return 1
 }

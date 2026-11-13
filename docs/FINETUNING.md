@@ -9,12 +9,12 @@
 ## Запуск переобучения
 
 ```bash
-python src/finetune_model.py
+python src/training/finetune_model.py
 ```
 
 После обучения:
 1. Указать новую модель в `.env`: `EMBEDDING_MODEL=models/e5-finetuned-v1`
-2. Пересобрать векторную базу: `python src/build_vectordb.py`
+2. Пересобрать векторную базу: `python src/training/build_vectordb.py`
 3. Перезапустить сервер
 
 ## Метрики

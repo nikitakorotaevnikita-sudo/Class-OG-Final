@@ -36,16 +36,16 @@ TEST_DATABASE_URL=postgresql://classifier:classifier@localhost:5433/classifier \
 python -m pytest tests/test_search.py::test_flat_entries_count
 
 # Run 4 built-in classification test appeals (needs a reachable DB, no broker)
-python src/test_agent.py
+python src/cli/test_agent.py
 
 # Interactive operator mode (verification + fine-tuning trigger)
-python src/operator_cli.py
+python src/cli/operator_cli.py
 
 # Queue a fine-tuning job (threshold applies to every source unless --force)
-python src/auto_finetune.py [--force]
+python src/training/auto_finetune.py [--force]
 
 # Processes by hand (PYTHONPATH=src: modules are imported top-level)
-uvicorn src.api_server:app --host 0.0.0.0 --port 8010
+uvicorn api.api_server:app --app-dir src --host 0.0.0.0 --port 8010
 PYTHONPATH=src celery -A queueing.celery_app worker -Q classify_sync,classify -c 2 --loglevel=INFO
 PYTHONPATH=src celery -A queueing.celery_app worker -Q training -c 1      # Windows: --pool=solo
 ```
@@ -121,16 +121,34 @@ ClassificationResult → appeal card / questions in PostgreSQL
 
 ### Key files
 
-- **`src/config.py`** — all constants from `.env`. Single source of truth for paths, model names, `DATABASE_URL`, `RABBITMQ_URL` (defaults built by `src/service_urls.py` from `POSTGRES_*` / `RABBITMQ_*` + ports).
+`src/` is the import root; no module lives directly in it. Packages by role (every
+`__init__.py` is empty, so importing one module never pulls its neighbours):
+
+| Package | Modules |
+|---|---|
+| `src/api/` | `api_server.py`, `integration_api.py`, `job_api.py`, `responses.py`, `static/` (UI) |
+| `src/classifier/` | `classifier_agent.py`, `hierarchy.py`, `reranker.py`, `section_router.py`, `llm_schemas.py`, `llm_check.py`, `fio_extractor.py`, `email_extractor.py` |
+| `src/queueing/` | `celery_app.py`, `dispatcher.py`, `tasks.py`, `waiter.py`, `warmup.py`, `webhook.py` |
+| `src/worker/` | `worker_main.py` |
+| `src/storage/` | DB layer + `appeals_logger.py`, `annotations_storage.py` |
+| `src/training/` | `finetune_model.py`, `auto_finetune.py`, `build_vectordb.py`, `historical_loader.py`, `auto_import_historical.py` |
+| `src/integrations/` | `rx_client.py`, `text_extractor.py`, `proxy_policy.py` |
+| `src/core/` | `config.py`, `env_bootstrap.py`, `settings_store.py`, `service_urls.py` |
+| `src/cli/` | `operator_cli.py`, `classify_manual.py`, `test_agent.py` |
+
+Imports are package-qualified (`from core import config`, `from classifier.classifier_agent import ClassifierAgent`);
+`tests/test_src_layout.py` enforces the layout.
+
+- **`src/core/config.py`** — all constants from `.env`. Single source of truth for paths, model names, `DATABASE_URL`, `RABBITMQ_URL` (defaults built by `src/core/service_urls.py` from `POSTGRES_*` / `RABBITMQ_*` + ports).
 - **`scripts/setup_infra_env.py`** — installer helper: picks free host ports for PostgreSQL/RabbitMQ, writes them and the URLs to `.env` (keeps BOM/line endings, never prints passwords). Used by `scripts/setup_infra.cmd` and `setup_infra` in `scripts/install_common.sh`.
 - **`src/storage/`** — persistence layer: `db.py` (psycopg pool, pgvector), `schema.sql` (canonical DDL, byte-identical copy in `deploy/db/init/002_schema.sql`), repos for classifier/vectors, appeals, jobs, historical, models; `memory.py` in-memory twins for tests; `get_storage()` picks by `STORAGE_BACKEND`.
 - **`src/queueing/`** — `celery_app.py` (broker, quorum queues, acks_late), `tasks.py` (classify, search, annotation embedding, finetune), `dispatcher.py` + `waiter.py` (API side: send_task, LISTEN job_done), `webhook.py`.
-- **`src/worker_main.py`** — worker bootstrap: one `ClassifierAgent` per process, model-change and `.env` hot reload.
-- **`src/classifier_agent.py`** — `ClassifierAgent.classify(text, appeal_id=None) → ClassificationResult`; metadata and dense search from the DB.
-- **`src/appeals_logger.py`** — same public API as before, backed by the appeals repo (cards, questions, verifications `pending/confirmed/corrected/rejected`).
-- **`src/api_server.py`** / **`src/integration_api.py`** — thin FastAPI over storage + dispatcher + waiter. `/health` reports DB, broker and worker readiness. RX contract unchanged.
-- **`src/finetune_model.py`** — reads verified + historical data from the DB, fine-tunes with `MultipleNegativesRankingLoss`, saves `models/e5-finetuned-vN/`, builds vectors for version N, registers it in `ml_model_registry` (activates only if recall@5 improved).
-- **`src/build_vectordb.py`** — fills `classifier_vectors` for a model version (called by fine-tuning).
+- **`src/worker/worker_main.py`** — worker bootstrap: one `ClassifierAgent` per process, model-change and `.env` hot reload.
+- **`src/classifier/classifier_agent.py`** — `ClassifierAgent.classify(text, appeal_id=None) → ClassificationResult`; metadata and dense search from the DB.
+- **`src/storage/appeals_logger.py`** — same public API as before, backed by the appeals repo (cards, questions, verifications `pending/confirmed/corrected/rejected`).
+- **`src/api/api_server.py`** / **`src/api/integration_api.py`** — thin FastAPI over storage + dispatcher + waiter. `/health` reports DB, broker and worker readiness. RX contract unchanged.
+- **`src/training/finetune_model.py`** — reads verified + historical data from the DB, fine-tunes with `MultipleNegativesRankingLoss`, saves `models/e5-finetuned-vN/`, builds vectors for version N, registers it in `ml_model_registry` (activates only if recall@5 improved).
+- **`src/training/build_vectordb.py`** — fills `classifier_vectors` for a model version (called by fine-tuning).
 - **`scripts/db/`** — `init_db.py`, `migrate_from_files.py`, `verify_search_parity.py`.
 - **`docker-compose.yml`, `start.*`, `stop.*`, `deploy/db/init/`** — deployment.
 
@@ -170,7 +188,7 @@ POSTGRES_PORT=           # host ports; empty = 5432/5672/15672; the installer pi
 RABBITMQ_PORT=           #   ones (fallbacks 5434.., 5673.., 15673..) and writes them here
 RABBITMQ_MGMT_PORT=
 DATABASE_URL=            # empty -> built from POSTGRES_USER/PASSWORD/DB + POSTGRES_PORT
-RABBITMQ_URL=            #   (src/service_urls.py, credentials URL-encoded)
+RABBITMQ_URL=            #   (src/core/service_urls.py, credentials URL-encoded)
 CLASSIFY_CONCURRENCY=2   # per worker; CLASSIFY_WORKERS=2 processes for start.cmd local
 SYNC_WAIT_TIMEOUT_SEC=1800
 WEBHOOK_ALLOWED_HOSTS=   # exact hostnames, comma-separated; empty = webhooks off
@@ -185,8 +203,8 @@ In compose, `DATABASE_URL`/`RABBITMQ_URL` are overridden to the service hostname
 - `numpy` major is chosen by environment marker: `<2.0` below Python 3.12 (the version prod
   is verified on), `>=2.1` from 3.12 up (numpy 1.26 has no cp313 wheels). Project code uses
   no aliases removed in numpy 2.0, so the bump needs no source changes.
-- Every process needs `src` on `PYTHONPATH` (modules are imported top-level: `import config`,
-  `queueing.celery_app`); the image sets `PYTHONPATH=/app/src`.
+- Every process needs `src` on `PYTHONPATH` (`src` is the import root: `from core import config`,
+  `queueing.celery_app`, `api.api_server:app`); the image sets `PYTHONPATH=/app/src`.
 - `data/vector_db/` and `models/` are excluded from Git (see `.gitignore`). The former
   production file DB `data/vector_db_adapted_v3` **is** in Git: it is the source of model
   version 0 for `migrate_from_files.py` (`VECTOR_DB_DIR` points at it).

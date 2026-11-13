@@ -35,10 +35,10 @@ cp .env.example .env
 # Заполнить GROQ_API_KEY
 
 # 3. Построить векторную базу (один раз)
-python src/build_vectordb.py
+python src/training/build_vectordb.py
 
 # 4. Запустить сервер
-uvicorn src.api_server:app --host 0.0.0.0 --port 8000
+uvicorn api.api_server:app --app-dir src --host 0.0.0.0 --port 8000
 
 # 5. Открыть
 open http://localhost:8000

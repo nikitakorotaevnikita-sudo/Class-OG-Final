@@ -36,7 +36,7 @@ docker compose --profile training down
 exit /b %errorlevel%
 
 :local
-:: 1) Python processes of THIS project: API (uvicorn src.api_server:app) and
+:: 1) Python processes of THIS project: API (uvicorn api.api_server:app) and
 ::    Celery workers (queueing.celery_app) whose executable path or command
 ::    line lies under the project folder. Window titles are not reliable: an
 ::    elevated console prefixes them ("Administrator: classifier-api").
@@ -44,7 +44,7 @@ exit /b %errorlevel%
 ::    A task killed mid-classification is not lost: acks_late re-queues it.
 ::    $root ends with a backslash, so D:\proj does not match D:\proj-old\...
 set "PROJ=%~dp0"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$root = $env:PROJ.TrimEnd('\') + '\'; Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'python.exe' -and $_.CommandLine -match 'queueing\.celery_app|src\.api_server:app|uvicorn' -and ((($_.ExecutablePath) -and $_.ExecutablePath.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) -or $_.CommandLine.IndexOf($root, [StringComparison]::OrdinalIgnoreCase) -ge 0) } | ForEach-Object { taskkill /F /T /PID $_.ProcessId 2>$null | Out-Null; Write-Output ('  stopped PID ' + $_.ProcessId) }"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$root = $env:PROJ.TrimEnd('\') + '\'; Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'python.exe' -and $_.CommandLine -match 'queueing\.celery_app|api\.api_server:app|uvicorn' -and ((($_.ExecutablePath) -and $_.ExecutablePath.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) -or $_.CommandLine.IndexOf($root, [StringComparison]::OrdinalIgnoreCase) -ge 0) } | ForEach-Object { taskkill /F /T /PID $_.ProcessId 2>$null | Out-Null; Write-Output ('  stopped PID ' + $_.ProcessId) }"
 :: 2) Leftover cmd windows of start.cmd local (titles start with "classifier-").
 taskkill /F /T /FI "WINDOWTITLE eq classifier-*" >nul 2>&1
 echo   OK: classifier processes and windows closed ^(if any were open^).

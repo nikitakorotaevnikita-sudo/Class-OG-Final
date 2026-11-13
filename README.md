@@ -291,16 +291,16 @@ Merge с lexical-пулом и иерархические бусты систе�
 
 ```bash
 # Fine-tuning только на исторических данных
-python src/finetune_model.py --source historical
+python src/training/finetune_model.py --source historical
 
 # Комбинированный (исторические + верифицированные, 3x вес для исторических)
-python src/finetune_model.py --source combined
+python src/training/finetune_model.py --source combined
 ```
 
 Автоматический импорт из папки:
 ```bash
-python src/auto_import_historical.py              # однократная обработка
-python src/auto_import_historical.py --watch     # слежение за папкой
+python src/training/auto_import_historical.py              # однократная обработка
+python src/training/auto_import_historical.py --watch     # слежение за папкой
 ```
 
 ---
@@ -629,7 +629,7 @@ Directum RX / UI ──HTTP──► API (FastAPI, без модели)
   - запуск из бэк-офиса (`POST /api/finetune`): для источника `verified` — проверяется (обход —
     флаг `force`); для `historical` и `combined` **не проверяется** (запуск всегда принудительный,
     как прежний вызов `finetune_model.py`);
-  - `python src/auto_finetune.py`: проверяется для любого `--source`, обход — `--force`.
+  - `python src/training/auto_finetune.py`: проверяется для любого `--source`, обход — `--force`.
 
   Задача уходит в очередь `training` — нужен запущенный `worker-training` (`start.* --training`).
   Одновременно в очереди или в работе может быть только одно дообучение (повторный запуск — `409`).
@@ -1204,10 +1204,28 @@ BACKOFFICE_PASSWORD=<новый_пароль>
 - Шрифт: Inter / Segoe UI / system-ui (без Google Fonts в Docker)
 - Логотип Directum в header (svg или text fallback)
 
+### Структура src/
+
+`src/` — корень импорта (`PYTHONPATH=src`), модули разложены по пакетам по роли;
+импорты пакетные (`from core import config`), напрямую в `src/` модулей нет:
+
+```
+src/
+├── api/            # api_server.py (FastAPI, uvicorn api.api_server:app), integration_api.py, job_api.py, responses.py, static/
+├── classifier/     # classifier_agent.py, hierarchy.py, reranker.py, section_router.py, llm_schemas.py, llm_check.py, fio_extractor.py, email_extractor.py
+├── queueing/       # celery_app.py, dispatcher.py, tasks.py, waiter.py, warmup.py, webhook.py
+├── worker/         # worker_main.py (classify-воркер)
+├── storage/        # PostgreSQL/pgvector и in-memory хранилище + appeals_logger.py, annotations_storage.py
+├── training/       # finetune_model.py, auto_finetune.py, build_vectordb.py, historical_loader.py, auto_import_historical.py
+├── integrations/   # rx_client.py, text_extractor.py, proxy_policy.py
+├── core/           # config.py, env_bootstrap.py, settings_store.py, service_urls.py
+└── cli/            # operator_cli.py, classify_manual.py, test_agent.py
+```
+
 ### Структура статических файлов
 
 ```
-src/static/
+src/api/static/
 ├── base.css           # CSS Custom Properties + компоненты
 ├── logo.svg           # Логотип Directum (fallback: текст)
 ├── index.html         # Главная страница (классификация)

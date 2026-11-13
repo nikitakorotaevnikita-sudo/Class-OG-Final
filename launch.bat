@@ -113,11 +113,11 @@ goto :end
 goto :end
 
 :operator
-%PY% src\operator_cli.py
+%PY% src\cli\operator_cli.py
 goto :end
 
 :classify
-%PY% src\classify_manual.py
+%PY% src\cli\classify_manual.py
 goto :end
 
 :help

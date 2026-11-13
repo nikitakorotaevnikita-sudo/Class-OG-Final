@@ -48,14 +48,14 @@ python scripts/check_offline.py --stage pre
 библиотека уже была загружена в онлайн-режиме и шла в сеть за метаданными модели —
 `FileMetadataError`, притом что файлы модели лежали рядом.
 
-Исправлено модулем [`src/env_bootstrap.py`](../src/env_bootstrap.py): он читает `.env`
+Исправлено модулем [`src/core/env_bootstrap.py`](../src/core/env_bootstrap.py): он читает `.env`
 и импортируется первым — раньше `torch`, `transformers` и `sentence_transformers`.
 Онлайн-поведение не изменилось (зеркало HF по-прежнему подставляется).
 
 Проверить руками:
 
 ```bash
-python -c "import sys; sys.path.insert(0,'src'); import env_bootstrap, huggingface_hub.constants as c; print(c.HF_HUB_OFFLINE)"
+python -c "import sys; sys.path.insert(0,'src'); from core import env_bootstrap; import huggingface_hub.constants as c; print(c.HF_HUB_OFFLINE)"
 ```
 
 ### 2. Колёса были собраны под другой Python
@@ -132,7 +132,7 @@ install_offline.bat
 Запуск сервиса после установки:
 
 ```bash
-venv\Scripts\python.exe -m uvicorn src.api_server:app --host 0.0.0.0 --port 8010
+venv\Scripts\python.exe -m uvicorn api.api_server:app --app-dir src --host 0.0.0.0 --port 8010
 ```
 
 ---
