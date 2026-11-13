@@ -374,7 +374,7 @@ def test_local_dispatcher_bounds_concurrency(monkeypatch):
 
 
 def test_local_dispatcher_default_workers_from_config(monkeypatch):
-    import config
+    from core import config
 
     monkeypatch.setattr(config, "CLASSIFY_CONCURRENCY", 3)
     assert LocalDispatcher(MemoryStorage(), agent_factory=lambda: None).max_workers == 3
@@ -383,7 +383,7 @@ def test_local_dispatcher_default_workers_from_config(monkeypatch):
 
 
 def test_local_dispatcher_clamps_non_positive_workers(monkeypatch):
-    import config
+    from core import config
 
     assert LocalDispatcher(MemoryStorage(), agent_factory=lambda: None,
                            max_workers=-1).max_workers == 1
@@ -502,7 +502,7 @@ def test_singletons_memory_backend():
 
 
 def test_singletons_postgres_backend(monkeypatch):
-    import config
+    from core import config
 
     monkeypatch.setattr(config, "STORAGE_BACKEND", "postgres")
     dispatcher_mod.reset_dispatcher()
@@ -521,7 +521,7 @@ def test_modules_do_not_import_model_stack():
     code = (
         "import sys; sys.path.insert(0, %r)\n"
         "import queueing.dispatcher, queueing.waiter\n"
-        "bad = [m for m in ('torch', 'classifier_agent', 'sentence_transformers', 'worker_main')"
+        "bad = [m for m in ('torch', 'classifier.classifier_agent', 'sentence_transformers', 'worker.worker_main')"
         " if m in sys.modules]\n"
         "print('BAD', bad)\n"
         "sys.exit(1 if bad else 0)\n" % str(SRC)

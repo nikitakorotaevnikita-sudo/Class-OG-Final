@@ -18,7 +18,7 @@ import psycopg
 from pgvector.psycopg import register_vector
 from psycopg_pool import ConnectionPool
 
-import config
+from core import config
 
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 

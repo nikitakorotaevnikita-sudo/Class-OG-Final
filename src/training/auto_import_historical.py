@@ -5,9 +5,9 @@
 перемещает обработанные файлы в processed/, а файлы с ошибками — в errors/.
 
 Usage:
-    python src/auto_import_historical.py              # однократный прогон
-    python src/auto_import_historical.py --watch      # режим наблюдения (poll every 30s)
-    python src/auto_import_historical.py --watch --interval 60   # custom interval
+    python src/training/auto_import_historical.py              # однократный прогон
+    python src/training/auto_import_historical.py --watch      # режим наблюдения (poll every 30s)
+    python src/training/auto_import_historical.py --watch --interval 60   # custom interval
 """
 
 import argparse
@@ -18,8 +18,16 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-from historical_loader import parse_file, validate_codes, save_to_historical_db, ValidationResult
+# Корень импорта — src/. При запуске `python src/<пакет>/<файл>.py` Python кладёт
+# в sys.path[0] папку самого скрипта: заменяем её на src, чтобы модули пакета
+# не импортировались под двумя именами. `python -m <пакет>.<файл>` с PYTHONPATH=src
+# и импорт из тестов работают без этого.
+_SRC = Path(__file__).resolve().parents[1]
+if sys.path and Path(sys.path[0] or ".").resolve() == Path(__file__).resolve().parent:
+    sys.path[0] = str(_SRC)
+elif str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
+from training.historical_loader import parse_file, validate_codes, save_to_historical_db, ValidationResult
 
 HISTORICAL_DIR = Path("data/historical")
 PROCESSED_DIR = HISTORICAL_DIR / "processed"

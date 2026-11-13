@@ -38,7 +38,7 @@ def test_offline_flag_reaches_huggingface_hub():
     """`HF_HUB_OFFLINE=1` в окружении доходит до констант библиотеки."""
     result = run_probe(
         'import json, sys; sys.path.insert(0, "src");'
-        ' import env_bootstrap;'
+        ' from core import env_bootstrap;'
         ' import huggingface_hub.constants as c;'
         ' import os;'
         ' print("JSON " + json.dumps({"offline": bool(c.HF_HUB_OFFLINE),'
@@ -55,7 +55,7 @@ def test_offline_flag_reaches_huggingface_hub():
 
 ENDPOINT_PROBE = (
     'import json, os, sys; sys.path.insert(0, "src");'
-    ' import env_bootstrap;'
+    ' from core import env_bootstrap;'
     ' import huggingface_hub.constants as c;'
     ' print("JSON " + json.dumps({"offline": bool(c.HF_HUB_OFFLINE),'
     ' "endpoint": os.environ.get("HF_ENDPOINT"), "library_endpoint": c.ENDPOINT}))'
@@ -82,14 +82,15 @@ def test_explicit_mirror_is_respected():
     assert result["library_endpoint"] == "https://hf-mirror.com"
 
 
-@pytest.mark.parametrize("module", ["classifier_agent", "build_vectordb", "finetune_model", "reranker"])
+@pytest.mark.parametrize("module", ["classifier/classifier_agent", "training/build_vectordb",
+                                    "training/finetune_model", "classifier/reranker"])
 def test_env_bootstrap_imported_before_hf_libraries(module):
     """В исходнике `env_bootstrap` должен стоять выше любой HF-библиотеки."""
     text = (SRC / f"{module}.py").read_text(encoding="utf-8")
     lines = text.splitlines()
 
     bootstrap_at = next((i for i, l in enumerate(lines)
-                         if l.strip().startswith("import env_bootstrap")), None)
+                         if l.strip().startswith("from core import env_bootstrap")), None)
     assert bootstrap_at is not None, f"{module}.py не импортирует env_bootstrap"
 
     for i, line in enumerate(lines):

@@ -135,7 +135,7 @@ class AppealsLogger:
             log_id, "corrected", operator_codes, comment)
         inserted: list[int] = []
         if updated and comment:
-            from annotations_storage import add_annotation
+            from storage.annotations_storage import add_annotation
             for op_code in operator_codes:
                 try:
                     inserted.append(add_annotation(op_code, comment, case_id=log_id,

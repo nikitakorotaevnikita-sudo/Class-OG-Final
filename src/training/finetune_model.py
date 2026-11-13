@@ -2,8 +2,8 @@
 finetune_model.py — Дообучение эмбеддинговой модели на верифицированных обращениях
 
 Запуск (вручную; обычно дообучение выполняет воркер очереди training):
-    python src/finetune_model.py --source combined
-    python src/finetune_model.py --source verified --force
+    python src/training/finetune_model.py --source combined
+    python src/training/finetune_model.py --source verified --force
 
 Что делает run_training(storage, ...):
     1. Читает из БД верифицированные карточки (confirmed/corrected) и исторические
@@ -35,13 +35,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
-sys.path.insert(0, str(Path(__file__).parent))
+# Корень импорта — src/. При запуске `python src/<пакет>/<файл>.py` Python кладёт
+# в sys.path[0] папку самого скрипта: заменяем её на src, чтобы модули пакета
+# не импортировались под двумя именами. `python -m <пакет>.<файл>` с PYTHONPATH=src
+# и импорт из тестов работают без этого.
+_SRC = Path(__file__).resolve().parents[1]
+if sys.path and Path(sys.path[0] or ".").resolve() == Path(__file__).resolve().parent:
+    sys.path[0] = str(_SRC)
+elif str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
 
-import env_bootstrap  # noqa: F401  — .env до HF-библиотек
+from core import env_bootstrap  # noqa: F401  — .env до HF-библиотек
 
-import build_vectordb
-import config
-from annotations_storage import build_search_text
+from training import build_vectordb
+from core import config
+from storage.annotations_storage import build_search_text
 from storage.models import ModelVersion, ModelVersionExists
 
 SOURCES = ("verified", "historical", "combined")

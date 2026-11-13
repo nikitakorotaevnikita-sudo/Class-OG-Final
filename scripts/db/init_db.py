@@ -7,7 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 import psycopg  # noqa: E402
 
-import config  # noqa: E402
+from core import config  # noqa: E402
 from storage import db  # noqa: E402
 
 

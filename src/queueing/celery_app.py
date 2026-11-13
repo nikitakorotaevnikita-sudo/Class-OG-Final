@@ -14,7 +14,7 @@
 from celery import Celery
 from kombu import Queue
 
-import config
+from core import config
 
 QUEUE_NAMES = ("classify_sync", "classify", "training")
 

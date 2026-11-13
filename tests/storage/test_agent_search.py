@@ -5,8 +5,8 @@ from pathlib import Path
 
 import numpy as np
 
-import classifier_agent as classifier_mod
-from classifier_agent import ClassifierAgent
+from classifier import classifier_agent as classifier_mod
+from classifier.classifier_agent import ClassifierAgent
 from storage.models import ClassifierEntry, ModelVersion
 
 N = 120

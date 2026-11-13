@@ -1,4 +1,4 @@
-"""Общие построители ответов: src/responses.py (без тяжёлых импортов)."""
+"""Общие построители ответов: src/api/responses.py (без тяжёлых импортов)."""
 
 import subprocess
 import sys
@@ -8,7 +8,7 @@ from pathlib import Path
 SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC))
 
-import responses
+from api import responses
 
 
 @dataclass
@@ -84,9 +84,9 @@ def test_request_has_webhook_url():
 def test_responses_module_has_no_heavy_imports(tmp_path):
     """Отдельный процесс из чужого cwd: путь к src абсолютный, а `responses`
     берётся именно из src (не одноимённый пакет PyPI)."""
-    code = ("import sys; sys.path.insert(0, %r); import responses; "
+    code = ("import sys; sys.path.insert(0, %r); from api import responses; "
             "assert responses.__file__.startswith(%r), responses.__file__; "
-            "heavy = [m for m in ('torch', 'sentence_transformers', 'classifier_agent') "
+            "heavy = [m for m in ('torch', 'sentence_transformers', 'classifier.classifier_agent') "
             "if m in sys.modules]; "
             "assert not heavy, heavy" % (str(SRC), str(SRC)))
     proc = subprocess.run([sys.executable, "-c", code], cwd=tmp_path,

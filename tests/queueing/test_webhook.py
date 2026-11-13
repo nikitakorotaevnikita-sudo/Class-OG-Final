@@ -4,7 +4,7 @@ import hmac
 
 import httpx
 
-import config
+from core import config
 from queueing import webhook
 
 

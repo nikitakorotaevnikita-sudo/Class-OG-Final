@@ -15,7 +15,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from classifier_agent import ClassifierAgent
+from classifier.classifier_agent import ClassifierAgent
 from eval_metrics_helpers import score_eval_case, summarize_eval_results
 
 

@@ -17,12 +17,10 @@ import json
 import math
 import os
 import re
-from pathlib import Path as _Path
 
-sys.path.insert(0, str(_Path(__file__).parent))
 # .env до любых HF-библиотек: они читают HF_HUB_OFFLINE / HF_ENDPOINT один раз,
 # в момент импорта. В онлайне выставляет зеркало HF, в офлайне — запрет сети.
-import env_bootstrap  # noqa: F401,E402
+from core import env_bootstrap  # noqa: F401,E402
 # Fix Groq API connection - corporate proxy breaks Bearer auth
 os.environ["NO_PROXY"] = "api.groq.com,*.groq.com"
 os.environ["no_proxy"] = "api.groq.com,*.groq.com"
@@ -42,7 +40,7 @@ from google.genai.types import GenerateContentConfig
 from sentence_transformers import SentenceTransformer
 from dataclasses import dataclass, field
 from typing import Optional
-from config import (
+from core.config import (
     LLM_TIMEOUT_SEC, LLM_MAX_RETRIES,
     GROQ_API_KEY, GROQ_MODEL,
     EMBEDDING_MODEL,  # тесты подменяют его, проверяя, что префикс запроса от него не зависит
@@ -68,22 +66,22 @@ from config import (
     ENABLE_ALLOWED_CODES, ALLOWED_CODES_PATH,
     ENABLE_ANNOTATION_VECTORS,
 )
-from proxy_policy import uses_env_proxy
-from hierarchy import (
+from integrations.proxy_policy import uses_env_proxy
+from classifier.hierarchy import (
     branch_agreement_scores, parent_similarity_boost,
     dominant_l1_sections, prefix_at_level,
 )
-from section_router import (
+from classifier.section_router import (
     build_routing_prompt, parse_routing_response,
     filter_candidates_by_l2, filter_candidates_by_l3,
     build_l3_routing_prompt, parse_l3_routing_response,
 )
-from appeals_logger import AppealsLogger
-from build_vectordb import passage_text
+from storage.appeals_logger import AppealsLogger
+from training.build_vectordb import passage_text
 from storage import get_storage
 from storage.models import AppealQuestionRow, AppealResult
-from email_extractor import extract_applicant_email
-from fio_extractor import extract_applicant_fio
+from classifier.email_extractor import extract_applicant_email
+from classifier.fio_extractor import extract_applicant_fio
 
 
 _WORD_RE = re.compile(r"[a-zа-яё0-9]{3,}", re.IGNORECASE)
@@ -636,7 +634,7 @@ class ClassifierAgent:
         # CrossEncoder reranker — lazy-load, только если флаг включён
         self.ce_reranker = None
         if ENABLE_CROSS_ENCODER_RERANKER:
-            from reranker import CrossEncoderReranker
+            from classifier.reranker import CrossEncoderReranker
             self.ce_reranker = CrossEncoderReranker(CROSS_ENCODER_MODEL)
             print(f"  CE reranker enabled: {CROSS_ENCODER_MODEL} (lazy load at first use)")
 

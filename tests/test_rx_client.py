@@ -3,7 +3,7 @@ sys.path.insert(0, "src")
 import base64
 import httpx
 import pytest
-import rx_client
+from integrations import rx_client
 
 # Минимальный валидный PDF с текстовым слоем не нужен — text_extractor мокаем.
 PDF_BYTES = b"%PDF-1.4 fake body"

@@ -263,11 +263,12 @@ def check_imports() -> None:
 RUNTIME_PROBE = r"""
 import json, os, sys
 sys.path.insert(0, "src")
-import env_bootstrap                     # .env до HF-библиотек
+from core import env_bootstrap                     # .env до HF-библиотек
 import huggingface_hub.constants as hf
 out = {"offline": bool(hf.HF_HUB_OFFLINE)}
 try:
-    import numpy as np, config
+    import numpy as np
+    from core import config
     from sentence_transformers import SentenceTransformer
     model = SentenceTransformer(config.EMBEDDING_MODEL)
     out["dim"] = int(model.get_sentence_embedding_dimension())

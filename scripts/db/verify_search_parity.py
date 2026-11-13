@@ -87,7 +87,7 @@ def _read_queries(path: Path) -> list[str]:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
-    import config
+    from core import config
     from storage import get_storage
 
     p = argparse.ArgumentParser(description="Сверка numpy vs pgvector top-K")

@@ -15,10 +15,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 import httpx
 import pytest
 
-import classifier_agent as ca
-import config
-import llm_check
-from classifier_agent import ClassifierAgent
+from classifier import classifier_agent as ca
+from core import config
+from classifier import llm_check
+from classifier.classifier_agent import ClassifierAgent
 
 
 class _FakeClient:

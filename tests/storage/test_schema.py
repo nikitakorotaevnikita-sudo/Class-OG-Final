@@ -39,7 +39,7 @@ def test_apply_schema_twice_is_idempotent(pg_conn):
 def test_config_defaults(monkeypatch):
     import dotenv
 
-    import config
+    from core import config
 
     for key in ("SYNC_WAIT_TIMEOUT_SEC", "ENABLE_ANNOTATION_VECTORS", "WEBHOOK_ALLOWED_HOSTS"):
         monkeypatch.delenv(key, raising=False)

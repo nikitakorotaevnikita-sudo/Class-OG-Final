@@ -5,24 +5,22 @@ FastAPI-сервер для агента классификации обраще
 Тонкий API: процесс не загружает классификатор (torch, sentence-transformers).
 Классификация и поиск по классификатору выполняются воркерами: API создаёт
 задачу в PostgreSQL, отправляет её в RabbitMQ и ждёт результата по
-LISTEN/NOTIFY (src/job_api.py). Статистика, верификация, исторические данные,
+LISTEN/NOTIFY (src/api/job_api.py). Статистика, верификация, исторические данные,
 дообучение и реестр моделей — через слой хранения (src/storage).
 
 Запуск:
-    uvicorn src.api_server:app --host 0.0.0.0 --port 8000 --reload
+    uvicorn api.api_server:app --app-dir src --host 0.0.0.0 --port 8000 --reload
 
 Документация API:
     http://localhost:8000/docs
 """
 
 import asyncio
-import sys
 import json
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal, Optional
-sys.path.insert(0, str(Path(__file__).parent))
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Request, Form
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
@@ -31,17 +29,17 @@ from starlette.status import HTTP_401_UNAUTHORIZED
 from pydantic import BaseModel
 import psycopg
 
-import config
-import job_api
-from responses import ClassifyRequest, ClassifyResponse
-from appeals_logger import AppealsLogger, get_logger
-from historical_loader import parse_file, validate_codes
-from integration_api import router as integration_router
+from core import config
+from api import job_api
+from api.responses import ClassifyRequest, ClassifyResponse
+from storage.appeals_logger import AppealsLogger, get_logger
+from training.historical_loader import parse_file, validate_codes
+from api.integration_api import router as integration_router
 from queueing import waiter as waiter_mod
 from storage import get_storage
 from storage.models import (STATUS_DONE, STATUS_ERROR, STATUS_QUEUED, STATUS_RUNNING,
                             ActiveJobExists)
-from text_extractor import (
+from integrations.text_extractor import (
     extract_text,
     TextExtractionError,
     ScanNotSupportedError,
@@ -95,7 +93,7 @@ security = HTTPBasic()
 
 
 def get_current_user(credentials: HTTPBasicCredentials = Depends(security)):
-    from config import BACKOFFICE_USER, BACKOFFICE_PASSWORD
+    from core.config import BACKOFFICE_USER, BACKOFFICE_PASSWORD
     if credentials.username != BACKOFFICE_USER or credentials.password != BACKOFFICE_PASSWORD:
         raise HTTPException(
             status_code=HTTP_401_UNAUTHORIZED,
@@ -124,7 +122,7 @@ def get_logger_dep() -> AppealsLogger:
 
 def get_examples_path() -> Path:
     """FastAPI-зависимость для пути к test_appeals.json. В тестах подменяется."""
-    return Path(__file__).parent.parent / "data" / "test_appeals.json"
+    return config.PROJECT_ROOT / "data" / "test_appeals.json"
 
 
 def _client_ip(req: Optional[Request]) -> Optional[str]:
@@ -181,7 +179,7 @@ async def health_check():
 @app.get("/api/llm/options")
 async def llm_options():
     """Возвращает доступные LLM-провайдеры и текущий выбор по .env."""
-    from config import LLM_PROVIDER, GROQ_MODEL, OLLAMA_MODEL, ARIO_MODEL
+    from core.config import LLM_PROVIDER, GROQ_MODEL, OLLAMA_MODEL, ARIO_MODEL
 
     def uniq(items: list[str]) -> list[str]:
         return list(dict.fromkeys(items))
@@ -454,7 +452,7 @@ def get_settings():
 
     Синхронный: чтение .env идёт в пуле потоков, не в event loop.
     """
-    import settings_store
+    from core import settings_store
     return settings_store.read_settings()
 
 
@@ -464,7 +462,7 @@ def save_settings(request: SettingsSaveRequest):
 
     Синхронный: запись .env идёт в пуле потоков, не в event loop.
     """
-    import settings_store
+    from core import settings_store
     try:
         result = settings_store.save_settings(request.values)
     except settings_store.SettingsError as e:
@@ -481,8 +479,8 @@ def save_settings(request: SettingsSaveRequest):
 async def test_rx_connection(request: RxTestRequest):
     """Проверить связь с Directum RX. Пустой пароль → используется сохранённый."""
     from starlette.concurrency import run_in_threadpool
-    import rx_client
-    import settings_store
+    from integrations import rx_client
+    from core import settings_store
 
     password = request.RX_PASSWORD
     if password is not None and password.strip() in ("", settings_store.MASK):
@@ -508,8 +506,8 @@ async def test_llm_connection(request: LlmTestRequest):
     base_url показывают, какой адрес проверяли.
     """
     from starlette.concurrency import run_in_threadpool
-    import llm_check
-    import settings_store
+    from classifier import llm_check
+    from core import settings_store
 
     # Пустое поле и маска означают «значение не меняли» — пусть решает конфиг.
     values = {
@@ -581,7 +579,7 @@ async def confirm_historical(request: dict):
     if not preview:
         raise HTTPException(status_code=400, detail="Нет валидных записей для сохранения")
 
-    from historical_loader import save_to_historical_db
+    from training.historical_loader import save_to_historical_db
     filename = _last_historical_upload.get("filename", "unknown")
     inserted = await asyncio.to_thread(save_to_historical_db, preview, filename,
                                        get_storage())

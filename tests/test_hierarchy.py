@@ -1,11 +1,11 @@
-"""Tests for src/hierarchy.py — hierarchy-aware utilities."""
+"""Tests for src/classifier/hierarchy.py — hierarchy-aware utilities."""
 
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from hierarchy import (
+from classifier.hierarchy import (
     code_parts, prefix_at_level, parent_code, same_branch,
     branch_agreement_scores, parent_similarity_boost, dominant_l1_sections,
 )

@@ -4,10 +4,8 @@ import json
 import pandas as pd
 from pathlib import Path
 from typing import Optional
-import sys
 
-sys.path.insert(0, str(Path(__file__).parent))
-from config import CLASSIFIER_FLAT_PATH
+from core.config import CLASSIFIER_FLAT_PATH
 
 
 def load_classifier_codes() -> set:

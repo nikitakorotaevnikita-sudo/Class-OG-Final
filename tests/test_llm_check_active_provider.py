@@ -16,9 +16,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import pytest
 
-import config
-import llm_check
-import settings_store
+from core import config
+from classifier import llm_check
+from core import settings_store
 
 
 # ── Куда идёт проверка при каждом провайдере ─────────────────────────────────
@@ -146,12 +146,12 @@ def _llm_setting_keys() -> set[str]:
 
 def test_request_model_accepts_every_llm_field_of_the_form():
     """Иначе значение из формы молча потеряется и проверится не то."""
-    import api_server
+    from api import api_server
     assert _llm_setting_keys() <= set(api_server.LlmTestRequest.model_fields)
 
 
 def test_frontend_sends_every_llm_field_of_the_form():
-    source = (Path(__file__).parent.parent / "src" / "static" / "settings.js").read_text(
+    source = (Path(__file__).parent.parent / "src" / "api" / "static" / "settings.js").read_text(
         encoding="utf-8")
     missing = [key for key in _llm_setting_keys() if key not in source]
     assert not missing, f"кнопка не отправляет поля: {missing}"
@@ -159,7 +159,7 @@ def test_frontend_sends_every_llm_field_of_the_form():
 
 def test_frontend_does_not_send_rx_credentials_to_llm_check():
     """Пароль RX в проверке LLM не нужен — не отправляем его туда."""
-    source = (Path(__file__).parent.parent / "src" / "static" / "settings.js").read_text(
+    source = (Path(__file__).parent.parent / "src" / "api" / "static" / "settings.js").read_text(
         encoding="utf-8")
     body = source.split("async function testLlm")[1].split("async function testRx")[0]
     assert "RX_PASSWORD" not in body

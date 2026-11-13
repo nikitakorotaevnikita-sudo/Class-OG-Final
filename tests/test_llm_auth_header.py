@@ -12,7 +12,7 @@ sys.path.insert(0, "src")
 import httpx
 import pytest
 
-import classifier_agent
+from classifier import classifier_agent
 
 
 class _Capture:

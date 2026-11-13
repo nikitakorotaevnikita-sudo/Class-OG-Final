@@ -67,7 +67,7 @@ def test_custom_provider_is_offered():
 def test_every_supported_provider_is_in_the_menu():
     import sys
     sys.path.insert(0, str(ROOT / "src"))
-    from classifier_agent import SUPPORTED_LLM_PROVIDERS
+    from classifier.classifier_agent import SUPPORTED_LLM_PROVIDERS
 
     missing = [p for p in SUPPORTED_LLM_PROVIDERS if p not in BAT.lower()]
     assert not missing, f"в меню нет провайдеров: {missing}"

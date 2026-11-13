@@ -12,7 +12,7 @@ sys.path.insert(0, "src")
 import httpx
 import pytest
 
-from classifier_agent import ClassifierAgent
+from classifier.classifier_agent import ClassifierAgent
 
 
 def response(status: int, body: str) -> httpx.Response:

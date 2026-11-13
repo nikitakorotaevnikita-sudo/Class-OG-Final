@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from classifier_agent import detect_withdrawal_markers
+from classifier.classifier_agent import detect_withdrawal_markers
 
 
 def test_positive_stop_consideration():

@@ -22,8 +22,8 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from classifier_agent import ClassifierAgent  # noqa: E402
-from config import ENABLE_HEURISTIC_RERANKER  # noqa: E402
+from classifier.classifier_agent import ClassifierAgent  # noqa: E402
+from core.config import ENABLE_HEURISTIC_RERANKER  # noqa: E402
 from eval_metrics_helpers import (  # noqa: E402
     attribute_failure,
     compute_per_stage_metrics,

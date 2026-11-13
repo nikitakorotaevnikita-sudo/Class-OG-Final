@@ -4,8 +4,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-import classifier_agent as classifier_mod
-from classifier_agent import ClassifierAgent
+from classifier import classifier_agent as classifier_mod
+from classifier.classifier_agent import ClassifierAgent
 from storage.memory import MemoryStorage
 
 WITHDRAWAL_CODE = "0001.0002.0027.0131"

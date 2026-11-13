@@ -26,7 +26,7 @@ import os, traceback
 sys.stdout = Proxy()
 sys.stderr = Proxy()
 try:
-    import classifier_agent  # noqa: F401
+    from classifier import classifier_agent  # noqa: F401
 except BaseException:
     os.write(2, traceback.format_exc().encode('utf-8'))
     raise

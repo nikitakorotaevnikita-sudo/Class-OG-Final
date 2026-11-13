@@ -15,9 +15,9 @@ from pathlib import Path
 
 sys.path.insert(0, "src")
 
-import rx_client
+from integrations import rx_client
 from rx_harness import make_client
-import text_extractor
+from integrations import text_extractor
 
 
 class _Agent:

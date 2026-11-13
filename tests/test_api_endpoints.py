@@ -15,8 +15,8 @@ from fastapi import HTTPException
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from api_server import verify, get_examples, VerifyRequest, backoffice_stats, get_current_user
-from appeals_logger import AppealsLogger
+from api.api_server import verify, get_examples, VerifyRequest, backoffice_stats, get_current_user
+from storage.appeals_logger import AppealsLogger
 from storage.memory import MemoryStorage
 
 

@@ -8,7 +8,7 @@
 
 Модуль импортируется первым — до `torch`, `transformers`, `sentence_transformers`:
 
-    import env_bootstrap  # noqa: F401  — .env до HF-библиотек
+    from core import env_bootstrap  # noqa: F401  — .env до HF-библиотек
     from sentence_transformers import SentenceTransformer
 
 Идемпотентен: повторный импорт ничего не меняет, `config.load_dotenv` тоже
@@ -20,7 +20,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-ENV_PATH = Path(__file__).parent.parent / ".env"
+ENV_PATH = Path(__file__).parent.parent.parent / ".env"  # src/core/ → корень проекта
 
 # override=False: переменные, заданные в окружении процесса (docker -e, set в
 # батнике, окружение systemd), приоритетнее файла.

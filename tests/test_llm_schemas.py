@@ -1,4 +1,4 @@
-"""Tests for src/llm_schemas.py — validate schema correctness."""
+"""Tests for src/classifier/llm_schemas.py — validate schema correctness."""
 import sys
 from pathlib import Path
 
@@ -7,7 +7,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 import jsonschema
 import pytest
 
-from llm_schemas import (
+from classifier.llm_schemas import (
     ROUTER_L1_SCHEMA,
     ROUTER_L2_SCHEMA,
     FINAL_PICK_SCHEMA,

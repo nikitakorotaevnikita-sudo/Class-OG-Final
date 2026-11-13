@@ -18,8 +18,8 @@ def pytest_configure(config):
 @pytest.fixture(autouse=True)
 def _memory_storage_backend(monkeypatch):
     """get_storage() в тестах — свежий MemoryStorage (никогда не прод-БД)."""
-    import config
-    import appeals_logger
+    from core import config
+    from storage import appeals_logger
     from storage import reset_storage
 
     monkeypatch.setattr(config, "STORAGE_BACKEND", "memory")

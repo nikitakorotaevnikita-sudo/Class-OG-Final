@@ -14,8 +14,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import pytest
 
-import settings_store
-from classifier_agent import SUPPORTED_LLM_PROVIDERS
+from core import settings_store
+from classifier.classifier_agent import SUPPORTED_LLM_PROVIDERS
 
 ROOT = Path(__file__).resolve().parent.parent
 ENV_EXAMPLE = (ROOT / ".env.example").read_text(encoding="utf-8")

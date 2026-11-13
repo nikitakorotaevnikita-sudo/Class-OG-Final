@@ -3,8 +3,8 @@ sys.path.insert(0, "src")
 
 import pytest
 
-import config
-import settings_store
+from core import config
+from core import settings_store
 
 
 @pytest.fixture
@@ -142,7 +142,7 @@ def test_no_updates_writes_nothing(env_file):
 
 def test_apply_runtime_updates_config_and_importers(monkeypatch):
     """rx_client импортирует RX_USER напрямую — его копию тоже надо обновить."""
-    import rx_client
+    from integrations import rx_client
 
     monkeypatch.setattr(config, "RX_USER", "old", raising=False)
     monkeypatch.setattr(rx_client, "RX_USER", "old", raising=False)

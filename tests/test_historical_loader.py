@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-from historical_loader import parse_file, validate_codes, save_to_historical_db, ValidationResult
+from training.historical_loader import parse_file, validate_codes, save_to_historical_db, ValidationResult
 
 
 def test_parse_csv(tmp_path):

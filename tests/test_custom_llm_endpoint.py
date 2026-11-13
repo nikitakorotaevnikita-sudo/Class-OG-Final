@@ -12,10 +12,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-import classifier_agent as ca
-import llm_check
-import settings_store
-from classifier_agent import ClassifierAgent
+from classifier import classifier_agent as ca
+from classifier import llm_check
+from core import settings_store
+from classifier.classifier_agent import ClassifierAgent
 
 
 def _agent():

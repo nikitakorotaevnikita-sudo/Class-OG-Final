@@ -10,7 +10,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from service_urls import database_url, rabbitmq_url
+from core.service_urls import database_url, rabbitmq_url
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -53,7 +53,7 @@ def test_special_characters_in_credentials_are_url_encoded():
 def test_config_uses_the_builder():
     """config.DATABASE_URL / RABBITMQ_URL берутся из service_urls (в отдельном процессе:
     config читает окружение один раз, при импорте; настоящий .env не подменяется)."""
-    code = ("import sys; sys.path.insert(0, 'src'); import config;"
+    code = ("import sys; sys.path.insert(0, 'src'); from core import config;"
             " print(config.DATABASE_URL); print(config.RABBITMQ_URL)")
     env = {k: v for k, v in os.environ.items()}
     env.update({"DATABASE_URL": "", "RABBITMQ_URL": "", "POSTGRES_USER": "cu",

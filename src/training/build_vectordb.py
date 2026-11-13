@@ -16,12 +16,20 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).parent))
+# Корень импорта — src/. При запуске `python src/<пакет>/<файл>.py` Python кладёт
+# в sys.path[0] папку самого скрипта: заменяем её на src, чтобы модули пакета
+# не импортировались под двумя именами. `python -m <пакет>.<файл>` с PYTHONPATH=src
+# и импорт из тестов работают без этого.
+_SRC = Path(__file__).resolve().parents[1]
+if sys.path and Path(sys.path[0] or ".").resolve() == Path(__file__).resolve().parent:
+    sys.path[0] = str(_SRC)
+elif str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
 
-import env_bootstrap  # noqa: F401  — .env до HF-библиотек
+from core import env_bootstrap  # noqa: F401  — .env до HF-библиотек
 
 from sentence_transformers import SentenceTransformer
-from annotations_storage import build_search_text
+from storage.annotations_storage import build_search_text
 
 BATCH_SIZE = 128
 
@@ -102,7 +110,7 @@ def main(argv=None) -> int:
             "Векторы классификатора хранятся в PostgreSQL (classifier_vectors).\n"
             "  Перенос текущей базы:        python scripts/db/migrate_from_files.py\n"
             "  Векторы новой версии модели строит дообучение (finetune).\n"
-            "  Ручная пересборка:           python src/build_vectordb.py --version N --model-path P"
+            "  Ручная пересборка:           python src/training/build_vectordb.py --version N --model-path P"
         )
         return 2
 

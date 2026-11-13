@@ -78,7 +78,7 @@ def _restore_modules(originals: dict[str, object]) -> None:
 
 _ORIGINAL_MODULES = _install_import_stubs()
 try:
-    ClassifierAgent = importlib.import_module("classifier_agent").ClassifierAgent
+    ClassifierAgent = importlib.import_module("classifier.classifier_agent").ClassifierAgent
 finally:
     _restore_modules(_ORIGINAL_MODULES)
 

@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import pytest
 
-from proxy_policy import uses_env_proxy
+from integrations.proxy_policy import uses_env_proxy
 
 
 @pytest.mark.parametrize("url", [

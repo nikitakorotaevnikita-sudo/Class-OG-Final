@@ -6,7 +6,7 @@ import numpy as np
 import psycopg
 import pytest
 
-import config
+from core import config
 from queueing import tasks
 from storage.memory import MemoryStorage
 from storage.models import AppealQuestionRow, AppealResult
@@ -428,7 +428,7 @@ def test_wrapper_backoff_and_storage_failure_retry(monkeypatch, retries, countdo
 
 def test_agent_build_failure_marks_error_and_is_not_cached(storage, no_webhook, monkeypatch):
     """Нет активной модели → задача error с текстом исключения; следующая строит агента заново."""
-    import worker_main
+    from worker import worker_main
 
     msg = _enqueue(storage, {"response_kind": "document"}, webhook_url="http://rx.local/hook")
     monkeypatch.setattr(tasks, "get_storage", lambda: storage)
@@ -476,8 +476,8 @@ def test_agent_build_infra_failure_retries(storage, monkeypatch):
 
 @pytest.fixture
 def fake_training(monkeypatch, tmp_path):
-    import build_vectordb
-    import finetune_model
+    from training import build_vectordb
+    from training import finetune_model
     from finetune_helpers import FakeSentenceTransformer, FakeTrain
 
     monkeypatch.setattr(config, "MODELS_DIR", str(tmp_path / "models"))

@@ -1,6 +1,6 @@
 import sys
 sys.path.insert(0, "src")
-from classifier_agent import extract_extra_fields
+from classifier.classifier_agent import extract_extra_fields
 
 
 def test_extract_fio_and_summary():

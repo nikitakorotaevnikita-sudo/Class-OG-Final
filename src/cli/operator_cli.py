@@ -2,7 +2,7 @@
 operator_cli.py — Интерактивный CLI для классификации и верификации обращений
 
 Запуск:
-    python src/operator_cli.py
+    python src/cli/operator_cli.py
 
 Сценарий работы:
     1. Введите текст обращения (Enter на пустой строке — конец ввода)
@@ -15,12 +15,20 @@ import sys
 import subprocess
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
+# Корень импорта — src/. При запуске `python src/<пакет>/<файл>.py` Python кладёт
+# в sys.path[0] папку самого скрипта: заменяем её на src, чтобы модули пакета
+# не импортировались под двумя именами. `python -m <пакет>.<файл>` с PYTHONPATH=src
+# и импорт из тестов работают без этого.
+_SRC = Path(__file__).resolve().parents[1]
+if sys.path and Path(sys.path[0] or ".").resolve() == Path(__file__).resolve().parent:
+    sys.path[0] = str(_SRC)
+elif str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
 
-from classifier_agent import ClassifierAgent
-from appeals_logger import get_logger
-from config import FINETUNE_THRESHOLD
-import annotations_storage
+from classifier.classifier_agent import ClassifierAgent
+from storage.appeals_logger import get_logger
+from core.config import FINETUNE_THRESHOLD
+from storage import annotations_storage
 
 
 # ── Вспомогательные функции ────────────────────────────────────────────────────
@@ -127,17 +135,17 @@ def check_and_offer_finetuning(logger):
         run_finetuning()
     else:
         print("  Дообучение отложено. Запустить вручную:")
-        print("    python src/finetune_model.py")
+        print("    python src/training/finetune_model.py")
 
 def run_finetuning():
     """Запускает finetune_model.py как подпроцесс."""
-    finetune_script = Path(__file__).parent / "finetune_model.py"
+    finetune_script = _SRC / "training" / "finetune_model.py"
     print()
     print("  Запуск дообучения...")
     print_separator()
     result = subprocess.run(
         [sys.executable, str(finetune_script)],
-        cwd=Path(__file__).parent.parent,
+        cwd=_SRC.parent,
     )
     print_separator()
     if result.returncode == 0:

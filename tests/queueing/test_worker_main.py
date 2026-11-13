@@ -1,9 +1,9 @@
 """worker_main: горячая перезагрузка .env и одиночка агента."""
 import os
 
-import config
-import settings_store
-import worker_main
+from core import config
+from core import settings_store
+from worker import worker_main
 
 
 def _bump(env, text):

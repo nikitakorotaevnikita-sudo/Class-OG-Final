@@ -1,7 +1,7 @@
 """Прогрев агента по сигналам Celery: без прогрева в родителе prefork."""
 import pytest
 
-import worker_main
+from worker import worker_main
 from queueing import warmup
 
 
@@ -111,8 +111,8 @@ def test_tasks_module_wires_warmup_without_loading_the_model():
     code = (
         "import sys; sys.path.insert(0, 'src')\n"
         "import queueing.tasks\n"
-        "bad = [m for m in ('worker_main', 'classifier_agent', 'torch', "
-        "'sentence_transformers', 'finetune_model') if m in sys.modules]\n"
+        "bad = [m for m in ('worker.worker_main', 'classifier.classifier_agent', 'torch', "
+        "'sentence_transformers', 'training.finetune_model') if m in sys.modules]\n"
         "print('WIRED' if 'queueing.warmup' in sys.modules else 'NOT_WIRED', bad)\n"
         "sys.exit(1 if bad else 0)\n"
     )

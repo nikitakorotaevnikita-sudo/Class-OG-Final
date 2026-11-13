@@ -6,9 +6,6 @@ RX передаёт текст обращения прямо в запросе (
 Формат ответа в обоих случаях одинаковый.
 """
 
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent))
 
 import asyncio
 
@@ -16,11 +13,11 @@ import psycopg
 from fastapi import APIRouter, HTTPException, Response
 from fastapi.responses import JSONResponse
 
-import config
-import job_api
-import rx_client
-import text_extractor
-from responses import (ClassifyDocumentRequest, ClassifyDocumentResponse, AcceptedResponse,
+from core import config
+from api import job_api
+from integrations import rx_client
+from integrations import text_extractor
+from api.responses import (ClassifyDocumentRequest, ClassifyDocumentResponse, AcceptedResponse,
                        JobStatusResponse, job_status_payload)
 from queueing import webhook
 from storage import get_storage

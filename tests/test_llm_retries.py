@@ -13,8 +13,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 import httpx
 import pytest
 
-import classifier_agent as ca
-from classifier_agent import ClassifierAgent
+from classifier import classifier_agent as ca
+from classifier.classifier_agent import ClassifierAgent
 
 ROOT = Path(__file__).parent.parent
 GOOD = '{"vid_obrascheniya": "Заявление", "questions": [{"ordinal": 1, "selected_code": "A"}]}'
@@ -45,13 +45,13 @@ def _agent(monkeypatch, answers: list):
 
 
 def test_setting_has_a_default_and_is_documented():
-    config = (ROOT / "src" / "config.py").read_text(encoding="utf-8")
+    config = (ROOT / "src" / "core" / "config.py").read_text(encoding="utf-8")
     assert 'os.getenv("LLM_MAX_RETRIES", "5")' in config
     assert "LLM_MAX_RETRIES=5" in (ROOT / ".env.example").read_text(encoding="utf-8")
 
 
 def test_no_hardcoded_retry_count_left():
-    source = (ROOT / "src" / "classifier_agent.py").read_text(encoding="utf-8")
+    source = (ROOT / "src" / "classifier" / "classifier_agent.py").read_text(encoding="utf-8")
     assert "max_retries = 5" not in source
 
 

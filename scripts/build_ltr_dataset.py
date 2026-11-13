@@ -44,8 +44,8 @@ def main():
     print(f"Train records: {len(train_records)}")
 
     # Init agent (без routing — нам нужно сырое поведение retrieval)
-    from classifier_agent import ClassifierAgent
-    from hierarchy import branch_agreement_scores, parent_similarity_boost
+    from classifier.classifier_agent import ClassifierAgent
+    from classifier.hierarchy import branch_agreement_scores, parent_similarity_boost
 
     agent = ClassifierAgent()
 

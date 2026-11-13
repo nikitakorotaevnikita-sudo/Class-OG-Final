@@ -13,8 +13,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 import httpx
 import jsonschema
 
-from config import ARIO_API_KEY, ARIO_BASE_URL, ARIO_MODEL
-from llm_schemas import FINAL_PICK_SCHEMA
+from core.config import ARIO_API_KEY, ARIO_BASE_URL, ARIO_MODEL
+from classifier.llm_schemas import FINAL_PICK_SCHEMA
 
 
 SYSTEM = """Ты классификатор обращений граждан. По тексту обращения выбери ОДИН код из 4-уровневого классификатора (формат XXXX.XXXX.XXXX.XXXX). Верни только JSON."""

@@ -54,7 +54,7 @@ def main():
     records = load_jsonl(args.dataset)
     print(f"Loaded {len(records)} test records")
 
-    from classifier_agent import ClassifierAgent
+    from classifier.classifier_agent import ClassifierAgent
     agent = ClassifierAgent()
 
     print("\nRunning eval (per record: heuristic + CE)...\n")

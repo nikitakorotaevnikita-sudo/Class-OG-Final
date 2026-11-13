@@ -16,7 +16,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from classifier_agent import split_appeal_questions, AppealQuestion
+from classifier.classifier_agent import split_appeal_questions, AppealQuestion
 
 
 def test_single_question_stays_one_segment():

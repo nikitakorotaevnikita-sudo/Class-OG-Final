@@ -10,9 +10,7 @@
     - Максимум 5000 символов
 """
 
-import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent))
 
 import logging
 

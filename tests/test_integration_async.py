@@ -12,8 +12,8 @@ sys.path.insert(0, "src")
 
 import pytest
 
-import integration_api
-import rx_client
+from api import integration_api
+from integrations import rx_client
 from rx_harness import make_client, poll_until_done
 
 
@@ -312,7 +312,7 @@ def test_queue_listing_counts_only_classify_jobs_and_keeps_worker_alive():
 
 
 def test_queue_listing_worker_alive_follows_worker_readiness(monkeypatch):
-    import job_api
+    from api import job_api
 
     async def no_workers():
         return False, True

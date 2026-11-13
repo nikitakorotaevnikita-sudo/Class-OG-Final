@@ -29,8 +29,8 @@ from typing import Optional
 import psycopg
 from kombu.exceptions import OperationalError as KombuOperationalError
 
-import config
-import responses
+from core import config
+from api import responses
 from queueing import warmup  # noqa: F401 — подключает прогрев агента к сигналам воркера
 from queueing import webhook
 from queueing.celery_app import app
@@ -219,7 +219,7 @@ def run_finetune(msg: dict, storage) -> None:
     def body(job) -> bool:
         payload = job.payload or {}
         try:
-            from finetune_model import run_training  # тяжёлый импорт — лениво
+            from training.finetune_model import run_training  # тяжёлый импорт — лениво
 
             status = run_training(storage, source=payload.get("source", "combined"),
                                   force=payload.get("force", False))
@@ -242,7 +242,7 @@ def run_finetune(msg: dict, storage) -> None:
 # ── Celery-обёртки ───────────────────────────────────────────────────────────
 
 def _agent():
-    import worker_main  # лениво: тянет classifier_agent (модель)
+    from worker import worker_main  # лениво: тянет classifier_agent (модель)
 
     return worker_main.get_agent()
 

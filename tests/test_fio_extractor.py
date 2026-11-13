@@ -1,7 +1,7 @@
 import sys
 sys.path.insert(0, "src")
 import pytest
-from fio_extractor import normalize_fio
+from classifier.fio_extractor import normalize_fio
 
 
 @pytest.mark.parametrize("raw,expected", [

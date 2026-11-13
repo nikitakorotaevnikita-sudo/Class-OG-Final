@@ -9,12 +9,9 @@ from __future__ import annotations
 
 import httpx
 
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent))
 
-from config import LLM_VIA_PROXY
-from proxy_policy import uses_env_proxy
+from core.config import LLM_VIA_PROXY
+from integrations.proxy_policy import uses_env_proxy
 
 TIMEOUT = 15.0
 
@@ -101,7 +98,7 @@ def resolve_endpoint(provider: str | None = None,
     настроек по именам из `.env`: они имеют приоритет над конфигом, поля
     других провайдеров игнорируются.
     """
-    import config
+    from core import config
 
     name = (provider or getattr(config, "LLM_PROVIDER", "") or "").strip().lower()
     if name in _UNCHECKABLE:

@@ -1,6 +1,6 @@
 """Установщики не строят numpy-базу: векторы переносит в PostgreSQL шаг migrate.
 
-`src/build_vectordb.py` без аргументов печатает usage и выходит с кодом 2 —
+`src/training/build_vectordb.py` без аргументов печатает usage и выходит с кодом 2 —
 вызов из установщика обрывал бы свежую установку. Проверка готовности
 (`scripts/check_offline.py`) не требует `embeddings.npy` в `data/vector_db`:
 файлы `VECTOR_DB_DIR` нужны лишь как источник миграции.

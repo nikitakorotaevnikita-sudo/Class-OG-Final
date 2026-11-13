@@ -15,7 +15,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-import config
+from core import config
 from queueing import dispatcher as dispatcher_mod
 from queueing import waiter as waiter_mod
 from queueing.dispatcher import DispatchError, LocalDispatcher
@@ -88,7 +88,7 @@ def env(monkeypatch):
     local = LocalDispatcher(storage, agent_factory=lambda: agent)
     monkeypatch.setattr(dispatcher_mod, "_dispatcher", local)
     monkeypatch.setattr(config, "SYNC_WAIT_TIMEOUT_SEC", 30)
-    import api_server
+    from api import api_server
     yield SimpleNamespace(storage=storage, agent=agent, app=api_server.app, dispatcher=local)
     # Задача, пережившая 504 (test_classify_sync_timeout_returns_504), не должна
     # доделываться в следующих тестах: ждём её и останавливаем потоки пула.
@@ -105,8 +105,8 @@ def client(env):
 
 def test_api_does_not_import_heavy_modules():
     code = (
-        "import sys; sys.path.insert(0, r'%s'); import api_server; "
-        "heavy = [m for m in ('torch', 'classifier_agent', 'sentence_transformers') "
+        "import sys; sys.path.insert(0, r'%s'); import api.api_server; "
+        "heavy = [m for m in ('torch', 'classifier.classifier_agent', 'sentence_transformers') "
         "if m in sys.modules]; print('HEAVY=' + ','.join(heavy))" % SRC
     )
     proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
@@ -344,7 +344,7 @@ def test_historical_count(env, client):
 
 
 def test_settings_include_sync_wait_timeout():
-    import settings_store
+    from core import settings_store
     data = settings_store.read_settings()
     queue = [g for g in data["groups"] if g["group"] == "queue"]
     assert queue and queue[0]["label"] == "Очередь"
@@ -353,13 +353,13 @@ def test_settings_include_sync_wait_timeout():
 
 @pytest.mark.parametrize("bad", ["0", "-5", "abc", "1.5"])
 def test_settings_sync_wait_timeout_rejects_non_positive_int(bad):
-    import settings_store
+    from core import settings_store
     with pytest.raises(settings_store.SettingsError):
         settings_store.normalize_updates({"SYNC_WAIT_TIMEOUT_SEC": bad})
 
 
 def test_settings_sync_wait_timeout_applied_at_runtime(monkeypatch, tmp_path):
-    import settings_store
+    from core import settings_store
     monkeypatch.setattr(settings_store, "ENV_PATH", tmp_path / ".env")
     monkeypatch.setattr(config, "SYNC_WAIT_TIMEOUT_SEC", 1800)
     monkeypatch.setenv("SYNC_WAIT_TIMEOUT_SEC", "1800")
@@ -381,7 +381,7 @@ def test_finetune_double_submit_race_is_409(env, client, monkeypatch):
 
 def test_search_timeout_504_does_not_point_to_jobs_endpoint(env, client, monkeypatch):
     """/integration/jobs/{id} отвечает 404 для задач поиска — ссылаться на него нельзя."""
-    import api_server
+    from api import api_server
 
     real = env.agent._search_candidates
 
@@ -401,7 +401,7 @@ def test_search_timeout_504_does_not_point_to_jobs_endpoint(env, client, monkeyp
 def test_confirm_historical_reports_actually_inserted(env, client, monkeypatch):
     rec = {"appeal_text": "т", "assigned_code": CODE}
     env.storage.historical.add([rec], "f.xlsx")  # уже есть: дубль не вставится
-    import api_server
+    from api import api_server
 
     monkeypatch.setattr(api_server, "_last_historical_upload", {
         "valid_records": [rec, {"appeal_text": "новое", "assigned_code": CODE}],
@@ -445,7 +445,7 @@ def test_verify_enqueues_exactly_inserted_annotation_ids(env, client, monkeypatc
 
 
 def test_logger_correct_with_annotations_returns_inserted_ids(env):
-    from appeals_logger import AppealsLogger
+    from storage.appeals_logger import AppealsLogger
 
     _register_models(env.storage)
     logger = AppealsLogger(storage=env.storage)
@@ -521,7 +521,7 @@ def test_finetune_force_reports_effective_flag(env, client, monkeypatch, source,
 def test_health_probe_is_single_flight_and_cached(monkeypatch):
     """Параллельные /health ждут одну проверку брокера; результат кэшируется ~2 с."""
     import asyncio
-    import job_api
+    from api import job_api
 
     monkeypatch.setattr(config, "STORAGE_BACKEND", "postgres")
     monkeypatch.setattr(job_api, "_ping_cache", {"at": None, "value": (False, False),
@@ -556,7 +556,7 @@ def test_health_probe_is_single_flight_and_cached(monkeypatch):
     (None, (False, True)),
 ])
 def test_ping_counts_only_classify_workers(monkeypatch, replies, expected):
-    import job_api
+    from api import job_api
     from queueing import celery_app as celery_mod
 
     class Inspect:
@@ -568,7 +568,7 @@ def test_ping_counts_only_classify_workers(monkeypatch, replies, expected):
 
 
 def test_ping_broker_down(monkeypatch):
-    import job_api
+    from api import job_api
     from queueing import celery_app as celery_mod
 
     def down(timeout=1):
@@ -588,7 +588,7 @@ def _off_loop() -> bool:
 
 
 def test_classify_file_extracts_text_off_event_loop(env, client, monkeypatch):
-    import api_server
+    from api import api_server
 
     seen = []
 
@@ -604,7 +604,7 @@ def test_classify_file_extracts_text_off_event_loop(env, client, monkeypatch):
 
 
 def test_upload_historical_parses_off_event_loop(env, client, monkeypatch):
-    import api_server
+    from api import api_server
 
     seen = []
 
@@ -627,7 +627,7 @@ def test_upload_historical_parses_off_event_loop(env, client, monkeypatch):
 
 
 def test_settings_read_and_save_off_event_loop(env, client, monkeypatch):
-    import settings_store
+    from core import settings_store
 
     seen = []
     monkeypatch.setattr(settings_store, "read_settings",
@@ -640,7 +640,7 @@ def test_settings_read_and_save_off_event_loop(env, client, monkeypatch):
 
 
 def test_examples_read_off_event_loop(env, client, tmp_path, monkeypatch):
-    import api_server
+    from api import api_server
 
     path = tmp_path / "ex.json"
     path.write_text('[{"text": "пример"}]', encoding="utf-8")

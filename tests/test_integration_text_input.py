@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 sys.path.insert(0, "src")
 
-import rx_client
+from integrations import rx_client
 from rx_harness import make_client
 
 

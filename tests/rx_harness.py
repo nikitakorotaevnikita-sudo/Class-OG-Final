@@ -7,8 +7,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-import config
-import integration_api
+from core import config
+from api import integration_api
 from queueing import dispatcher as dispatcher_mod
 from queueing import waiter as waiter_mod
 from queueing.dispatcher import LocalDispatcher

@@ -11,9 +11,9 @@ from typing import Optional
 
 from dotenv import dotenv_values
 
-import config
-import settings_store
-from classifier_agent import ClassifierAgent
+from core import config
+from core import settings_store
+from classifier.classifier_agent import ClassifierAgent
 from storage import get_storage
 
 log = logging.getLogger(__name__)

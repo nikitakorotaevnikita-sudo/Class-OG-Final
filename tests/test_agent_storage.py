@@ -12,8 +12,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-import classifier_agent as classifier_mod
-from classifier_agent import ClassifierAgent
+from classifier import classifier_agent as classifier_mod
+from classifier.classifier_agent import ClassifierAgent
 from storage.memory import MemoryStorage
 from storage.models import ClassifierEntry, ModelVersion
 
@@ -205,7 +205,7 @@ def test_embed_passage_applies_prefix_rule(fake_st):
 # ── AppealsLogger ────────────────────────────────────────────────────────────
 
 def test_logger_legacy_log_and_verification():
-    from appeals_logger import AppealsLogger
+    from storage.appeals_logger import AppealsLogger
 
     logger = AppealsLogger(_storage())
     lid = logger.log(appeal_text="текст", candidates=[{"code": "c", "name": "n", "similarity": 0.5}],
@@ -220,7 +220,7 @@ def test_logger_legacy_log_and_verification():
 
 
 def test_correct_with_comment_creates_annotation():
-    from appeals_logger import AppealsLogger
+    from storage.appeals_logger import AppealsLogger
 
     storage = _storage()
     logger = AppealsLogger(storage)
@@ -248,7 +248,7 @@ def global_storage(monkeypatch):
 
 
 def test_annotations_api(global_storage):
-    import annotations_storage as ann
+    from storage import annotations_storage as ann
 
     code = "0001.0001.0001.0001"
     assert ann.build_search_text(code, "Вопрос", "Раздел / Вопрос") == "Вопрос. Раздел / Вопрос"
@@ -277,8 +277,8 @@ def test_annotations_api(global_storage):
 # ── build_vectordb ──────────────────────────────────────────────────────────
 
 def test_build_database_writes_base_and_annotation_rows(global_storage, monkeypatch):
-    import annotations_storage as ann
-    import build_vectordb
+    from storage import annotations_storage as ann
+    from training import build_vectordb
 
     monkeypatch.setattr(build_vectordb, "SentenceTransformer", FakeST)
     code = "0001.0001.0001.0001"
@@ -373,7 +373,7 @@ def test_agent_metadata_order_equals_classifier_flat(fake_st):
 
 def test_operator_comment_with_legacy_prefix_is_not_a_legacy_field(global_storage):
     """Комментарий оператора "correct_name: ..." не переименовывает запись."""
-    import annotations_storage as ann
+    from storage import annotations_storage as ann
 
     code = "0001.0001.0001.0001"
     ann.add_annotation(code, "correct_name: Чужое имя")
@@ -387,8 +387,8 @@ def test_operator_comment_with_legacy_prefix_is_not_a_legacy_field(global_storag
 
 
 def test_appeals_logger_correct_comment_does_not_rename_code(global_storage):
-    import annotations_storage as ann
-    from appeals_logger import AppealsLogger
+    from storage import annotations_storage as ann
+    from storage.appeals_logger import AppealsLogger
 
     code = "0001.0001.0001.0001"
     logger = AppealsLogger(storage=global_storage)
@@ -414,8 +414,8 @@ class _NoPerCodeAnnotations:
 
 
 def test_build_vectordb_reads_annotations_in_bulk(global_storage, monkeypatch):
-    import annotations_storage as ann
-    import build_vectordb
+    from storage import annotations_storage as ann
+    from training import build_vectordb
 
     monkeypatch.setattr(build_vectordb, "SentenceTransformer", FakeST)
     code = "0001.0001.0001.0001"
@@ -428,8 +428,8 @@ def test_build_vectordb_reads_annotations_in_bulk(global_storage, monkeypatch):
 
 
 def test_finetune_texts_read_annotations_in_bulk(global_storage):
-    import annotations_storage as ann
-    import finetune_model
+    from storage import annotations_storage as ann
+    from training import finetune_model
 
     code = "0001.0001.0001.0001"
     ann.save_annotation(code, "correct_name", "Иное")

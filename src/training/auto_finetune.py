@@ -9,9 +9,9 @@ recall@5 и только если база — дообученная верси
 (векторы с адаптером), активируют вручную в бэк-офисе.
 
 Запуск:
-    python src/auto_finetune.py
-    python src/auto_finetune.py --force              # без проверки порога
-    python src/auto_finetune.py --source verified    # источник данных (по умолчанию combined)
+    python src/training/auto_finetune.py
+    python src/training/auto_finetune.py --force              # без проверки порога
+    python src/training/auto_finetune.py --source verified    # источник данных (по умолчанию combined)
 """
 
 import argparse
@@ -19,9 +19,17 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-sys.path.insert(0, str(Path(__file__).parent))
+# Корень импорта — src/. При запуске `python src/<пакет>/<файл>.py` Python кладёт
+# в sys.path[0] папку самого скрипта: заменяем её на src, чтобы модули пакета
+# не импортировались под двумя именами. `python -m <пакет>.<файл>` с PYTHONPATH=src
+# и импорт из тестов работают без этого.
+_SRC = Path(__file__).resolve().parents[1]
+if sys.path and Path(sys.path[0] or ".").resolve() == Path(__file__).resolve().parent:
+    sys.path[0] = str(_SRC)
+elif str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
 
-import config
+from core import config
 from storage import get_storage
 from storage.models import ActiveJobExists
 

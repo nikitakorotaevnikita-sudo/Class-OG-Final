@@ -72,7 +72,7 @@ docker compose up -d --force-recreate classifier
 ## Проверка
 
 ```
-docker compose exec classifier python -c "import sys; sys.path.insert(0,'src'); import env_bootstrap; from sentence_transformers import SentenceTransformer; import config; m=SentenceTransformer(config.EMBEDDING_MODEL); print('OK', m.get_sentence_embedding_dimension())"
+docker compose exec classifier python -c "import sys; sys.path.insert(0,'src'); from core import env_bootstrap; from sentence_transformers import SentenceTransformer; from core import config; m=SentenceTransformer(config.EMBEDDING_MODEL); print('OK', m.get_sentence_embedding_dimension())"
 ```
 
 Ожидается `OK 768`.
@@ -86,7 +86,7 @@ docker compose exec classifier python -c "import sys; sys.path.insert(0,'src'); 
 
 PROBE = (
     "import json, os, sys; sys.path.insert(0, 'src');"
-    " import env_bootstrap;"
+    " from core import env_bootstrap;"
     " import huggingface_hub.constants as c;"
     " from sentence_transformers import SentenceTransformer;"
     " m = SentenceTransformer(os.environ['PROBE_MODEL']);"

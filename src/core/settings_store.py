@@ -7,7 +7,7 @@
 * применить изменения в already-running процессе, не дожидаясь перезапуска.
 
 Горячее применение нужно потому, что модули проекта импортируют константы
-через `from config import X` — то есть держат собственную копию значения.
+через `from core.config import X` — то есть держат собственную копию значения.
 Одного `setattr(config, ...)` мало: перепривязываем имя во всех загруженных
 модулях проекта, которые его импортировали.
 """
@@ -18,9 +18,9 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).parent.parent
+PROJECT_ROOT = Path(__file__).parent.parent.parent  # src/core/ → корень проекта
 ENV_PATH = PROJECT_ROOT / ".env"
-SRC_DIR = Path(__file__).parent
+SRC_DIR = Path(__file__).parent.parent
 
 # Значение, которое фронт получает вместо секрета. Если поле вернулось с этим
 # значением (или пустым) — пользователь его не трогал, перезаписывать не нужно.
@@ -99,7 +99,7 @@ EDITABLE_KEYS: tuple[str, ...] = tuple(FIELDS_BY_KEY)
 
 def _current_value(key: str) -> str:
     """Текущее значение из модуля config (он — единая точка правды в рантайме)."""
-    import config
+    from core import config
     return str(getattr(config, key, "") or "")
 
 
@@ -252,7 +252,7 @@ def _project_modules():
         if not path:
             continue
         try:
-            if Path(path).parent == SRC_DIR:
+            if Path(path).is_relative_to(SRC_DIR):
                 yield module
         except (OSError, ValueError):
             continue
@@ -275,7 +275,7 @@ def apply_runtime(updates: dict, agent=None) -> list[str]:
     if not updates:
         return []
 
-    import config
+    from core import config
 
     for key, value in updates.items():
         os.environ[key] = value

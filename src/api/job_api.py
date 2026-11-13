@@ -25,7 +25,7 @@ from typing import Optional
 import psycopg
 from fastapi import HTTPException
 
-import config
+from core import config
 from queueing import dispatcher as dispatcher_mod
 from queueing import waiter as waiter_mod
 from queueing.dispatcher import DispatchError

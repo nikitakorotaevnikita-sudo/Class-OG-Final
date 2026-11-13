@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 from typing import Optional
 
-import config
+from core import config
 
 from .models import Storage
 

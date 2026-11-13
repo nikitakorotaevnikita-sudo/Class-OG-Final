@@ -75,7 +75,7 @@ def test_process_using_pool_exits_promptly():
     if not url:
         pytest.skip("TEST_DATABASE_URL не задан — тесты PostgreSQL пропущены")
     # register_vector не нужен (в public тестовой БД расширения может не быть)
-    code = ("import config; config.DATABASE_URL = %r\n"
+    code = ("from core import config; config.DATABASE_URL = %r\n"
             "from storage import db\n"
             "db._configure = lambda conn: conn.commit()\n"
             "with db.transaction() as c:\n"

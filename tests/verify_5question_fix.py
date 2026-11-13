@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from classifier_agent import ClassifierAgent
+from classifier.classifier_agent import ClassifierAgent
 
 
 APPEAL = """Заявитель повторно обращается!!

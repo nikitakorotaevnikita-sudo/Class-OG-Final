@@ -1,13 +1,10 @@
 """Клиент RX OData: получение текста документа по id (pull-модель)."""
 
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent))
 
 import httpx
-from config import RX_ODATA_URL, RX_USER, RX_PASSWORD, RX_VIA_PROXY
-from proxy_policy import uses_env_proxy
-from text_extractor import extract_text
+from core.config import RX_ODATA_URL, RX_USER, RX_PASSWORD, RX_VIA_PROXY
+from integrations.proxy_policy import uses_env_proxy
+from integrations.text_extractor import extract_text
 
 
 class DocumentNotFound(Exception):

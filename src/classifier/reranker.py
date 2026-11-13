@@ -9,14 +9,11 @@ CrossEncoder reranker через transformers напрямую (sentence-transfo
 """
 
 import os
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
 
-import env_bootstrap  # noqa: F401  — .env до HF-библиотек
+from core import env_bootstrap  # noqa: F401  — .env до HF-библиотек
 
-from config import CROSS_ENCODER_MODEL, CE_RERANK_TOP_N, CE_BLEND_WEIGHT
+from core.config import CROSS_ENCODER_MODEL, CE_RERANK_TOP_N, CE_BLEND_WEIGHT
 
 
 class CrossEncoderReranker:

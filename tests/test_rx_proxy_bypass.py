@@ -20,8 +20,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 import httpx
 import pytest
 
-import config
-import rx_client
+from core import config
+from integrations import rx_client
 
 
 class _Resp:

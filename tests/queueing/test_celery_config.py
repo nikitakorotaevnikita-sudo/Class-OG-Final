@@ -36,7 +36,7 @@ def test_short_broker_timeouts_for_publishing():
 
 def test_broker_heartbeat_from_config_default_disabled():
     """solo-пул не шлёт heartbeat во время задачи — по умолчанию heartbeat выключен."""
-    import config
+    from core import config
 
     assert config.BROKER_HEARTBEAT_SEC == 0
     assert app.conf.broker_heartbeat == config.BROKER_HEARTBEAT_SEC
@@ -44,12 +44,12 @@ def test_broker_heartbeat_from_config_default_disabled():
 
 def test_worker_proc_alive_timeout_from_config():
     """Страховка prefork: дочерний процесс не убивается за долгую инициализацию."""
-    import config
+    from core import config
 
     from pathlib import Path
 
     # Дефолт кода, независимо от .env разработчика.
-    src = (Path(__file__).resolve().parents[2] / "src" / "config.py").read_text(encoding="utf-8")
+    src = (Path(__file__).resolve().parents[2] / "src" / "core" / "config.py").read_text(encoding="utf-8")
     assert 'os.getenv("WORKER_PROC_ALIVE_TIMEOUT_SEC", "300")' in src
     assert app.conf.worker_proc_alive_timeout == config.WORKER_PROC_ALIVE_TIMEOUT_SEC
 

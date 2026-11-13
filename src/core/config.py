@@ -9,10 +9,13 @@ from typing import Optional
 
 from dotenv import load_dotenv
 
-import service_urls
+from core import service_urls
+
+# Корень проекта: этот файл лежит в src/core/.
+PROJECT_ROOT = Path(__file__).parent.parent.parent
 
 # Загружаем .env из корня проекта
-load_dotenv(Path(__file__).parent.parent / ".env")
+load_dotenv(PROJECT_ROOT / ".env")
 
 # ── LLM Provider ────────────────────────────────────────────────────────────────
 LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "groq")  # "groq" | "gemini" | "ollama" | "ario"
@@ -60,7 +63,7 @@ CUSTOM_LLM_MODEL: str = os.getenv("CUSTOM_LLM_MODEL", "")
 CUSTOM_LLM_API_KEY: str = os.environ.get("CUSTOM_LLM_API_KEY", "")
 
 # ── Векторная база (numpy) ─────────────────────────────────────────────────────
-_data_dir = Path(__file__).parent.parent / "data"
+_data_dir = PROJECT_ROOT / "data"
 VECTOR_DB_DIR: str = os.getenv(
     "VECTOR_DB_DIR",
     str(_data_dir / "vector_db")
@@ -129,14 +132,14 @@ MQE_N_VARIANTS: int = int(os.getenv("MQE_N_VARIANTS", "4"))
 ENABLE_ALLOWED_CODES: bool = os.getenv("ENABLE_ALLOWED_CODES", "false").lower() == "true"
 ALLOWED_CODES_PATH: str = os.getenv(
     "ALLOWED_CODES_PATH",
-    str(Path(__file__).parent.parent / "data" / "allowed_codes_top69.json"),
+    str(PROJECT_ROOT / "data" / "allowed_codes_top69.json"),
 )
 
 # ── Learning-to-Rank reranker (опциональный) ────────────────────────────────────
 # Sklearn LogReg обучен на ii25_train: предсказывает вероятность что candidate -
 # правильный код. Score добавляется в combined_score reranker'а.
 ENABLE_LTR_RERANKER: bool = os.getenv("ENABLE_LTR_RERANKER", "false").lower() == "true"
-LTR_MODEL_PATH: str = os.getenv("LTR_MODEL_PATH", str(Path(__file__).parent.parent / "models" / "ltr_v1.json"))
+LTR_MODEL_PATH: str = os.getenv("LTR_MODEL_PATH", str(PROJECT_ROOT / "models" / "ltr_v1.json"))
 # Вес LtR-score в финальном combined_score
 LTR_WEIGHT: float = float(os.getenv("LTR_WEIGHT", "0.30"))
 
@@ -144,7 +147,7 @@ LTR_WEIGHT: float = float(os.getenv("LTR_WEIGHT", "0.30"))
 # Применяется к query embedding после e5. Vector DB должна быть пересобрана
 # через тот же адаптер (data/vector_db_adapted).
 ENABLE_EMBEDDING_ADAPTER: bool = os.getenv("ENABLE_EMBEDDING_ADAPTER", "false").lower() == "true"
-ADAPTER_PATH: str = os.getenv("ADAPTER_PATH", str(Path(__file__).parent.parent / "models" / "adapter_v1.npz"))
+ADAPTER_PATH: str = os.getenv("ADAPTER_PATH", str(PROJECT_ROOT / "models" / "adapter_v1.npz"))
 
 # ── Full-classifier fallback ───────────────────────────────────────────────────
 # Если ретривер промахнулся (в пуле нет близких по смыслу кодов — max cosine
@@ -191,7 +194,7 @@ MAX_APPEAL_LENGTH: int = 5000   # символов
 # Порог верифицированных записей для запуска fine-tuning
 FINETUNE_THRESHOLD: int = int(os.getenv("FINETUNE_THRESHOLD", "50"))
 # Папка для дообученных моделей
-MODELS_DIR: str = os.getenv("MODELS_DIR", str(Path(__file__).parent.parent / "models"))
+MODELS_DIR: str = os.getenv("MODELS_DIR", str(PROJECT_ROOT / "models"))
 
 # ── Бэк-офис (Basic Auth) ───────────────────────────────────────────────────────
 BACKOFFICE_USER:     str = os.getenv("BACKOFFICE_USER", "admin")

@@ -2,7 +2,7 @@
 Тестирование агента классификации на примерах обращений.
 
 Использование:
-    python src/test_agent.py
+    python src/cli/test_agent.py
 """
 
 import sys
@@ -10,9 +10,17 @@ sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent))
+# Корень импорта — src/. При запуске `python src/<пакет>/<файл>.py` Python кладёт
+# в sys.path[0] папку самого скрипта: заменяем её на src, чтобы модули пакета
+# не импортировались под двумя именами. `python -m <пакет>.<файл>` с PYTHONPATH=src
+# и импорт из тестов работают без этого.
+_SRC = Path(__file__).resolve().parents[1]
+if sys.path and Path(sys.path[0] or ".").resolve() == Path(__file__).resolve().parent:
+    sys.path[0] = str(_SRC)
+elif str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
 
-from classifier_agent import ClassifierAgent
+from classifier.classifier_agent import ClassifierAgent
 
 TEST_APPEALS = [
     {

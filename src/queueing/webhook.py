@@ -9,8 +9,8 @@ from urllib.parse import urlparse
 
 import httpx
 
-import config
-from proxy_policy import uses_env_proxy
+from core import config
+from integrations.proxy_policy import uses_env_proxy
 
 log = logging.getLogger(__name__)
 

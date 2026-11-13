@@ -44,7 +44,7 @@ from urllib.parse import urlsplit
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from service_urls import build_database_url, build_rabbitmq_url  # noqa: E402
+from core.service_urls import build_database_url, build_rabbitmq_url  # noqa: E402
 
 BOM = "\ufeff"
 

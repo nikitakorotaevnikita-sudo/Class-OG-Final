@@ -314,7 +314,7 @@ def test_entries_keep_flat_order_and_correct_name_is_honoured(mem, tmp_path, mon
 
     assert [e.code for e in mem.classifier.load_entries()] == [e["code"] for e in flat]
     assert "correct_name: Новое имя" in mem.classifier.annotations_for(CODE)
-    import annotations_storage
+    from storage import annotations_storage
     assert annotations_storage.build_search_text(CODE, "Старое", "путь", storage=mem) == (
         "Новое имя. путь | Note: x")
 

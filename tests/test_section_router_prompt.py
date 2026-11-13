@@ -3,7 +3,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from section_router import ROUTING_SYSTEM_PROMPT, SECTIONS_CATALOG, build_routing_prompt
+from classifier.section_router import ROUTING_SYSTEM_PROMPT, SECTIONS_CATALOG, build_routing_prompt
 
 
 def test_routing_prompt_distinguishes_school_activity_from_construction():

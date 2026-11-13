@@ -24,7 +24,7 @@ import logging
 import threading
 from typing import Optional
 
-import config
+from core import config
 from storage.models import STATUS_DONE, STATUS_ERROR, Job
 
 log = logging.getLogger(__name__)

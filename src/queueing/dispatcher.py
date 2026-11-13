@@ -20,7 +20,7 @@ from typing import Callable, Optional, Protocol
 
 from kombu.exceptions import OperationalError as KombuOperationalError
 
-import config
+from core import config
 from storage.models import STATUS_DONE, STATUS_ERROR
 
 log = logging.getLogger(__name__)
@@ -158,7 +158,7 @@ class LocalDispatcher:
 
 
 def _worker_agent():
-    import worker_main  # лениво: тянет classifier_agent (модель)
+    from worker import worker_main  # лениво: тянет classifier_agent (модель)
 
     return worker_main.get_agent()
 

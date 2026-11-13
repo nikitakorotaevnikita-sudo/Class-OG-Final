@@ -8,9 +8,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-import build_vectordb
-import config
-import finetune_model
+from training import build_vectordb
+from core import config
+from training import finetune_model
 from finetune_helpers import (ANNOTATION, BASE_MODEL, CODES, FakeSentenceTransformer,
                               FakeTrain, seed)
 
@@ -219,7 +219,7 @@ def test_cli_main_exit_codes(monkeypatch, capsys):
 # ── auto_finetune / auto_import_historical ───────────────────────────────────
 
 def test_auto_finetune_enqueues_training_job(monkeypatch):
-    import auto_finetune
+    from training import auto_finetune
     from queueing import dispatcher
     from storage import get_storage
 
@@ -240,7 +240,7 @@ def test_auto_finetune_enqueues_training_job(monkeypatch):
 
 
 def test_auto_finetune_below_threshold_enqueues_nothing(monkeypatch):
-    import auto_finetune
+    from training import auto_finetune
     from queueing import dispatcher
     from storage import get_storage
 
@@ -255,8 +255,8 @@ def test_auto_finetune_below_threshold_enqueues_nothing(monkeypatch):
 
 
 def test_auto_import_saves_valid_records_to_db(monkeypatch, tmp_path):
-    import auto_import_historical as aih
-    from historical_loader import ValidationResult
+    from training import auto_import_historical as aih
+    from training.historical_loader import ValidationResult
     from storage import get_storage
 
     hist = tmp_path / "historical"
@@ -294,7 +294,7 @@ class _RecordingEmbedder:
 
 
 def _agent(model_path, version):
-    import classifier_agent
+    from classifier import classifier_agent
 
     agent = classifier_agent.ClassifierAgent.__new__(classifier_agent.ClassifierAgent)
     agent.embedder = _RecordingEmbedder()
@@ -307,7 +307,7 @@ def _agent(model_path, version):
 
 
 def test_query_prefix_follows_active_model_path(monkeypatch):
-    import classifier_agent
+    from classifier import classifier_agent
 
     monkeypatch.setattr(classifier_agent, "EMBEDDING_MODEL", "BAAI/bge-m3")
     agent = _agent("models/e5-finetuned-v2", 2)
@@ -321,7 +321,7 @@ def test_query_prefix_follows_active_model_path(monkeypatch):
 
 
 def test_adapter_applies_only_to_version_zero(monkeypatch):
-    import classifier_agent
+    from classifier import classifier_agent
 
     monkeypatch.setattr(classifier_agent, "ENABLE_EMBEDDING_ADAPTER", True)
     v0 = _agent(BASE_MODEL, 0)._embed_query("т")
@@ -429,7 +429,7 @@ def test_build_vectordb_cli_usage_without_args(capsys):
 
 
 def test_auto_finetune_race_with_active_job_exits_cleanly(monkeypatch, capsys):
-    import auto_finetune
+    from training import auto_finetune
     from queueing import dispatcher
     from storage import get_storage
 

@@ -27,7 +27,7 @@ log = logging.getLogger(__name__)
 
 def _warm() -> None:
     try:
-        import worker_main  # лениво: тянет classifier_agent (модель)
+        from worker import worker_main  # лениво: тянет classifier_agent (модель)
 
         worker_main.get_agent()
     except Exception:
@@ -52,7 +52,7 @@ def reset_inherited_state() -> None:
 
     db._pool = None
     factory.reset_storage()
-    worker_main = sys.modules.get("worker_main")
+    worker_main = sys.modules.get("worker.worker_main")
     if worker_main is not None:
         worker_main._agent = None
 

@@ -1,7 +1,7 @@
 import sys
 sys.path.insert(0, "src")
 from dataclasses import dataclass, field
-import rx_client
+from integrations import rx_client
 from rx_harness import make_client
 
 

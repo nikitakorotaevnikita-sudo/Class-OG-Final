@@ -420,7 +420,7 @@ def _get_storage() -> Storage:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
-    import config
+    from core import config
 
     p = argparse.ArgumentParser(description="Импорт файлового хранилища в БД")
     p.add_argument("--data-dir", default="data")

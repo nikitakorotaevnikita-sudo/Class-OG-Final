@@ -1,6 +1,6 @@
 import pytest
 
-import config
+from core import config
 from storage import get_storage, reset_storage
 from storage.memory import MemoryStorage
 

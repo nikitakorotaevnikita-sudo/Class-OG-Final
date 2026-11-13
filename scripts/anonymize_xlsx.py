@@ -38,7 +38,7 @@ def _regex_scrub(s: str) -> str:
 
 sys.path.insert(0, "src")
 sys.stdout.reconfigure(encoding="utf-8")
-from config import ARIO_API_KEY, ARIO_BASE_URL, ARIO_MODEL
+from core.config import ARIO_API_KEY, ARIO_BASE_URL, ARIO_MODEL
 
 IN = sys.argv[1]
 OUT = sys.argv[2]

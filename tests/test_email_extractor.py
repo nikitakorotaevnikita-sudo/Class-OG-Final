@@ -10,7 +10,7 @@ import sys
 sys.path.insert(0, "src")
 
 import pytest
-from email_extractor import extract_applicant_email, extract_emails
+from classifier.email_extractor import extract_applicant_email, extract_emails
 
 
 # ── адрес заявителя распознаётся по признаку принадлежности ──────────────────

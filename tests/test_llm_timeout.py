@@ -14,8 +14,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 import httpx
 import pytest
 
-import classifier_agent as ca
-from classifier_agent import ClassifierAgent
+from classifier import classifier_agent as ca
+from classifier.classifier_agent import ClassifierAgent
 
 
 class _FakeClient:
@@ -49,7 +49,7 @@ def test_raising_the_setting_raises_the_ollama_timeout(monkeypatch):
 
 def test_no_hardcoded_timeout_left_for_ollama():
     """Второй такой клиент создаётся в __init__ — там было то же число."""
-    source = (Path(__file__).parent.parent / "src" / "classifier_agent.py").read_text(
+    source = (Path(__file__).parent.parent / "src" / "classifier" / "classifier_agent.py").read_text(
         encoding="utf-8")
     assert "timeout=120" not in source, "остался зашитый таймаут"
 
@@ -57,7 +57,7 @@ def test_no_hardcoded_timeout_left_for_ollama():
 def test_default_timeout_is_360_seconds():
     """300 с не хватало модели Заказчика на стенде (ollama): по умолчанию 360."""
     root = Path(__file__).parent.parent
-    config = (root / "src" / "config.py").read_text(encoding="utf-8")
+    config = (root / "src" / "core" / "config.py").read_text(encoding="utf-8")
     assert 'os.getenv("LLM_TIMEOUT_SEC", "360")' in config
     example = (root / ".env.example").read_text(encoding="utf-8")
     assert "LLM_TIMEOUT_SEC=360" in example

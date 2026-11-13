@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import pytest
 
-from fio_extractor import extract_applicant_fio
+from classifier.fio_extractor import extract_applicant_fio
 
 
 # ── Где искать заявителя ────────────────────────────────────────────────────

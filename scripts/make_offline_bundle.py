@@ -162,7 +162,7 @@ def copy_vector_db(vdb_dir: Path) -> bool:
     emb = vdb_dir / "embeddings.npy"
     meta = vdb_dir / "metadata.json"
     if not (emb.is_file() and meta.is_file()):
-        print(f"  базы нет в {vdb_dir} — сначала python src/build_vectordb.py")
+        print(f"  базы нет в {vdb_dir} — сначала python src/training/build_vectordb.py")
         return False
     dest.mkdir(parents=True, exist_ok=True)
     shutil.copy2(emb, dest / "embeddings.npy")
@@ -212,7 +212,7 @@ def main() -> int:
     BUNDLE.mkdir(parents=True, exist_ok=True)
 
     sys.path.insert(0, str(ROOT / "src"))
-    import config
+    from core import config
 
     vdb = Path(args.vector_db) if args.vector_db else Path(config.VECTOR_DB_DIR)
     if not vdb.is_absolute():

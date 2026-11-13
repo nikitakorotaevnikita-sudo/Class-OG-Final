@@ -19,7 +19,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from classifier_agent import ClassifierAgent  # noqa: E402
+from classifier.classifier_agent import ClassifierAgent  # noqa: E402
 from eval_metrics_helpers import code_prefix, first_expected_rank, pct  # noqa: E402
 
 
