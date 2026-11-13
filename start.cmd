@@ -237,6 +237,15 @@ if errorlevel 1 (
     echo ERROR: docker compose v2 plugin not found.
     exit /b 1
 )
+:: The CLI is there, but the engine may be stopped or hung (Docker Desktop
+:: then answers "Internal Server Error for API route ..."): say so plainly.
+docker info >nul 2>&1
+if errorlevel 1 (
+    echo ERROR: the Docker engine does not respond. Start Docker Desktop, or if it
+    echo        is already running restart it ^(Troubleshoot - Restart^), wait for
+    echo        "Engine running" and run this command again.
+    exit /b 1
+)
 exit /b 0
 
 :require_venv

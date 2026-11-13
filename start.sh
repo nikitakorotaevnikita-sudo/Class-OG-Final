@@ -54,6 +54,9 @@ ensure_env() {
 require_docker() {
     command -v docker >/dev/null 2>&1 || die "docker не найден — установить Docker Engine с плагином compose"
     docker compose version >/dev/null 2>&1 || die "нет плагина docker compose (нужен Compose v2)"
+    # CLI на месте, но движок может быть остановлен или зависнуть
+    # (Docker Desktop отвечает "Internal Server Error for API route ...").
+    docker info >/dev/null 2>&1 || die "движок Docker не отвечает: запустить (или перезапустить) Docker Desktop / сервис docker и повторить"
 }
 
 require_venv() {

@@ -169,3 +169,11 @@ def test_batch_files_checked_out_with_crlf_regardless_of_autocrlf():
     for name in files:
         assert f"{name}: eol: crlf" in out, out
         assert f"{name}: text: set" in out, out
+
+
+@pytest.mark.parametrize("script", ["start.cmd", "start.sh"])
+def test_start_scripts_check_that_docker_engine_responds(script):
+    """Зависший движок Docker Desktop: понятная ошибка до docker compose up."""
+    text = (ROOT / script).read_text(encoding="utf-8")
+    assert "docker info" in text
+    assert "does not respond" in text or "не отвечает" in text
