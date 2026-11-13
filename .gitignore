@@ -86,9 +86,13 @@ playwright-report/
 # Логи запуска сервиса (uvicorn пишет сюда stdout/stderr)
 logs/
 
-# Фоновые задачи классификации: в результатах ФИО, почта и суть обращения — ПДн
-data/jobs/*
-!data/jobs/.gitkeep
+# Старое файловое хранилище (ПДн). Данные перенесены в PostgreSQL
+# (scripts/db/migrate_from_files.py), файлы в Git не возвращаются.
+data/jobs/
+data/appeals_log.jsonl
+data/request_log.jsonl
+data/historical_verified.jsonl
+data/classifier_annotations.json
 
 # Локальный запуск start.sh: pid-файлы и логи процессов (в логах бывают тексты обращений)
 run/

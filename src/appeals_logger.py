@@ -28,15 +28,11 @@ read_all()/read_verified() отдают записи в формате стар�
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Optional
 
 from storage import get_storage
 from storage.models import AppealQuestionRow, AppealResult, Storage
 
-# Старый файловый лог. Остаётся только как имя для импорта (auto_finetune),
-# данные теперь в БД; перенос — scripts/db/migrate_from_files.py.
-LOG_FILE = Path(__file__).parent.parent / "data" / "appeals_log.jsonl"
 
 
 def _legacy_result(candidates: list, agent_questions: list,

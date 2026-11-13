@@ -191,8 +191,8 @@ In compose, `DATABASE_URL`/`RABBITMQ_URL` are overridden to the service hostname
   production file DB `data/vector_db_adapted_v3` **is** in Git: it is the source of model
   version 0 for `migrate_from_files.py` (`VECTOR_DB_DIR` points at it).
 - Personal data (appeal texts, 59-FZ) never goes to Git: the `pgdata` volume, `run/`
-  (local process logs), migration output, `data/appeals_log.jsonl`, `data/request_log.jsonl`,
-  `data/jobs/`. `stop.*` never runs `docker compose down -v`.
+  (local process logs), migration output, the legacy `data/appeals_log.jsonl` /
+  `data/request_log.jsonl` (git-ignored; data now lives in PostgreSQL). `stop.*` never runs `docker compose down -v`.
 - The API process must never import `classifier_agent`, `sentence_transformers` or `torch`.
 - `.cmd` files: executable lines ASCII-only, CRLF. `.sh` files: LF, `set -euo pipefail`.
 - `setup.ps1` is ASCII-only — Cyrillic strings cause PowerShell parse errors on Windows with CP1251 encoding.
