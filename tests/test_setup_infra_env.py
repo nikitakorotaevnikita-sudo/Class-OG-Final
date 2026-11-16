@@ -1,8 +1,7 @@
-"""scripts/setup_infra_env.py — порты PostgreSQL/RabbitMQ на хосте и URL в .env.
+"""scripts/setup_infra_env.py — порт PostgreSQL на хосте и DATABASE_URL в .env.
 
-Установщик выбирает свободные порты (на машине могут работать «родные»
-PostgreSQL :5432 / RabbitMQ :5672) и пишет их в .env вместе с DATABASE_URL /
-RABBITMQ_URL. Файл с ключами правится бережно: кодировка, BOM, концы строк и
+Установщик выбирает свободный порт (на машине может работать «родной»
+PostgreSQL :5432) и пишет его в .env вместе с DATABASE_URL. Файл с ключами правится бережно: кодировка, BOM, концы строк и
 комментарии сохраняются, пароли не печатаются.
 """
 
@@ -85,10 +84,7 @@ def test_fallback_lists_skip_the_test_database_port():
     """5433 занят тестовым PostgreSQL (TEST_DATABASE_URL) — список начинается с 5434."""
     assert infra.PORTS["POSTGRES_PORT"][0] == 5432
     assert infra.PORTS["POSTGRES_PORT"][1][:2] == [5434, 5435]
-    assert infra.PORTS["RABBITMQ_PORT"][0] == 5672
-    assert infra.PORTS["RABBITMQ_PORT"][1][:2] == [5673, 5674]
-    assert infra.PORTS["RABBITMQ_MGMT_PORT"][0] == 15672
-    assert infra.PORTS["RABBITMQ_MGMT_PORT"][1][:2] == [15673, 15674]
+    assert list(infra.PORTS) == ["POSTGRES_PORT"]
 
 
 # ── Порты своих контейнеров из docker compose ps ────────────────────────────
@@ -97,12 +93,6 @@ PS_ITEMS = [
     {"Service": "postgres", "State": "running",
      "Publishers": [{"URL": "127.0.0.1", "TargetPort": 5432, "PublishedPort": 5434,
                      "Protocol": "tcp"}]},
-    {"Service": "rabbitmq", "State": "running",
-     "Publishers": [{"URL": "127.0.0.1", "TargetPort": 5672, "PublishedPort": 5673,
-                     "Protocol": "tcp"},
-                    {"URL": "127.0.0.1", "TargetPort": 15672, "PublishedPort": 15673,
-                     "Protocol": "tcp"},
-                    {"URL": "", "TargetPort": 4369, "PublishedPort": 0, "Protocol": "tcp"}]},
     {"Service": "api", "State": "running",
      "Publishers": [{"URL": "0.0.0.0", "TargetPort": 8005, "PublishedPort": 8010,
                      "Protocol": "tcp"}]},
@@ -114,8 +104,7 @@ PS_ITEMS = [
     "\n".join(json.dumps(item) for item in PS_ITEMS),     # новый: объект на строку
 ])
 def test_own_ports_parsed_from_compose_ps(output):
-    assert infra.parse_compose_ps(output) == {
-        "POSTGRES_PORT": 5434, "RABBITMQ_PORT": 5673, "RABBITMQ_MGMT_PORT": 15673}
+    assert infra.parse_compose_ps(output) == {"POSTGRES_PORT": 5434}
 
 
 def test_compose_ps_garbage_gives_nothing():
@@ -136,8 +125,8 @@ def test_parse_env_strips_comments_and_quotes():
 
 def test_set_keys_replaces_and_appends_keeping_comments():
     text = "# POSTGRES_PORT=1\r\nPOSTGRES_PORT=\r\nOTHER=x\r\n"
-    out = infra.set_keys(text, {"POSTGRES_PORT": "5434", "RABBITMQ_PORT": "5673"}, "\r\n")
-    assert out == "# POSTGRES_PORT=1\r\nPOSTGRES_PORT=5434\r\nOTHER=x\r\nRABBITMQ_PORT=5673\r\n"
+    out = infra.set_keys(text, {"POSTGRES_PORT": "5434", "EXTRA_KEY": "5673"}, "\r\n")
+    assert out == "# POSTGRES_PORT=1\r\nPOSTGRES_PORT=5434\r\nOTHER=x\r\nEXTRA_KEY=5673\r\n"
 
 
 def test_set_keys_adds_newline_before_append_when_missing():
@@ -153,11 +142,10 @@ def run_main(env_path, *extra, busy=(), ours=None):
 def test_main_writes_ports_and_urls_preserving_bom_and_crlf(tmp_path, capsys):
     env = tmp_path / ".env"
     original = ("# Настройки\r\nPOSTGRES_USER=classifier\r\nPOSTGRES_PASSWORD=s3cr@t:pw\r\n"
-                "POSTGRES_DB=classifier\r\nPOSTGRES_PORT=\r\nDATABASE_URL=\r\n"
-                "RABBITMQ_DEFAULT_USER=mq\r\nRABBITMQ_DEFAULT_PASS=topsecret\r\n")
+                "POSTGRES_DB=classifier\r\nPOSTGRES_PORT=\r\nDATABASE_URL=\r\n")
     env.write_bytes(b"\xef\xbb\xbf" + original.encode("utf-8"))
 
-    assert run_main(env, busy=(5432, 5672, 15672)) == 0
+    assert run_main(env, busy=(5432,)) == 0
 
     raw = env.read_bytes()
     assert raw.startswith(b"\xef\xbb\xbf")
@@ -166,21 +154,19 @@ def test_main_writes_ports_and_urls_preserving_bom_and_crlf(tmp_path, capsys):
     assert text.startswith("# Настройки\r\n")
     values = infra.parse_env(text)
     assert values["POSTGRES_PORT"] == "5434"
-    assert values["RABBITMQ_PORT"] == "5673"
-    assert values["RABBITMQ_MGMT_PORT"] == "15673"
+    assert not any("RABBIT" in key for key in values)
     assert values["DATABASE_URL"] == "postgresql://classifier:s3cr%40t%3Apw@localhost:5434/classifier"
-    assert values["RABBITMQ_URL"] == "amqp://mq:topsecret@localhost:5673//"
 
     out = capsys.readouterr()
     printed = out.out + out.err
-    assert "5434" in printed and "5673" in printed and "15673" in printed
-    for secret in ("s3cr", "topsecret", "%40"):
+    assert "5434" in printed
+    for secret in ("s3cr", "%40"):
         assert secret not in printed
 
 
 def test_main_without_bom_writes_no_bom_and_keeps_lf(tmp_path):
     env = tmp_path / ".env"
-    env.write_text("POSTGRES_PORT=5434\nRABBITMQ_PORT=5673\nRABBITMQ_MGMT_PORT=15673\n",
+    env.write_text("POSTGRES_PORT=5434\n",
                    encoding="utf-8", newline="")
     assert run_main(env) == 0
     raw = env.read_bytes()
@@ -189,30 +175,23 @@ def test_main_without_bom_writes_no_bom_and_keeps_lf(tmp_path):
     values = infra.parse_env(raw.decode("utf-8"))
     assert values["POSTGRES_PORT"] == "5434"  # своё значение не трогается
     assert values["DATABASE_URL"] == "postgresql://classifier:classifier@localhost:5434/classifier"
-    assert values["RABBITMQ_URL"] == "amqp://classifier:classifier@localhost:5673//"
 
 
 def test_main_keeps_external_database_url(tmp_path):
     """DATABASE_URL на другую машину — осознанная настройка, не переписывается."""
     env = tmp_path / ".env"
-    env.write_text("DATABASE_URL=postgresql://a:b@db.example:5432/x\n"
-                   "RABBITMQ_URL=amqp://a:b@localhost:5672//\n", encoding="utf-8")
+    env.write_text("DATABASE_URL=postgresql://a:b@db.example:5432/x\n", encoding="utf-8")
     assert run_main(env, busy=(5432,)) == 0
     values = infra.parse_env(env.read_text(encoding="utf-8"))
     assert values["DATABASE_URL"] == "postgresql://a:b@db.example:5432/x"
-    # локальный адрес — пересобирается под выбранный порт
-    assert values["RABBITMQ_URL"] == "amqp://classifier:classifier@localhost:5672//"
 
 
 def test_main_uses_own_container_ports(tmp_path):
     env = tmp_path / ".env"
     env.write_text("LLM_PROVIDER=ario\n", encoding="utf-8")
-    assert run_main(env, busy=(5434, 5673, 15673),
-                    ours={"POSTGRES_PORT": 5434, "RABBITMQ_PORT": 5673,
-                          "RABBITMQ_MGMT_PORT": 15673}) == 0
+    assert run_main(env, busy=(5434,), ours={"POSTGRES_PORT": 5434}) == 0
     values = infra.parse_env(env.read_text(encoding="utf-8"))
-    assert (values["POSTGRES_PORT"], values["RABBITMQ_PORT"],
-            values["RABBITMQ_MGMT_PORT"]) == ("5434", "5673", "15673")
+    assert values["POSTGRES_PORT"] == "5434"
 
 
 def test_main_is_idempotent(tmp_path):
@@ -249,7 +228,7 @@ def test_cli_runs_as_script_on_a_copy(tmp_path):
     env = tmp_path / ".env"
     # Редкие порты: 5434/5673 может держать живой стек проекта, а --no-docker
     # не узнает в нём «свой» контейнер.
-    env.write_text("POSTGRES_PORT=5451\nRABBITMQ_PORT=5691\nRABBITMQ_MGMT_PORT=15691\n",
+    env.write_text("POSTGRES_PORT=5451\n",
                    encoding="utf-8")
     proc = subprocess.run([sys.executable, str(SCRIPT), "--env-file", str(env), "--no-docker"],
                           cwd=str(ROOT), capture_output=True, text=True,
@@ -275,13 +254,12 @@ def test_main_busy_custom_port_from_env_stops_with_clear_error(tmp_path, capsys)
 
 def test_main_busy_default_port_from_old_template_gets_a_fallback(tmp_path, capsys):
     env = tmp_path / ".env"
-    env.write_text("POSTGRES_PORT=5432\nRABBITMQ_PORT=5672\nRABBITMQ_MGMT_PORT=15672\n"
+    env.write_text("POSTGRES_PORT=5432\n"
                    "DATABASE_URL=postgresql://classifier:classifier@localhost:5432/classifier\n",
                    encoding="utf-8")
-    assert run_main(env, busy=(5432, 5672, 15672)) == 0
+    assert run_main(env, busy=(5432,)) == 0
     values = infra.parse_env(env.read_text(encoding="utf-8"))
-    assert (values["POSTGRES_PORT"], values["RABBITMQ_PORT"],
-            values["RABBITMQ_MGMT_PORT"]) == ("5434", "5673", "15673")
+    assert values["POSTGRES_PORT"] == "5434"
     assert values["DATABASE_URL"] == "postgresql://classifier:classifier@localhost:5434/classifier"
     printed = capsys.readouterr().out
     assert "busy" in printed and "5434" in printed

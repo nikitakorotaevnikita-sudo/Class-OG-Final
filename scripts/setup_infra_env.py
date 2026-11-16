@@ -1,24 +1,22 @@
-"""Порты PostgreSQL / RabbitMQ на хосте и адреса подключения в .env.
+"""Порт PostgreSQL на хосте и адрес подключения в .env.
 
 Вызывается установщиками (install.bat / install.sh / install_offline.*) перед
-`docker compose up postgres rabbitmq` и миграцией:
+`docker compose up postgres` и миграцией:
 
     venv/Scripts/python.exe scripts/setup_infra_env.py [--env-file PATH] [--dry-run] [--no-docker]
 
-Для каждого из POSTGRES_PORT (5432), RABBITMQ_PORT (5672), RABBITMQ_MGMT_PORT (15672):
+Для POSTGRES_PORT (5432):
 - значение уже есть в .env — остаётся, если порт свободен или его держит свой
-  контейнер. Занят чужим процессом: 5432 / 5672 / 15672 (старый .env.example)
-  считаются незаданными — подбирается запасной; иное значение — ошибка (код 1)
+  контейнер. Занят чужим процессом: 5432 (старый .env.example)
+  считается незаданным — подбирается запасной; иное значение — ошибка (код 1)
   с именем ключа и порта. Не число 1..65535 — тоже ошибка;
 - иначе порт, который сейчас публикует контейнер ЭТОГО проекта (docker compose ps), —
   он свой, а не «занят»;
 - иначе порт по умолчанию, если на 127.0.0.1 его никто не слушает;
-- иначе первый свободный из фиксированного списка (5434, 5435, ...; 5673, ...;
-  15673, ...). 5433 пропущен: там тестовый PostgreSQL (TEST_DATABASE_URL).
+- иначе первый свободный из фиксированного списка (5434, 5435, ...). 5433 пропущен: там тестовый PostgreSQL (TEST_DATABASE_URL).
 
-Затем в .env пишутся DATABASE_URL / RABBITMQ_URL на localhost с этими портами и
-учётными данными POSTGRES_* / RABBITMQ_DEFAULT_* (экранированными). DATABASE_URL /
-RABBITMQ_URL, указывающие на другую машину или unix-сокет, не трогаются; локальный
+Затем в .env пишется DATABASE_URL на localhost с этим портом и учётными данными
+POSTGRES_* (экранированными). DATABASE_URL, указывающий на другую машину или unix-сокет, не трогаются; локальный
 URL с другими учётными данными или портом заменяется (в выводе: replaced, was different).
 
 Файл правится бережно: UTF-8, BOM (если был), концы строк, комментарии и порядок
@@ -44,22 +42,18 @@ from urllib.parse import urlsplit
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from core.service_urls import build_database_url, build_rabbitmq_url  # noqa: E402
+from core.service_urls import build_database_url  # noqa: E402
 
 BOM = "\ufeff"
 
 # ключ .env -> (порт по умолчанию, запасные порты по порядку)
 PORTS: dict[str, tuple[int, list[int]]] = {
     "POSTGRES_PORT": (5432, list(range(5434, 5454))),
-    "RABBITMQ_PORT": (5672, list(range(5673, 5693))),
-    "RABBITMQ_MGMT_PORT": (15672, list(range(15673, 15693))),
 }
 
 # (сервис compose, порт в контейнере) -> ключ .env
 _PUBLISHED = {
     ("postgres", 5432): "POSTGRES_PORT",
-    ("rabbitmq", 5672): "RABBITMQ_PORT",
-    ("rabbitmq", 15672): "RABBITMQ_MGMT_PORT",
 }
 
 # Пустой hostname (unix-сокет: postgresql:///db?host=/run/postgresql) — не TCP
@@ -137,7 +131,7 @@ def choose_port(current: str, default: int, fallbacks: list[int],
 
 
 def parse_compose_ps(output: str) -> dict[str, int]:
-    """Порты хоста, которые публикуют postgres / rabbitmq проекта (ключ .env -> порт)."""
+    """Порты хоста, которые публикуют postgres проекта (ключ .env -> порт)."""
     output = (output or "").strip()
     if not output:
         return {}
@@ -247,8 +241,8 @@ def _hostport(url: str) -> str:
 def main(argv: Optional[list[str]] = None, *,
          is_free: Callable[[int], bool] = port_is_free,
          own_ports: Optional[Callable[[], dict[str, int]]] = None) -> int:
-    parser = argparse.ArgumentParser(description="Pick host ports for PostgreSQL/RabbitMQ "
-                                                 "and write them with the URLs to .env")
+    parser = argparse.ArgumentParser(description="Pick the host port for PostgreSQL "
+                                                 "and write it with DATABASE_URL to .env")
     parser.add_argument("--env-file", default=str(ROOT / ".env"))
     parser.add_argument("--dry-run", action="store_true", help="print the plan, do not write")
     parser.add_argument("--no-docker", action="store_true",
@@ -290,14 +284,13 @@ def main(argv: Optional[list[str]] = None, *,
         print(f"  {key}={port}  ({why})")
 
     merged = {**env, **updates}
-    for key, builder, label in (("DATABASE_URL", build_database_url, "POSTGRES_*"),
-                                ("RABBITMQ_URL", build_rabbitmq_url, "RABBITMQ_DEFAULT_*")):
-        current = env.get(key, "")
-        if current and not _is_local(current):
-            print(f"  {key}: not a localhost TCP address - kept as is")
-            continue
-        updates[key] = builder(merged)
-        note = f"credentials from {label}"
+    key = "DATABASE_URL"
+    current = env.get(key, "")
+    if current and not _is_local(current):
+        print(f"  {key}: not a localhost TCP address - kept as is")
+    else:
+        updates[key] = build_database_url(merged)
+        note = "credentials from POSTGRES_*"
         if current and current != updates[key]:
             # Только host:port: в старом URL могут быть чужие учётные данные.
             note += f"; replaced, was different ({_hostport(current)})"

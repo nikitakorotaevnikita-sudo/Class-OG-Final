@@ -1,9 +1,8 @@
-"""Адреса PostgreSQL и RabbitMQ проекта по умолчанию.
+"""Адрес PostgreSQL проекта по умолчанию.
 
-Если DATABASE_URL / RABBITMQ_URL не заданы (или пусты), они собираются из тех же
-ключей, что и контейнеры docker compose: POSTGRES_USER/PASSWORD/DB/PORT и
-RABBITMQ_DEFAULT_USER/PASS + RABBITMQ_PORT. Так config (operator_cli, test_agent,
-launch check) и start-скрипты смотрят на одни и те же порты хоста.
+Если DATABASE_URL не задан (или пуст), он собирается из тех же ключей, что и
+контейнер docker compose: POSTGRES_USER/PASSWORD/DB/PORT. Так config (operator_cli,
+test_agent, launch check) и start-скрипты смотрят на один и тот же порт хоста.
 
 Учётные данные экранируются (urllib.parse.quote): пароль с @ / : # не ломает URL.
 Модуль без побочных эффектов — его импортируют config.py и
@@ -33,20 +32,6 @@ def build_database_url(env: Mapping[str, str]) -> str:
     )
 
 
-def build_rabbitmq_url(env: Mapping[str, str]) -> str:
-    """URL RabbitMQ проекта на localhost из RABBITMQ_DEFAULT_* (RABBITMQ_URL не смотрится)."""
-    return "amqp://{}:{}@localhost:{}//".format(
-        _q(_value(env, "RABBITMQ_DEFAULT_USER", "classifier")),
-        _q(_value(env, "RABBITMQ_DEFAULT_PASS", "classifier")),
-        _value(env, "RABBITMQ_PORT", "5672"),
-    )
-
-
 def database_url(env: Mapping[str, str]) -> str:
     """DATABASE_URL, если задан, иначе собранный из POSTGRES_*."""
     return _value(env, "DATABASE_URL", "") or build_database_url(env)
-
-
-def rabbitmq_url(env: Mapping[str, str]) -> str:
-    """RABBITMQ_URL, если задан, иначе собранный из RABBITMQ_DEFAULT_*."""
-    return _value(env, "RABBITMQ_URL", "") or build_rabbitmq_url(env)

@@ -40,7 +40,7 @@ COPY models/ltr_v1.json ./models/ltr_v1.json
 COPY .env.example .env
 
 # src/ — корень импорта, модули разложены по пакетам (`from core import config`,
-# `queueing.celery_app`) — нужно и celery-воркерам, и скриптам миграции.
+# `worker.run`) — нужно и воркерам, и скриптам миграции.
 ENV PYTHONPATH=/app/src
 
 EXPOSE 8005

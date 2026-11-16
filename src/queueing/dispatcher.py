@@ -42,7 +42,7 @@ class LocalDispatcher:
     """Выполняет задачи в ограниченном пуле daemon-потоков текущего процесса.
 
     Одновременно — не больше max_workers задач (по умолчанию
-    CLASSIFY_CONCURRENCY, как у воркера; при 0 — 2), остальные ждут в очереди.
+    CLASSIFY_WORKERS; при 0 — 2), остальные ждут в очереди.
     Не ThreadPoolExecutor: его потоки не daemon, и зависшая задача не дала бы
     процессу (тестам) завершиться. Дообучение (finetune) в пул не входит:
     оно идёт в отдельном daemon-потоке, чтобы не занимать слот классификации.
@@ -55,7 +55,7 @@ class LocalDispatcher:
         # Фабрика вызывается на каждую задачу: кэш агента, горячая перезагрузка
         # модели после дообучения и применение .env живут в worker_main.get_agent.
         self._agent_factory = agent_factory
-        self.max_workers = max(1, max_workers or config.CLASSIFY_CONCURRENCY or 2)
+        self.max_workers = max(1, max_workers or config.CLASSIFY_WORKERS or 2)
         self._queue: "SimpleQueue[Optional[tuple[str, str]]]" = SimpleQueue()
         self._threads: list[threading.Thread] = []
         self._finetune_threads: list[threading.Thread] = []

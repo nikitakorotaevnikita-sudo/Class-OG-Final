@@ -1,6 +1,6 @@
 """Раскладка развёртывания: compose-стек, скрипты start/stop, .env.example.
 
-Сервис разрезан на postgres + rabbitmq + migrate + api + воркеры. Здесь
+Сервис разрезан на postgres (очередь — таблица jobs) + migrate + api + воркеры. Здесь
 фиксируется то, что легко сломать правкой «на глазок»: состав сервисов,
 монтирование init-SQL, отсутствие ПДн в api, запрет `down -v` (том БД хранит
 тексты обращений) и ASCII в исполняемых строках .cmd (консоль CP1251).
@@ -23,7 +23,7 @@ SH_SCRIPTS = [START_SH, STOP_SH]
 CMD_SCRIPTS = [START_CMD, STOP_CMD]
 ALL_SCRIPTS = SH_SCRIPTS + CMD_SCRIPTS
 
-EXPECTED_SERVICES = {"postgres", "rabbitmq", "migrate", "api",
+EXPECTED_SERVICES = {"postgres", "migrate", "api",
                      "worker-classify", "worker-training"}
 APP_SERVICES = ["migrate", "api", "worker-classify", "worker-training"]
 
@@ -82,32 +82,6 @@ def test_compose_mounts_init_sql():
         assert (ROOT / "deploy" / "db" / "init" / sql).is_file()
 
 
-def test_rabbitmq_service():
-    rmq = services()["rabbitmq"]
-    assert rmq["image"] == "rabbitmq:3.13-management"
-    assert "rabbitmq-diagnostics -q ping" in " ".join(map(str, rmq["healthcheck"]["test"]))
-    ports = " ".join(map(str, rmq.get("ports", [])))
-    assert "5672" in ports and "15672" in ports
-
-
-def test_rabbitmq_consumer_timeout_covers_long_tasks():
-    """acks_late + стандартные 30 мин consumer_timeout = повторная доставка дообучения."""
-    conf = ROOT / "deploy" / "rabbitmq" / "rabbitmq.conf"
-    lines = [ln.strip() for ln in conf.read_text(encoding="utf-8").splitlines()
-             if ln.strip() and not ln.strip().startswith("#")]
-    assert "consumer_timeout = 86400000" in lines
-    assert ("./deploy/rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/20-classifier.conf:ro"
-            in volumes_of("rabbitmq"))
-    # Заметка для своего (не из compose) RabbitMQ — в руководстве администратора.
-    setup = (ROOT / "instructions" / "Setup_instruction.md").read_text(encoding="utf-8")
-    assert "consumer_timeout = 86400000" in setup
-
-
-def test_env_example_disables_broker_heartbeat():
-    text = (ROOT / ".env.example").read_text(encoding="utf-8")
-    assert re.search(r"^BROKER_HEARTBEAT_SEC=0\s*$", text, re.M)
-
-
 def test_migrate_runs_once_after_postgres():
     mig = services()["migrate"]
     assert mig["build"] == "."
@@ -124,7 +98,7 @@ def test_migrate_runs_once_after_postgres():
 def test_api_waits_for_migration_and_has_no_pii_or_model_mounts():
     api = services()["api"]
     assert api["depends_on"]["migrate"]["condition"] == "service_completed_successfully"
-    assert api["depends_on"]["rabbitmq"]["condition"] == "service_healthy"
+    assert set(api["depends_on"]) == {"migrate"}
     assert "${HOST_PORT:-8010}:8005" in [str(p) for p in api["ports"]]
     vols = " ".join(volumes_of("api"))
     for forbidden in (".jsonl", "huggingface", "./models", "./data"):
@@ -133,9 +107,9 @@ def test_api_waits_for_migration_and_has_no_pii_or_model_mounts():
 
 def test_classify_worker_command_and_mounts():
     cmd = command_of("worker-classify")
-    assert "celery -A queueing.celery_app worker" in cmd
-    assert "-Q classify_sync,classify" in cmd
-    assert "${CLASSIFY_CONCURRENCY:-2}" in cmd
+    assert "python -m worker.run" in cmd
+    assert "--queues classify_sync,classify" in cmd
+    assert services()["worker-classify"]["deploy"]["replicas"] == "${CLASSIFY_WORKERS:-2}"
     vols = " ".join(volumes_of("worker-classify"))
     assert "/root/.cache/huggingface" in vols
     assert "./models:/app/models" in vols
@@ -144,7 +118,8 @@ def test_classify_worker_command_and_mounts():
 
 def test_training_worker_is_single_and_optional():
     cmd = command_of("worker-training")
-    assert "-Q training" in cmd and "-c 1" in cmd
+    assert "python -m worker.run" in cmd and "--queues training" in cmd
+    assert "replicas" not in services()["worker-training"].get("deploy", {})
     raw = COMPOSE_PATH.read_text(encoding="utf-8")
     assert "# deploy:" in raw or "#   resources:" in raw or "# GPU" in raw, (
         "закомментированный GPU-блок для training-воркера"
@@ -159,7 +134,7 @@ def test_app_services_share_env_and_point_at_compose_hosts(name):
     assert "./.env:/app/.env" in volumes_of(name)
     env = env_of(name)
     assert "@postgres:5432/" in env["DATABASE_URL"]
-    assert "@rabbitmq:5672/" in env["RABBITMQ_URL"]
+    assert "RABBITMQ_URL" not in env
     assert env["PYTHONPATH"] == "/app/src"
     assert env["STORAGE_BACKEND"] == "postgres"
 
@@ -174,9 +149,6 @@ def test_infra_ports_bound_to_loopback_by_default():
     """В БД ПДн, пароли по умолчанию classifier — наружу только осознанно."""
     pg = [str(p) for p in services()["postgres"]["ports"]]
     assert pg == ["${POSTGRES_BIND:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"]
-    rmq = [str(p) for p in services()["rabbitmq"]["ports"]]
-    assert rmq == ["${RABBITMQ_BIND:-127.0.0.1}:${RABBITMQ_PORT:-5672}:5672",
-                   "${RABBITMQ_BIND:-127.0.0.1}:${RABBITMQ_MGMT_PORT:-15672}:15672"]
 
 
 # ── Образ ───────────────────────────────────────────────────────────────────
@@ -263,12 +235,12 @@ def test_run_dir_is_ignored():
 
 
 @pytest.mark.parametrize("key", [
-    "STORAGE_BACKEND", "DATABASE_URL", "DB_POOL_MAX", "RABBITMQ_URL",
-    "CLASSIFY_CONCURRENCY", "CLASSIFY_WORKERS", "SYNC_WAIT_TIMEOUT_SEC",
+    "STORAGE_BACKEND", "DATABASE_URL", "DB_POOL_MAX",
+    "CLASSIFY_WORKERS", "QUEUE_POLL_SEC", "JOB_LEASE_SEC", "JOB_DELIVERED_GRACE_SEC",
+    "SYNC_WAIT_TIMEOUT_SEC",
     "JOB_MAX_ATTEMPTS", "ENABLE_ANNOTATION_VECTORS", "WEBHOOK_ALLOWED_HOSTS",
     "WEBHOOK_SECRET", "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB",
-    "POSTGRES_PORT", "RABBITMQ_DEFAULT_USER", "RABBITMQ_DEFAULT_PASS",
-    "POSTGRES_BIND", "RABBITMQ_BIND", "RABBITMQ_PORT", "RABBITMQ_MGMT_PORT",
+    "POSTGRES_PORT", "POSTGRES_BIND",
 ])
 def test_env_example_declares_key_once(key):
     text = (ROOT / ".env.example").read_text(encoding="utf-8")
@@ -295,10 +267,9 @@ def test_docker_compose_config_is_valid_with_env_example(tmp_path):
 
 def test_env_example_leaves_ports_and_urls_to_the_installer():
     """Порты и URL пусты: установщик выбирает свободные порты и пишет их сам,
-    а без него действуют 5432 / 5672 / 15672 (compose ${...:-...}, config.py)."""
+    а без него действует 5432 (compose ${...:-...}, config.py)."""
     text = (ROOT / ".env.example").read_text(encoding="utf-8")
-    for key in ("POSTGRES_PORT", "RABBITMQ_PORT", "RABBITMQ_MGMT_PORT",
-                "DATABASE_URL", "RABBITMQ_URL"):
+    for key in ("POSTGRES_PORT", "DATABASE_URL"):
         assert re.search(rf"^{key}=\r?$", text, re.MULTILINE), key
 
 

@@ -263,26 +263,17 @@ RX_VIA_PROXY: Optional[bool] = _via_proxy("RX_VIA_PROXY")
 LLM_VIA_PROXY: Optional[bool] = _via_proxy("LLM_VIA_PROXY")
 
 
-# ── PostgreSQL / RabbitMQ / воркеры ─────────────────────────────────────────────
+# ── PostgreSQL / воркеры ─────────────────────────────────────────────
 def _flag(name: str, default: str = "false") -> bool:
     return os.getenv(name, default).strip().lower() == "true"
 
 
 STORAGE_BACKEND: str = os.getenv("STORAGE_BACKEND", "postgres")  # "postgres" | "memory" (тесты)
-# Не заданы (или пусты) — собираются из POSTGRES_USER/PASSWORD/DB/PORT и
-# RABBITMQ_DEFAULT_USER/PASS + RABBITMQ_PORT, как в start-скриптах: иначе
-# operator_cli / test_agent ушли бы на localhost:5432/5672 (там может быть
-# «родной» PostgreSQL / RabbitMQ, а не контейнеры проекта).
+# Не задан (или пуст) — собирается из POSTGRES_USER/PASSWORD/DB/PORT, как в
+# start-скриптах: иначе operator_cli / test_agent ушли бы на localhost:5432
+# (там может быть «родной» PostgreSQL, а не контейнер проекта).
 DATABASE_URL: str = service_urls.database_url(os.environ)
 DB_POOL_MAX: int = int(os.getenv("DB_POOL_MAX", "10"))
-RABBITMQ_URL: str = service_urls.rabbitmq_url(os.environ)
-# Heartbeat AMQP, с. 0 — выключен: solo-пул не шлёт heartbeat во время задачи,
-# и RabbitMQ рвал бы соединение долгой классификации (повторная доставка).
-BROKER_HEARTBEAT_SEC: int = int(os.getenv("BROKER_HEARTBEAT_SEC", "0"))
-CLASSIFY_CONCURRENCY: int = int(os.getenv("CLASSIFY_CONCURRENCY", "2"))
-# Сколько секунд Celery (prefork) ждёт инициализации дочернего процесса,
-# прежде чем убить его. Модель грузится лениво, это страховка.
-WORKER_PROC_ALIVE_TIMEOUT_SEC: int = int(os.getenv("WORKER_PROC_ALIVE_TIMEOUT_SEC", "300"))
 CLASSIFY_WORKERS: int = int(os.getenv("CLASSIFY_WORKERS", "2"))
 SYNC_WAIT_TIMEOUT_SEC: int = int(os.getenv("SYNC_WAIT_TIMEOUT_SEC", "1800"))
 JOB_MAX_ATTEMPTS: int = max(1, int(os.getenv("JOB_MAX_ATTEMPTS", "2")))

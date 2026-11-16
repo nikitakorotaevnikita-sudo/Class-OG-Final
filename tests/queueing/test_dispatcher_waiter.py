@@ -344,9 +344,9 @@ def test_local_dispatcher_bounds_concurrency(monkeypatch):
 def test_local_dispatcher_default_workers_from_config(monkeypatch):
     from core import config
 
-    monkeypatch.setattr(config, "CLASSIFY_CONCURRENCY", 3)
+    monkeypatch.setattr(config, "CLASSIFY_WORKERS", 3)
     assert LocalDispatcher(MemoryStorage(), agent_factory=lambda: None).max_workers == 3
-    monkeypatch.setattr(config, "CLASSIFY_CONCURRENCY", 0)
+    monkeypatch.setattr(config, "CLASSIFY_WORKERS", 0)
     assert LocalDispatcher(MemoryStorage(), agent_factory=lambda: None).max_workers == 2
 
 
@@ -355,7 +355,7 @@ def test_local_dispatcher_clamps_non_positive_workers(monkeypatch):
 
     assert LocalDispatcher(MemoryStorage(), agent_factory=lambda: None,
                            max_workers=-1).max_workers == 1
-    monkeypatch.setattr(config, "CLASSIFY_CONCURRENCY", -3)
+    monkeypatch.setattr(config, "CLASSIFY_WORKERS", -3)
     assert LocalDispatcher(MemoryStorage(), agent_factory=lambda: None).max_workers == 1
 
 

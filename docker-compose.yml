@@ -1,19 +1,18 @@
-# Стек классификатора: PostgreSQL + pgvector, RabbitMQ, разовая миграция,
-# тонкий API и Celery-воркеры. Запуск: ./start.sh (Linux) / start.cmd (Windows)
+# Стек классификатора: PostgreSQL + pgvector (в нём же очередь задач, таблица jobs),
+# разовая миграция, тонкий API и воркеры. Запуск: ./start.sh (Linux) / start.cmd (Windows)
 # или напрямую `docker compose up -d --build` (+ `--profile training`).
 #
 # Остановка — `docker compose down` БЕЗ `-v`: том pgdata хранит тексты
 # обращений (ПДн по 59-ФЗ) и обязан переживать пересоздание контейнеров.
 #
 # Код живёт в src/ (корень импорта, модули по пакетам: `from core import config`,
-# `queueing.celery_app`), поэтому всем прикладным сервисам нужен PYTHONPATH=/app/src.
+# `worker.run`), поэтому всем прикладным сервисам нужен PYTHONPATH=/app/src.
 
 # Общие настройки прикладных сервисов (migrate, api, воркеры).
 x-app-env: &app-env
   # Адреса сервисов внутри compose-сети. Значения из .env (localhost) здесь
   # перекрываются: внутри контейнера localhost — это сам контейнер.
   DATABASE_URL: postgresql://${POSTGRES_USER:-classifier}:${POSTGRES_PASSWORD:-classifier}@postgres:5432/${POSTGRES_DB:-classifier}
-  RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-classifier}:${RABBITMQ_DEFAULT_PASS:-classifier}@rabbitmq:5672//
   PYTHONPATH: /app/src
   STORAGE_BACKEND: postgres
 
@@ -40,30 +39,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
-    restart: unless-stopped
-
-  rabbitmq:
-    image: rabbitmq:3.13-management
-    environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-classifier}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-classifier}
-    volumes:
-      # consumer_timeout = 24 ч: задачи подтверждаются после выполнения, а
-      # стандартные 30 мин RabbitMQ оборвали бы долгую задачу и дообучение.
-      - ./deploy/rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/20-classifier.conf:ro
-    ports:
-      # Порты на хосте — RABBITMQ_PORT / RABBITMQ_MGMT_PORT (сменить, если на
-      # машине уже работает свой RabbitMQ).
-      # Только loopback по умолчанию (RABBITMQ_BIND); наружу — для нескольких
-      # машин и только после смены RABBITMQ_DEFAULT_PASS.
-      - "${RABBITMQ_BIND:-127.0.0.1}:${RABBITMQ_PORT:-5672}:5672"
-      # Веб-консоль управления очередями: http://localhost:15672
-      - "${RABBITMQ_BIND:-127.0.0.1}:${RABBITMQ_MGMT_PORT:-15672}:15672"
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
-      interval: 10s
-      timeout: 10s
-      retries: 12
     restart: unless-stopped
 
   # Разовый шаг: схема (идемпотентно) + импорт файлового хранилища в БД.
@@ -108,14 +83,16 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-      rabbitmq:
-        condition: service_healthy
     restart: unless-stopped
 
-  # Воркеры классификации. Масштабирование: docker compose up -d --scale worker-classify=3
+  # Воркеры классификации: CLASSIFY_WORKERS реплик, один процесс = одна задача.
+  # Без воркеров (воркеры на других машинах) поднимаются только postgres, migrate и api:
+  # `docker compose up -d postgres migrate api` (start docker --no-workers).
   worker-classify:
     build: .
-    command: celery -A queueing.celery_app worker -Q classify_sync,classify -c ${CLASSIFY_CONCURRENCY:-2} --loglevel=INFO
+    command: python -m worker.run --queues classify_sync,classify
+    deploy:
+      replicas: ${CLASSIFY_WORKERS:-2}
     env_file: .env
     environment: *app-env
     extra_hosts:
@@ -135,14 +112,12 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-      rabbitmq:
-        condition: service_healthy
     restart: unless-stopped
 
   # Дообучение — один процесс, включается профилем: --profile training.
   worker-training:
     build: .
-    command: celery -A queueing.celery_app worker -Q training -c 1 --loglevel=INFO
+    command: python -m worker.run --queues training
     profiles: [training]
     env_file: .env
     extra_hosts:
@@ -156,8 +131,6 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-      rabbitmq:
-        condition: service_healthy
     restart: unless-stopped
     # GPU для дообучения: раскомментировать на хосте с NVIDIA Container Toolkit
     # и собрать образ с CUDA-torch (--build-arg TORCH_INDEX_URL=.../cu124).

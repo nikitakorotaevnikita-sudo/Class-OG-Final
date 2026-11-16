@@ -7,8 +7,8 @@
 """
 
 import sys
-# Fix UTF-8 output on Windows cp1251 console. В Celery-воркере потоки подменены
-# на LoggingProxy без reconfigure() — там перенастраивать нечего.
+# Fix UTF-8 output on Windows cp1251 console. Если поток подменён
+# объектом без reconfigure() — перенастраивать нечего.
 for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):
         _stream.reconfigure(encoding='utf-8', errors='replace')
