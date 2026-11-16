@@ -65,3 +65,27 @@ def test_agent_search_candidates_on_store(storage, monkeypatch):
     np_top, _ = _parity().numpy_topk(emb, codes, agent._embed_query("жалоба на шум"), 10)
     assert [c["code"] for c in cands] == [c for c, _ in np_top]
     assert [c["similarity"] for c in cands] == [round(s, 3) for _, s in np_top]
+
+
+def test_parity_script_loads_finetuned_model_from_models_dir(tmp_path, monkeypatch):
+    """Реестр хранит имя папки (e5-finetuned-v3): скрипт сверки ищет её в MODELS_DIR
+    (config.resolve_model_path), а не грузит имя как модель Hugging Face."""
+    import sys
+    import types
+
+    from core import config
+
+    (tmp_path / "e5-finetuned-v3").mkdir()
+    monkeypatch.setattr(config, "MODELS_DIR", tmp_path)
+    loaded = []
+
+    class _ST(_FakeST):
+        def __init__(self, path, *a, **k):
+            loaded.append(path)
+
+    monkeypatch.setitem(sys.modules, "sentence_transformers",
+                        types.SimpleNamespace(SentenceTransformer=_ST))
+    mod = _parity()
+    model, prefix = mod.load_model(ModelVersion(3, "base", "e5-finetuned-v3", True))
+    assert loaded == [str(tmp_path / "e5-finetuned-v3")]
+    assert prefix == "query: " and isinstance(model, _ST)

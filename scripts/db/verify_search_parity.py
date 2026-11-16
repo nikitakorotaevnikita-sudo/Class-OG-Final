@@ -24,6 +24,18 @@ TOL = 1e-5
 TOP_K = 50
 
 
+def load_model(mv):
+    """Модель версии mv и префикс запроса. Путь из реестра (имя папки
+    дообученной версии) разрешается через MODELS_DIR, как у воркеров."""
+    from sentence_transformers import SentenceTransformer
+
+    from core import config
+
+    model = SentenceTransformer(config.resolve_model_path(mv.model_path, mv.version))
+    prefix = "query: " if "e5" in mv.model_path.lower() else ""
+    return model, prefix
+
+
 def numpy_topk(embeddings: np.ndarray, codes: list[str], query: np.ndarray, k: int):
     """Эталон: косинус по нормированным векторам, max по коду, порядок (-sim, code).
 
@@ -115,10 +127,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     random.Random(args.seed).shuffle(pool)
     queries += pool[:args.extra]
 
-    from sentence_transformers import SentenceTransformer
-
-    model = SentenceTransformer(mv.model_path)
-    prefix = "query: " if "e5" in mv.model_path.lower() else ""
+    model, prefix = load_model(mv)
     for n, text in enumerate(queries, 1):
         q = np.asarray(model.encode(prefix + text, normalize_embeddings=True), dtype=np.float32)
         np_top, np_all = numpy_topk(embeddings, codes, q, args.top_k)
