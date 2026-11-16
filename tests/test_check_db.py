@@ -210,3 +210,74 @@ def test_output_is_ascii_for_cmd():
         if "say(" in line and '"' in line:
             literal = line.split("say(", 1)[1]
             assert literal.isascii(), line
+
+
+# ── resolve: адрес PostgreSQL главного сервера (start.* all/api/migrate) ─────
+
+ODD_PASSWORD = "p!a@b:c/d#e%f g" + SECRET
+
+
+def test_built_url_round_trips_any_password():
+    """Пароль с ! @ : / # % и пробелом: URL, который строят config/check_db,
+    psycopg разбирает обратно в тот же пароль."""
+    from psycopg import conninfo
+
+    sys.path.insert(0, str(ROOT / "src"))
+    from core import service_urls
+
+    env = {"POSTGRES_USER": "u@x", "POSTGRES_PASSWORD": ODD_PASSWORD,
+           "POSTGRES_DB": "d/b", "POSTGRES_PORT": "5434"}
+    params = conninfo.conninfo_to_dict(service_urls.database_url(env))
+    assert params["password"] == ODD_PASSWORD
+    assert params["user"] == "u@x" and params["dbname"] == "d/b"
+    assert params["host"] == "localhost" and params["port"] == "5434"
+
+
+def test_resolve_builds_address_from_postgres_keys(capsys):
+    mod = load()
+    rc = mod.resolve({"POSTGRES_PASSWORD": ODD_PASSWORD, "POSTGRES_PORT": "5434"})
+    out = capsys.readouterr().out
+    assert rc == 0, out
+    assert "PostgreSQL: localhost:5434" in out
+    assert SECRET not in out and out.isascii()
+
+
+def test_resolve_default_port():
+    mod = load()
+    assert mod.resolve({}) == 0
+
+
+def test_resolve_explicit_url_with_matching_port(capsys):
+    mod = load()
+    rc = mod.resolve({"DATABASE_URL": f"postgresql://a:{SECRET}@db.local:5434/x",
+                      "POSTGRES_PORT": "5434"})
+    out = capsys.readouterr().out
+    assert rc == 0 and "PostgreSQL: db.local:5434" in out
+    assert SECRET not in out
+
+
+def test_resolve_port_mismatch_fails_fast(capsys):
+    mod = load()
+    rc = mod.resolve({"DATABASE_URL": f"postgresql://a:{SECRET}@localhost:5432/x",
+                      "POSTGRES_PORT": "5434"})
+    out = capsys.readouterr().out
+    assert rc == 2
+    assert "DATABASE_URL points to port 5432, but POSTGRES_PORT=5434" in out
+    assert SECRET not in out and out.isascii()
+
+
+@pytest.mark.parametrize("url", MALFORMED)
+def test_resolve_malformed_url_is_exit_2_without_secret(url, capsys):
+    mod = load()
+    rc = mod.resolve({"DATABASE_URL": url})
+    out = capsys.readouterr().out
+    assert rc == 2
+    assert SECRET not in out and url not in out
+
+
+def test_resolve_command_line():
+    proc = run(["resolve"], f"postgresql://u:{SECRET}@db.local:5434/x",
+               extra_env={"POSTGRES_PORT": "5434"})
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    assert "db.local:5434" in out and SECRET not in out

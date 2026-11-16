@@ -3,9 +3,9 @@
 Режимы: all (по умолчанию; local — прежнее имя), api (без воркеров), worker (только
 воркеры, база на другой машине), docker [--no-workers], migrate; флаг --training.
 
-Без DATABASE_URL config подключился бы к localhost:5432 — на машине с «родным»
-PostgreSQL это чужой сервер. Скрипты собирают URL из учётных данных compose и
-порта, а при расхождении порта — останавливаются. /health всегда отвечает 200,
+Адрес PostgreSQL скрипты не собирают и не экспортируют: его строят сами процессы
+Python (core.config, из POSTGRES_* с %-кодированием), а host:port и сверку порта
+с POSTGRES_PORT печатает scripts/check_db.py resolve (расхождение — остановка). /health всегда отвечает 200,
 поэтому готовность — по "db":true (и "agent_ready":true, когда воркеры поднимаются).
 """
 
@@ -28,73 +28,23 @@ CLEAN_ENV = ("DATABASE_URL", "POSTGRES_PORT", "POSTGRES_USER", "POSTGRES_PASSWOR
              "POSTGRES_DB", "CLASSIFY_WORKERS", "API_PORT", "HOST_PORT")
 
 
-def run_start_fn(tmp_path: Path, env_text: str, body: str, extra_env=None):
-    env_file = tmp_path / ".env"
-    env_file.write_text(env_text, encoding="utf-8")
-    unset = " ".join(CLEAN_ENV)
-    script = textwrap.dedent(f"""
-        unset {unset}
-        source ./start.sh
-        ENV_FILE='{env_file.as_posix()}'
-        {body}
-    """)
-    env = {k: v for k, v in os.environ.items() if k not in CLEAN_ENV}
-    env.update(extra_env or {})
-    # Модули окружения выше снимаются ещё раз внутри скрипта; extra_env
-    # выставляется после unset — через export в теле.
-    return subprocess.run([BASH, "-c", script], cwd=str(ROOT), env=env, capture_output=True,
-                          text=True, encoding="utf-8", errors="replace", timeout=60)
-
-
 needs_bash = pytest.mark.skipif(BASH is None, reason="bash недоступен")
 
 
-@needs_bash
-def test_url_built_from_compose_credentials_and_port(tmp_path):
-    proc = run_start_fn(tmp_path, (
-        "POSTGRES_USER=u1\nPOSTGRES_PASSWORD=p1\nPOSTGRES_DB=d1\nPOSTGRES_PORT=5434\n"),
-        'resolve_service_urls; echo "DB=$DATABASE_URL"')
-    assert proc.returncode == 0, proc.stderr
-    assert "DB=postgresql://u1:p1@localhost:5434/d1" in proc.stdout
-    # адрес печатается, пароль — нет
-    assert "localhost:5434" in proc.stdout
-    printed = proc.stdout.replace("DB=postgresql://u1:p1@", "")
-    assert "p1" not in printed
+# Адрес PostgreSQL главного сервера (all/api/migrate) скрипты не собирают и не
+# экспортируют: пароль с ! @ : / # % или пробелом cmd/shell испортили бы. Его
+# строят сами процессы Python (core.config → service_urls, с %-кодированием), а
+# host:port и сверку с POSTGRES_PORT печатает scripts/check_db.py resolve.
 
-
-@needs_bash
-def test_url_default_port_when_nothing_configured(tmp_path):
-    proc = run_start_fn(tmp_path, "", 'resolve_service_urls; echo "DB=$DATABASE_URL"')
-    assert proc.returncode == 0, proc.stderr
-    assert "DB=postgresql://classifier:classifier@localhost:5432/classifier" in proc.stdout
-
-
-@needs_bash
-def test_explicit_url_with_matching_port_is_kept(tmp_path):
-    proc = run_start_fn(tmp_path, (
-        "DATABASE_URL=postgresql://a:b@db.local:5434/x\nPOSTGRES_PORT=5434\n"),
-        'resolve_service_urls; echo "DB=$DATABASE_URL"')
-    assert proc.returncode == 0, proc.stderr
-    assert "DB=postgresql://a:b@db.local:5434/x" in proc.stdout
-    assert "db.local:5434" in proc.stdout
-
-
-@needs_bash
-def test_port_mismatch_fails_fast(tmp_path):
-    proc = run_start_fn(tmp_path,
-                        "DATABASE_URL=postgresql://a:b@localhost:5432/x\nPOSTGRES_PORT=5434\n",
-                        "resolve_service_urls; echo REACHED")
-    assert proc.returncode == 1
-    assert "REACHED" not in proc.stdout
-    assert "POSTGRES_PORT=5434" in proc.stderr
-
-
-@needs_bash
-def test_environment_overrides_env_file(tmp_path):
-    proc = run_start_fn(tmp_path, "POSTGRES_PORT=5434\n",
-                        'export POSTGRES_PORT=5440; resolve_service_urls; echo "DB=$DATABASE_URL"')
-    assert proc.returncode == 0, proc.stderr
-    assert "localhost:5440/" in proc.stdout
+def test_start_sh_resolve_delegates_to_check_db():
+    text = START_SH.read_text(encoding="utf-8")
+    body = text[text.index("resolve_service_urls() {"):]
+    body = body[:body.index("\n}\n")]
+    assert '"$VENV_PY" scripts/check_db.py resolve' in body
+    for access in SH_URL_ACCESS + ("POSTGRES_PASSWORD", "POSTGRES_USER", "postgresql://"):
+        assert access not in body, access
+    for access in ("export DATABASE_URL", "POSTGRES_PASSWORD"):
+        assert access not in text, access
 
 
 def test_start_sh_resolves_urls_in_local_and_migrate():
@@ -115,16 +65,23 @@ def cmd_section(text: str, label: str, end_label: str) -> str:
 
 def test_start_cmd_resolves_urls_before_migration_and_local_start():
     text = START_CMD.read_text(encoding="utf-8")
-    assert ":resolve_urls" in text
-    for key in ("POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB", "POSTGRES_PORT"):
-        assert key in text, key
     local = cmd_section(text, "local", "worker")
     assert local.index("call :resolve_urls") < local.index("docker compose up")
     run_migrate = text[text.index("\n:run_migrate\n"):]
     run_migrate = run_migrate[:run_migrate.index("exit /b 0")]
     assert "call :resolve_urls" in run_migrate
-    assert "postgresql://" in text
-    assert "ERROR: DATABASE_URL points to port" in text
+    resolve = text[text.index("\n:resolve_urls\n"):]
+    resolve = resolve[:resolve.index("\nexit /b 0\n")]
+    assert "%PY% scripts\\check_db.py resolve" in resolve
+    assert "errorlevel 1" in resolve
+
+
+def test_start_cmd_never_builds_or_exports_database_url():
+    code = "\n".join(line for line in START_CMD.read_text(encoding="utf-8").splitlines()
+                     if not line.lstrip().startswith("::"))
+    for access in CMD_URL_ACCESS + ("POSTGRES_PASSWORD", "POSTGRES_USER", ":url_hostport",
+                                    "@localhost"):
+        assert access not in code, access
 
 
 # ── Режимы ──────────────────────────────────────────────────────────────────
@@ -375,6 +332,38 @@ def fail_db_check(tmp_path: Path, code: int) -> None:
     py.write_text(py.read_text(encoding="utf-8")
                   + f'case "$*" in *check_db.py*) exit {code} ;; esac\n',
                   encoding="utf-8", newline="\n")
+
+
+@needs_bash
+def test_start_sh_api_mode_exports_no_database_url(tmp_path):
+    """Пароль с ! @ : / # % и пробелом: скрипт его не трогает, процессам Python
+    DATABASE_URL не экспортируется (они строят адрес сами)."""
+    calls = start_sandbox(tmp_path, '{"status":"ok","agent_ready":false,"db":true}',
+                          "API_PORT=18997\nPOSTGRES_PORT=5434\n"
+                          "POSTGRES_PASSWORD='p!a@b:c/d#e%f g'\n")
+    py = tmp_path / "venv" / "bin" / "python"
+    py.write_text(py.read_text(encoding="utf-8")
+                  + f'echo "DBURL=[${{DATABASE_URL:-}}]" >> "{calls.as_posix()}"\n',
+                  encoding="utf-8", newline="\n")
+    proc = run_sandbox(tmp_path, "api")
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    log = read_calls(calls)
+    assert "scripts/check_db.py resolve" in log
+    assert log.index("check_db.py resolve") < log.index("docker compose up")
+    assert "DBURL=[]" in log and "DBURL=[postgresql" not in log
+    assert "p!a@b" not in out
+
+
+@needs_bash
+def test_start_sh_port_mismatch_from_check_db_stops_before_docker(tmp_path):
+    calls = start_sandbox(tmp_path, "{}", "API_PORT=18996\n")
+    fail_db_check(tmp_path, 2)
+    proc = run_sandbox(tmp_path, "api")
+    assert proc.returncode != 0
+    log = read_calls(calls)
+    assert "scripts/check_db.py resolve" in log
+    assert "docker compose up" not in log and "init_db.py" not in log
 
 
 @needs_bash

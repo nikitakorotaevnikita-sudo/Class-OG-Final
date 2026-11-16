@@ -111,36 +111,17 @@ wait_health() {
     die "API не ответил за $((tries * 2)) с. Docker: docker compose logs api; локально: run/api.log"
 }
 
-# Значение: переменная окружения, иначе активная строка .env, иначе по умолчанию.
-env_or_file() {
-    local current="${!1:-}"
-    if [ -n "$current" ]; then
-        printf '%s\n' "$current"
-    else
-        env_value "$1" "$2"
-    fi
-}
-
-# DATABASE_URL для all, api и migrate. Не задан (ни в окружении, ни в .env) —
-# собирается из учётных данных compose и порта POSTGRES_PORT: иначе config взял
-# бы localhost:5432, где может работать чужой («родной») PostgreSQL. Задан, но
-# порт расходится с POSTGRES_PORT — остановка с понятной ошибкой.
+# Адрес базы для all, api и migrate. Скрипт его не собирает, не читает и не
+# экспортирует (пароль может содержать любые символы — shell и .env-парсер их
+# испортили бы): API, воркеры и миграция строят его сами (core.config:
+# DATABASE_URL из .env, иначе POSTGRES_USER/PASSWORD/DB/PORT на localhost с
+# %-кодированием). scripts/check_db.py resolve печатает host:port этого адреса и
+# завершается с кодом 2, если порт DATABASE_URL расходится с POSTGRES_PORT
+# (иначе подключение ушло бы к другому PostgreSQL). Пароль не печатается.
 # В режиме worker не применяется: там адрес задан явно, обычно на другой хост.
 resolve_service_urls() {
-    local db_url pg_port_set db_hp
-    db_url="$(env_or_file DATABASE_URL "")"
-    pg_port_set="$(env_or_file POSTGRES_PORT "")"
-
-    if [ -z "$db_url" ]; then
-        db_url="postgresql://$(env_or_file POSTGRES_USER classifier):$(env_or_file POSTGRES_PASSWORD classifier)@localhost:${pg_port_set:-5432}/$(env_or_file POSTGRES_DB classifier)"
-    fi
-    db_hp="$(url_hostport "$db_url" 5432)"
-    if [ -n "$pg_port_set" ] && [ "${db_hp##*:}" != "$pg_port_set" ]; then
-        die "DATABASE_URL указывает на порт ${db_hp##*:}, а POSTGRES_PORT=$pg_port_set — исправить одно из них в .env (иначе подключение уйдёт к другому PostgreSQL)"
-    fi
-
-    export DATABASE_URL="$db_url"
-    say "PostgreSQL: $db_hp"
+    "$VENV_PY" scripts/check_db.py resolve \
+        || die "адрес базы не согласован — причина выше; исправить DATABASE_URL или POSTGRES_PORT в .env"
 }
 
 # src/ — корень импорта, модули разложены по пакетам (from core import config, worker.run).

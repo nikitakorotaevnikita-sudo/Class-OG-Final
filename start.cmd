@@ -127,8 +127,9 @@ call :read_env API_PORT 8010 PORT
 if defined PORT_ARG set "PORT=%PORT_ARG%"
 call :read_env API_HOST 0.0.0.0 HOST
 
-:: Child windows inherit this environment (PYTHONPATH, DATABASE_URL) and the
-:: working dir. Window titles start with "classifier-": stop.cmd closes them.
+:: Child windows inherit this environment (PYTHONPATH) and the working dir;
+:: the database address they build from .env themselves (see resolve_urls).
+:: Window titles start with "classifier-": stop.cmd closes them.
 :: cmd /k keeps a window open after a crash so the error stays readable.
 if /i "%MODE%"=="all" (
     echo [4/4] API and workers
@@ -230,54 +231,18 @@ if errorlevel 1 (
 )
 exit /b 0
 
-:: resolve_urls - DATABASE_URL for all, api and migrate modes.
-:: Not set (environment or .env): built from the compose credentials and the
-:: host port POSTGRES_PORT. Otherwise config would fall back to
-:: localhost:5432, where a native PostgreSQL may be running.
-:: Set, but the port differs from POSTGRES_PORT: stop.
-:: Child windows inherit the exported value. Passwords are never printed.
+:: resolve_urls - database address for all, api and migrate modes. This
+:: file never builds, reads or exports DATABASE_URL (cmd would mangle "!",
+:: and a password may contain any characters): the API, workers and migration
+:: build it themselves in Python (core.config: DATABASE_URL from .env, else
+:: POSTGRES_USER/PASSWORD/DB/PORT on localhost, percent-encoded).
+:: scripts\check_db.py resolve prints host:port of that address and stops
+:: (exit 2) when DATABASE_URL and POSTGRES_PORT disagree on the port -
+:: otherwise another PostgreSQL would be used. Passwords are never printed.
 :resolve_urls
-call :env_or_file POSTGRES_PORT "" PG_PORT_SET
-call :env_or_file DATABASE_URL "" DATABASE_URL
-if not defined DATABASE_URL (
-    set "_PORT=!PG_PORT_SET!"
-    if not defined _PORT set "_PORT=5432"
-    call :env_or_file POSTGRES_USER classifier _U
-    call :env_or_file POSTGRES_PASSWORD classifier _P
-    call :env_or_file POSTGRES_DB classifier _D
-    set "DATABASE_URL=postgresql://!_U!:!_P!@localhost:!_PORT!/!_D!"
-)
-call :url_hostport DATABASE_URL 5432 DB_HOST DB_PORT
-if defined PG_PORT_SET if not "!DB_PORT!"=="!PG_PORT_SET!" (
-    echo ERROR: DATABASE_URL points to port !DB_PORT!, but POSTGRES_PORT=!PG_PORT_SET!.
-    echo        Fix one of them in .env - otherwise another PostgreSQL would be used.
-    exit /b 1
-)
-set "_U=" & set "_P=" & set "_D="
-echo   PostgreSQL: !DB_HOST!:!DB_PORT!
-exit /b 0
-
-:: env_or_file KEY DEFAULT OUTVAR - environment value, else read_env.
-:env_or_file
-if defined %~1 (
-    set "%~3=!%~1!"
-    exit /b 0
-)
-call :read_env %~1 "%~2" %~3
-exit /b 0
-
-:: url_hostport URLVAR DEFAULT_PORT OUTHOST OUTPORT - host and port of
-:: scheme://user:pass@host:port/... held in variable URLVAR.
-:url_hostport
-set "_HP=!%~1!"
-set "_HP=!_HP:*://=!"
-set "_HP=!_HP:*@=!"
-for /f "tokens=1 delims=/" %%b in ("!_HP!") do set "_HP=%%b"
-set "%~3=" & set "%~4=%~2"
-for /f "tokens=1,2 delims=:" %%c in ("!_HP!") do (
-    set "%~3=%%c"
-    if not "%%d"=="" set "%~4=%%d"
-)
+set "PYTHONPATH=%PROJECT%\src"
+%PY% scripts\check_db.py resolve
+if errorlevel 1 exit /b 1
 exit /b 0
 
 :require_docker

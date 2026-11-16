@@ -1,5 +1,12 @@
-"""Адрес базы для машины «только воркеры»: проверка связи и запись в .env.
+"""Адрес базы: проверка связи и запись в .env (машина «только воркеры»),
+адрес PostgreSQL главного сервера (start.* all/api/migrate).
 
+    python scripts/check_db.py resolve
+        Адрес, который возьмут API, воркеры и миграция (core.config): DATABASE_URL,
+        а пустой — собранный из POSTGRES_USER/PASSWORD/DB/PORT на localhost
+        (с %-кодированием, пароль может содержать любые символы). Печатает
+        host:port; DATABASE_URL и POSTGRES_PORT заданы оба, а порты расходятся —
+        ошибка (код 2). Без подключения: PostgreSQL ещё может не работать.
     python scripts/check_db.py check
         DATABASE_URL из окружения или .env (через core.config) → подключение за 5 с.
     python scripts/check_db.py ask [--env-file .env] [--non-interactive]
@@ -11,7 +18,7 @@
 печатаются. Сообщения — ASCII: их показывают и cmd.exe (start.cmd, install.bat).
 
 Коды выхода: 0 — в порядке; 1 — база не отвечает / неверный пароль / нет базы;
-2 — DATABASE_URL не задан или неверен.
+2 — DATABASE_URL не задан или неверен (resolve: или порт расходится с POSTGRES_PORT).
 """
 from __future__ import annotations
 
@@ -21,7 +28,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Mapping, Optional
 from urllib.parse import quote, urlsplit
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -117,13 +124,39 @@ def check(url: str) -> int:
     return OK
 
 
+def resolve(env: Mapping[str, str]) -> int:
+    """Адрес PostgreSQL главного сервера тем же построителем, что и core.config
+    (service_urls.database_url); печатает host:port, сверяет порт с POSTGRES_PORT."""
+    sys.path.insert(0, str(ROOT / "src"))
+    from core import service_urls
+
+    url = service_urls.database_url(env)
+    try:
+        hp = validate(url)
+    except BadUrl as exc:
+        say(f"ERROR: {exc}")
+        return BAD_URL
+    pg_port = (env.get("POSTGRES_PORT") or "").strip()
+    url_port = hp.rsplit(":", 1)[-1]
+    if pg_port and url_port != pg_port:
+        say(f"ERROR: DATABASE_URL points to port {url_port}, but POSTGRES_PORT={pg_port}.")
+        say("Fix one of them in .env - otherwise another PostgreSQL would be used.")
+        return BAD_URL
+    say(f"PostgreSQL: {hp}")
+    return OK
+
+
+def load_project_env() -> None:
+    """.env проекта в os.environ (как в API и воркерах: окружение важнее)."""
+    sys.path.insert(0, str(ROOT / "src"))
+    from core import config  # noqa: F401 — load_dotenv(.env проекта)
+
+
 def configured_url() -> str:
     """DATABASE_URL, заданный явно (окружение или .env через core.config).
     Сборка из POSTGRES_* (как в config.DATABASE_URL) здесь не нужна: машине
     воркеров нужен адрес главного сервера."""
-    sys.path.insert(0, str(ROOT / "src"))
-    from core import config  # noqa: F401 — load_dotenv(.env проекта)
-
+    load_project_env()
     return os.environ.get("DATABASE_URL", "").strip()
 
 
@@ -215,11 +248,16 @@ def run_ask(env_file: Path, interactive: bool,
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(prog="check_db.py", description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("resolve", help="print host:port of the main server database "
+                                   "(DATABASE_URL or POSTGRES_*), check POSTGRES_PORT")
     sub.add_parser("check", help="connect to DATABASE_URL within 5 s")
     ask = sub.add_parser("ask", help="ask DATABASE_URL and write it to .env")
     ask.add_argument("--env-file", default=str(ROOT / ".env"))
     ask.add_argument("--non-interactive", action="store_true")
     args = parser.parse_args(argv)
+    if args.cmd == "resolve":
+        load_project_env()
+        return resolve(os.environ)
     if args.cmd == "check":
         return check(configured_url())
     return run_ask(Path(args.env_file), interactive=not args.non_interactive)
