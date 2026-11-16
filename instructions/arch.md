@@ -37,7 +37,8 @@
 ### 1.1. Процессы
 
 Сервис — это не одна программа, а несколько процессов. Каждый делает свою часть
-работы и общается с остальными через базу данных и брокер сообщений.
+работы и общается с остальными через базу данных PostgreSQL. Отдельного сервиса
+очередей нет. Вариант с RabbitMQ развивается в ветке `Database_Rabbit`.
 
 Несколько терминов, которые понадобятся дальше:
 
@@ -45,12 +46,16 @@
   по запросу», «дообучить модель». У каждой задачи есть строка в таблице `jobs`
   с её статусом: `queued` (ждёт), `running` (выполняется), `done` (готово),
   `error` (ошибка).
-- **Брокер сообщений** — отдельная программа, которая принимает сообщения от одного
-  процесса и раздаёт их другим. У нас это RabbitMQ.
-- **Очередь** — именованный «почтовый ящик» в брокере. Сообщение кладут в очередь,
-  а забирает его тот, кто эту очередь слушает.
-- **Воркер** — процесс, который слушает очередь и выполняет задачи из неё. Воркеры
-  построены на библиотеке Celery.
+- **Очередь** — список задач, ждущих исполнителя. У нас это та же таблица `jobs`:
+  вид очереди — поле `queue` (`classify_sync`, `classify`, `training`). Поставить
+  задачу в очередь — значит вставить строку; взять задачу — атомарно перевести
+  строку в `running`.
+- **Воркер** — процесс, который берёт задачи из очереди и выполняет их. Это обычный
+  процесс Python (`python -m worker.run --queues ...`); один процесс выполняет одну
+  задачу за раз. Воркеров может быть несколько, в том числе на других машинах.
+- **Аренда (lease)** — срок, на который задача закреплена за взявшим её воркером
+  (`jobs.locked_until`). Работающий воркер продлевает аренду; если воркер пропал,
+  аренда истекает и задачу берёт другой.
 - **Эмбеддинг (вектор)** — список из 768 чисел, который описывает смысл текста.
   Близкие по смыслу тексты дают близкие векторы. Векторы считает модель
   `multilingual-e5-base` (или её дообученная версия).
@@ -61,12 +66,11 @@
 
 | Процесс | Что делает | Где код |
 |---|---|---|
-| **API** | Принимает HTTP-запросы от RX и веб-интерфейса. Модель не загружает: только создаёт задачи и ждёт результат. | `src/api/` |
-| **Воркер классификации** | Слушает очереди `classify_sync` и `classify`. Держит в памяти модель эмбеддингов и выполняет классификацию, поиск по классификатору и расчёт векторов аннотаций. | `src/worker/`, `src/queueing/tasks.py`, `src/classifier/` |
-| **Воркер дообучения** | Слушает очередь `training`, выполняет по одной задаче за раз. Дообучает модель и регистрирует новую версию. Запускается только по запросу (профиль `training` в compose, ключ `--training` у `start`). | `src/training/` |
-| **PostgreSQL 16 + pgvector** | Хранит всё: классификатор, векторы, карточки обращений, задачи, реестр моделей. pgvector — расширение, которое умеет искать похожие векторы прямо в SQL. | `src/storage/` |
-| **RabbitMQ** | Брокер. Три очереди типа quorum (надёжные, переживают перезапуск брокера): `classify_sync`, `classify`, `training`. | `src/queueing/celery_app.py` |
-| **migrate** (разовый) | При старте compose создаёт схему БД и один раз переносит файловые данные в PostgreSQL. | `scripts/db/` |
+| **API** | Принимает HTTP-запросы от RX и веб-интерфейса. Модель не загружает: только записывает задачи в `jobs` и ждёт результат. | `src/api/` |
+| **Воркер классификации** | Берёт задачи из очередей `classify_sync` (первыми) и `classify`. Держит в памяти модель эмбеддингов и выполняет классификацию, поиск по классификатору и расчёт векторов аннотаций. Процессов столько, сколько задано `CLASSIFY_WORKERS` на каждой машине. | `src/worker/run.py`, `src/worker/worker_main.py`, `src/queueing/tasks.py`, `src/classifier/` |
+| **Воркер дообучения** | Берёт задачи из очереди `training`. Дообучает модель и регистрирует новую версию. Запускается только по запросу (профиль `training` в compose, ключ `--training` у `start`). | `src/worker/run.py`, `src/training/` |
+| **PostgreSQL 16 + pgvector** | Хранит всё: классификатор, векторы, карточки обращений, очередь задач, реестр моделей. pgvector — расширение, которое умеет искать похожие векторы прямо в SQL. | `src/storage/` |
+| **migrate** (разовый) | При старте создаёт или обновляет схему БД и один раз переносит файловые данные в PostgreSQL. | `scripts/db/` |
 
 Схема связей:
 
@@ -74,23 +78,21 @@
  Directum RX / веб-интерфейс
             │ HTTP (порт 8010)
             ▼
- ┌──────────────────────────┐   INSERT карточки и задачи    ┌───────────────────────┐
- │ API (FastAPI, uvicorn)   │ ────────────────────────────► │ PostgreSQL + pgvector │
- │ без модели и без torch   │ ◄──── LISTEN job_done ─────── │                       │
- └──────────────────────────┘                               └───────────────────────┘
-            │ send_task                                         ▲            ▲
-            ▼                                                   │            │
- ┌──────────────────────────────────────┐                       │            │
- │ RabbitMQ: classify_sync │ classify │ training │             │            │
- └──────────────────────────────────────┘                       │            │
-       │ classify_sync, classify          │ training            │            │
-       ▼                                  ▼                     │            │
- ┌────────────────────────────┐   ┌────────────────────────────┐            │
- │ Воркер классификации       │   │ Воркер дообучения          │            │
- │ ClassifierAgent в памяти   │   │ fine-tune → векторы →      │            │
- │ результат + jobs=done      │   │ реестр моделей             │            │
- │ + NOTIFY job_done ─────────┼───┼────────────────────────────┼────────────┘
- └────────────────────────────┘   └────────────────────────────┘
+ ┌──────────────────────────┐  INSERT карточки и задачи    ┌──────────────────────────────┐
+ │ API (FastAPI, uvicorn)   │  + NOTIFY job_queued ──────► │ PostgreSQL + pgvector        │
+ │ без модели и без torch   │ ◄──── LISTEN job_done ────── │ таблица jobs = очередь:      │
+ └──────────────────────────┘                              │ classify_sync│classify│training│
+                                                           └──────────────────────────────┘
+                     LISTEN job_queued, захват задачи,  ▲          ▲
+                     продление аренды, результат,       │          │
+                     NOTIFY job_done                    │          │
+       ┌────────────────────────────────────────────────┘          │
+       │                                                           │
+ ┌─────┴──────────────────────────┐   ┌────────────────────────────┴┐
+ │ Воркеры классификации (1..N,   │   │ Воркер дообучения           │
+ │ на этой и других машинах)      │   │ fine-tune → векторы →       │
+ │ ClassifierAgent в памяти       │   │ реестр моделей              │
+ └────────────────────────────────┘   └─────────────────────────────┘
        │ (по желанию) webhook на адрес из запроса RX
        ▼
  Directum RX
@@ -100,7 +102,8 @@
 подписывается на канал (`LISTEN job_done`), другой отправляет в него сообщение
 (`NOTIFY job_done, '<id задачи>'`). Уведомление доставляется только после фиксации
 транзакции, поэтому API узнаёт о готовности задачи ровно тогда, когда результат
-уже записан.
+уже записан. Так же воркеры узнают о новой задаче: API в транзакции постановки
+шлёт `NOTIFY job_queued, '<очередь>'`.
 
 ### 1.2. Жизнь одного обращения
 
@@ -112,28 +115,34 @@
 
 1. API получает текст (`appeal_text`). Если текста нет, но есть `document_id`,
    API забирает тело документа из RX по OData (`integrations/rx_client.py`).
-2. В отдельном потоке API удаляет задачи старше `JOB_TTL_HOURS` (24 ч по
-   умолчанию), затем **одной транзакцией** создаёт карточку обращения
-   (`appeal_classifications`) и строку задачи (`jobs`, статус `queued`).
-   Код: `api/job_api.py::_create_rows`.
-3. API отправляет в RabbitMQ сообщение `{"job_id", "appeal_id", "document_id"}`
-   с именем задачи `classify_appeal` в очередь `classify_sync`
-   (`queueing/dispatcher.py::CeleryDispatcher.send`). Параметры задачи
-   (провайдер LLM, форма ответа) лежат не в сообщении, а в `jobs.payload`.
-   Если брокер недоступен, задача сразу помечается `error`, API отвечает 503.
-4. API ждёт: `queueing/waiter.py::JobWaiter.wait`. Ожидание просыпается от
+2. В отдельном потоке API удаляет завершённые задачи, которым пора уйти
+   (`jobs.cleanup_expired`, см. [раздел 2.2](#22-queueing--очереди-и-задачи)), затем
+   **одной транзакцией** создаёт карточку обращения (`appeal_classifications`) и
+   строку задачи (`jobs`: статус `queued`, `queue='classify_sync'`,
+   `available_at=now()`) и отправляет `NOTIFY job_queued, 'classify_sync'`.
+   Эта вставка и есть постановка в очередь. Параметры задачи (провайдер LLM,
+   форма ответа) лежат в `jobs.payload`. Ошибка БД — ответ 503.
+   Код: `api/job_api.py::submit_job` и `_create_rows`.
+3. API ждёт: `queueing/waiter.py::JobWaiter.wait`. Ожидание просыпается от
    уведомления `job_done` и на всякий случай раз в 5 секунд перечитывает задачу
    из БД. Предел ожидания — `SYNC_WAIT_TIMEOUT_SEC` (1800 с по умолчанию).
-5. Воркер получает сообщение и вызывает `queueing/tasks.py::run_classify_appeal`:
-   - «забирает» задачу (`jobs.claim`: статус `running`, `attempts + 1`);
-   - открывает транзакцию и блокирует строку задачи (`jobs.lock_owned`);
-   - читает текст карточки и вызывает `ClassifierAgent.classify(...)`;
-   - агент пишет результат (вопросы, коды, уверенность) в карточку **в той же
-     транзакции**;
-   - собирает ответ в нужной форме (`api/responses.py`) и вызывает `jobs.finish`:
-     статус `done`, ответ в `jobs.result`, `NOTIFY job_done`;
+4. Свободный воркер просыпается от `job_queued` (или от своей проверки раз в
+   `QUEUE_POLL_SEC`) и забирает задачу одним запросом `jobs.claim_next`: статус
+   `running`, `attempts + 1`, `worker_id`, аренда `locked_until = now() +
+   JOB_LEASE_SEC`. Фоновый поток воркера продлевает аренду каждые `JOB_LEASE_SEC/3`.
+5. Воркер вызывает `queueing/tasks.py::run_classify_appeal`:
+   - короткой транзакцией проверяет, что задачей всё ещё владеет эта попытка
+     (`jobs.lock_owned`), чтобы не тратить вызов LLM на чужую задачу;
+   - **вне транзакции** читает текст карточки и вызывает
+     `ClassifierAgent.classify(..., defer_card=True)` — поиск и LLM, это долго;
+     журнал запросов к LLM пишется сразу;
+   - собирает ответ в нужной форме (`api/responses.py`);
+   - короткой транзакцией: снова `jobs.lock_owned` (строка под `FOR UPDATE`),
+     запись результата в карточку (`appeals.save_result`) и `jobs.finish`:
+     статус `done`, ответ в `jobs.result`, аренда снята, `NOTIFY job_done`;
    - транзакция фиксируется — карточка, статус и уведомление появляются разом.
-6. API просыпается, читает задачу и возвращает RX готовый JSON
+6. API просыпается, читает задачу, помечает результат забранным
+   (`jobs.mark_delivered`) и возвращает RX готовый JSON
    (`ClassifyDocumentResponse`). Если время вышло — 504, а в тексте ошибки
    указан адрес `GET /integration/jobs/{job_id}`, где результат можно забрать
    позже: задача продолжает выполняться. Если задача завершилась ошибкой — 500.
@@ -152,11 +161,13 @@
    задачи есть `webhook_url`, воркер отправляет туда POST с тем же JSON, что
    отдаёт `GET /integration/jobs/{job_id}` (`queueing/webhook.py::deliver`).
 5. RX забирает результат опросом `GET /integration/jobs/{job_id}` или получает
-   его через webhook.
+   его через webhook. И опрос с конечным статусом, и успешный webhook ставят
+   `delivered_at`; через `JOB_DELIVERED_GRACE_SEC` (600 с) строка задачи удаляется,
+   и опрос отвечает 404.
 
 Две очереди классификации нужны, чтобы срочные синхронные запросы не стояли за
-длинной пачкой асинхронных: воркеры слушают обе, но у каждой своя очередь в
-RabbitMQ.
+длинной пачкой асинхронных: воркеры слушают обе, но при выборе задачи
+`claim_next` сначала берёт `classify_sync`, затем остальные по `available_at`.
 
 Веб-интерфейс (`POST /classify`, `POST /classify/file`) идёт тем же синхронным
 путём, только ответ другой формы (`ClassifyResponse` с карточкой для оператора).
@@ -172,7 +183,7 @@ RabbitMQ.
 2. Создаётся строка `jobs` с типом `finetune`. Одновременно может существовать
    только одна активная задача дообучения: это гарантирует уникальный индекс
    `one_active_finetune`, второй запрос получает 409.
-3. Сообщение уходит в очередь `training`. Его берёт воркер дообучения и вызывает
+3. Задача ставится в очередь `training`. Её берёт воркер дообучения и вызывает
    `training/finetune_model.py::run_training`:
    - проверяет порог `FINETUNE_THRESHOLD` (если не `force`); не набрано — статус
      `skipped`;
@@ -183,7 +194,14 @@ RabbitMQ.
    - сохраняет модель в `models/<семейство>-finetuned-vN/`;
    - считает векторы классификатора новой моделью и **одной транзакцией**
      регистрирует версию N в `ml_model_registry` (неактивной) и пишет её векторы
-     в `classifier_vectors`.
+     в `classifier_vectors`. В начале этой транзакции проверяется, что воркер всё
+     ещё владеет задачей (`still_owner` → `jobs.lock_owned`); не владеет — версия не
+     регистрируется. В реестр записывается имя папки (`e5-finetuned-vN`), а не
+     полный путь: каждый воркер ищет модель в своей `MODELS_DIR`
+     (`core/config.py::resolve_model_path`).
+   - Дообучение долгое, аренду держат продления. Если воркер дообучения пропал и
+     аренда истекла, задача **не** перезапускается: `jobs.fail_lost_training`
+     завершает её ошибкой «воркер дообучения пропал, запустите дообучение заново».
 4. Правило активации:
    - если дообучали от версии 0 — новая версия **никогда не активируется
      автоматически**. Версия 0 — это прежние прод-векторы с адаптером, и сравнение
@@ -228,23 +246,26 @@ RabbitMQ.
   `BACKOFFICE_PASSWORD`. Сейчас ею защищена только активация версии модели.
 - `get_logger_dep()`, `get_examples_path()` — зависимости FastAPI, тесты их подменяют.
 - `_classify_via_job(text, req, payload)` — общий путь `/classify` и
-  `/classify/file`: `job_api.run_sync_job("classify", "classify_appeal", ...)`.
+  `/classify/file`: `job_api.run_sync_job("classify", payload, ...)`.
 - `_dispatch_embeddings(vector_ids)` — для каждой новой аннотации ставит задачу
   `embed_annotation` в очередь `classify`. Сбой постановки не ломает верификацию:
   воркер досчитает вектор при следующем старте.
 - `_finetune_snapshot(job)` — переводит задачу `finetune` в формат статуса для
   бэк-офиса (`idle`, `queued`, `running`, `completed`, `failed`).
+- `_latest_finetune_status(storage)` — последняя задача `finetune` (конечный статус
+  помечается забранным); если строки уже нет — итог последней версии из
+  `ml_model_registry.report`, иначе «Дообучение не запускалось».
 
 Эндпоинты:
 
 | Метод | Путь | Что делает | Коды ответа |
 |---|---|---|---|
 | GET | `/` , `/backoffice` | Страницы веб-интерфейса и бэк-офиса. | 200 |
-| GET | `/health` | Состояние: число записей классификатора, доступность БД, брокера и наличие хотя бы одного воркера классификации (`agent_ready`). Не падает. | 200 |
+| GET | `/health` | Состояние: `{status, agent_ready, classifier_entries, db}` — число записей классификатора, доступность БД и наличие хотя бы одного живого воркера классификации (`agent_ready`). Не падает. | 200 |
 | GET | `/api/llm/options` | Список LLM-провайдеров и моделей для выпадающего списка. | 200 |
-| POST | `/classify` | Классификация текста из JSON (`appeal_text`, `llm_provider`, `llm_model`, `appeal_id`). Синхронно через `classify_sync`. | 200; 400 пустой текст; 500 ошибка задачи; 503 БД или брокер; 504 таймаут |
+| POST | `/classify` | Классификация текста из JSON (`appeal_text`, `llm_provider`, `llm_model`, `appeal_id`). Синхронно через `classify_sync`. | 200; 400 пустой текст; 500 ошибка задачи; 503 БД недоступна; 504 таймаут |
 | POST | `/classify/file` | То же для файла TXT/PDF (до 5 МБ). Текст длиннее 5000 символов обрезается, в ответе `was_truncated: true`. | 200; 400 нет текста или ошибка чтения; 413 файл велик; 422 скан PDF; 500; 503; 504 |
-| GET | `/classifier/search?q=вывоз мусора&top_k=5` | Поиск по классификатору задачей `search_classifier` (ожидание до 60 с). | 200; 500; 503; 504 |
+| GET | `/classifier/search?q=вывоз мусора&top_k=5` | Поиск по классификатору задачей `search` в очереди `classify_sync` (ожидание до 60 с). | 200; 500; 503; 504 |
 | POST | `/verify` | Решение оператора: `confirm`, `correct` (с `operator_codes` и необязательной `annotation`), `reject`. | 200; 400 нет кодов для `correct`; 503 |
 | GET | `/examples` | Демонстрационные обращения из `data/test_appeals.json`. | 200; 503 нет файла |
 | GET | `/stats` | Счётчики проверок и прогресс до порога дообучения. | 200 |
@@ -256,7 +277,7 @@ RabbitMQ.
 | POST | `/api/confirm-historical` | Сохранить проверенные записи в `historical_appeals` (дубли пропускаются). | 200; 400 нет данных |
 | GET | `/api/historical-count` | Сколько исторических записей в БД. | 200 |
 | POST | `/api/finetune` | Поставить дообучение в очередь `training` (`source`, `force`). Для `historical` и `combined` порог не проверяется. | 200; 409 уже идёт; 503 |
-| GET | `/api/finetune/status` | Статус последней задачи дообучения. | 200 |
+| GET | `/api/finetune/status` | Статус последней задачи дообучения; без строки задачи — итог последней версии из реестра. | 200 |
 | GET | `/api/models` | Версии модели из `ml_model_registry`. | 200 |
 | POST | `/api/models/{version}/activate` | Активировать версию (ручное включение или откат). Нужна HTTP Basic авторизация. | 200; 401; 404 |
 | GET | `/api/backoffice/stats` | Агрегаты для бэк-офиса за 30 дней (по дням, по кодам, по IP). | 200 |
@@ -277,27 +298,33 @@ RabbitMQ.
 |---|---|---|---|
 | POST | `/integration/classify-document` | Синхронная классификация. Тело: `appeal_text` и/или `document_id`. | 200; 400 нет текста / скан / не извлечь текст; 404 документа нет в RX; 502 RX не отдал тело; 500; 503; 504 |
 | POST | `/integration/classify-document-async` | Асинхронная классификация, сразу возвращает `job_id`, `status`, `queue_position`, `poll_url`. Можно передать `webhook_url`. | 202 (+ заголовок `Location`); 400 (в т. ч. webhook не разрешён); 404; 429 очередь полна; 502; 503 |
-| GET | `/integration/jobs/{job_id}` | Статус задачи классификации; `result` заполнен только у `done`, `error` — только у `error`. | 200; 404 нет задачи или истёк срок хранения; 503 |
+| GET | `/integration/jobs/{job_id}` | Статус задачи классификации; `result` заполнен только у `done`, `error` — только у `error`. Конечный статус помечает результат забранным (`delivered_at`). | 200; 404 нет задачи или она уже удалена; 503 |
 | GET | `/integration/jobs?limit=20` | Сводка очереди классификации и `worker_alive` — для диагностики. | 200; 503 |
 
 #### `api/job_api.py`
 
 Общая часть «поставить задачу и дождаться». Не импортирует модель.
 
-- `submit_job(job_type, task_name, queue, payload, *, appeal_text, document_id, ip, webhook_url, max_queued)` —
+- `submit_job(job_type, queue, payload, *, appeal_text, document_id, ip, webhook_url, max_queued)` —
   удаляет просроченные задачи, создаёт карточку (если передан текст) и задачу
-  в одной транзакции, отправляет сообщение брокеру. Возвращает `Submitted(job, appeal_id)`.
-  Ошибка БД — 503; сбой брокера — задача помечается `error`, ответ 503.
-  `QueueFull` не ловит: решение (429) за вызывающим.
+  в одной транзакции (`jobs.create` отправляет `NOTIFY job_queued` в ней же).
+  Строка в PostgreSQL — и есть постановка, отдельной отправки нет. Возвращает
+  `Submitted(job, appeal_id)`. Ошибка БД — 503. `QueueFull` не ловит: решение
+  (429) за вызывающим. В `STORAGE_BACKEND=memory` задачу дополнительно
+  выполняет `LocalDispatcher` этого процесса.
 - `wait_job(job_id, timeout, ...)` — ждёт конечного статуса. `done` → возвращает
-  `Job`; таймаут → 504; `error` → 500.
+  `Job`; таймаут → 504; `error` → 500. Конечный результат помечается забранным
+  (`mark_delivered`).
+- `mark_delivered(job_id)` — `jobs.mark_delivered` в потоке; сбой БД только
+  пишется в журнал (строка тогда удалится по `JOB_TTL_HOURS`).
 - `run_sync_job(...)` — `submit_job` + `wait_job`; очередь по умолчанию
   `classify_sync`, таймаут — `SYNC_WAIT_TIMEOUT_SEC`, который читается на каждый
   запрос (его можно менять из бэк-офиса).
-- `worker_status()` — возвращает `(agent_ready, broker)`: слушает ли очереди
-  классификации хотя бы один воркер и отвечает ли брокер. Опрашивает Celery
-  (`inspect().active_queues()`), результат кэширует на 2 с; одновременные запросы
-  ждут один общий опрос.
+- `worker_status()` — `agent_ready`: есть ли живой воркер очереди `classify`.
+  Смотрит соединения в `pg_stat_activity` с `application_name`
+  `classifier-worker:<очереди>` (`jobs.live_workers("classify")`); воркер
+  дообучения не считается. Результат кэширует на 2 с; одновременные запросы ждут
+  одну общую проверку.
 
 #### `api/responses.py`
 
@@ -317,90 +344,86 @@ RabbitMQ.
 
 ### 2.2. queueing — очереди и задачи
 
-Пакет связывает API и воркеры через RabbitMQ и PostgreSQL.
+Пакет содержит работу над задачами и сторону API, которая ждёт результат. Сама
+очередь — таблица `jobs`; её методы — в `JobStore` (см.
+[раздел 2.5](#25-storage--слой-хранения)), цикл воркера — в `worker/run.py`
+([раздел 2.3](#23-worker--процесс-воркера)).
 
-#### `queueing/celery_app.py`
+Какая задача в какую очередь попадает (`queue` в `submit_job`):
 
-Создаёт приложение Celery `app` и объявляет три quorum-очереди. Важные настройки:
-
-- `task_acks_late=True` — брокер считает сообщение обработанным только после
-  завершения задачи. Если воркер упал посреди работы, сообщение вернётся в
-  очередь и достанется другому воркеру.
-- `task_reject_on_worker_lost=True`, `worker_prefetch_multiplier=1` — воркер не
-  берёт задачи «впрок», потерянная задача возвращается.
-- `broker_heartbeat=BROKER_HEARTBEAT_SEC` (по умолчанию 0) — без heartbeat: иначе
-  при долгой задаче RabbitMQ разорвал бы соединение и отдал задачу второму воркеру.
-- Короткие таймауты публикации: при недоступном брокере API не висит, а отвечает 503.
-
-Маршруты задач:
-
-| Задача | Очередь по умолчанию | Кто ставит |
+| Тип задачи (`job_type`) | Очередь | Кто ставит |
 |---|---|---|
-| `classify_appeal` | `classify` (синхронные вызовы явно указывают `classify_sync`) | API |
-| `search_classifier` | `classify_sync` | API, `/classifier/search` |
-| `embed_annotation` | `classify` | API, `/verify` с аннотацией |
-| `finetune` | `training` | API `/api/finetune`, `auto_finetune.py` |
+| `classify` синхронный | `classify_sync` | `/classify`, `/classify/file`, `/integration/classify-document` |
+| `classify` асинхронный | `classify` | `/integration/classify-document-async` |
+| `search` | `classify_sync` | `/classifier/search` |
+| `embed_annotation` | `classify` | `/verify` с аннотацией |
+| `finetune` | `training` | `/api/finetune`, `auto_finetune.py` |
 
 #### `queueing/tasks.py`
 
-Сами задачи. Логика вынесена в обычные функции `run_*(msg, storage, agent)`: их
-вызывают и Celery-обёртки, и тесты, и локальный диспетчер.
+Сами задачи. Функции `run_*(job, storage, agent)` получают уже захваченную задачу
+(`Job`) и возвращают, перешла ли она в конечный статус сейчас (`True`/`False`), или
+`None`, если попытка больше не владеет задачей. Их вызывают воркер
+(`worker/run.py`), локальный диспетчер и тесты.
 
-- `run_classify_appeal(msg, storage, agent)` — читает текст карточки, вызывает
-  `agent.classify(...)` с соединением транзакции, собирает ответ формы
-  `classify` или `document` (по `payload.response_kind`) и сохраняет его в
-  `jobs.result`.
-- `run_search_classifier(msg, storage, agent)` — поиск `top_k` кандидатов по
+- `run_classify_appeal(job, storage, agent)` — читает текст карточки, вызывает
+  `agent.classify(..., defer_card=True)`, собирает ответ формы `classify` или
+  `document` (по `payload.response_kind`); карточку и `jobs.result` пишет владелец
+  задачи в короткой транзакции.
+- `run_search_classifier(job, storage, agent)` — поиск `top_k` кандидатов по
   `payload.q`; результат `{query, results}`.
-- `run_embed_annotation(msg, storage, agent)` — считает вектор текста аннотации
-  `payload.vector_id` и записывает его в `classifier_vectors`.
-- `run_finetune(msg, storage)` — вызывает `training.finetune_model.run_training`
-  вне транзакции (долго). Если результат `failed` — задача завершается `error`.
+- `run_embed_annotation(job, storage, agent)` — считает вектор текста аннотации
+  `payload.vector_id` и записывает его в `classifier_vectors`. Успешная задача
+  сразу удаляется (`delete_if_embed_done`): её результат никто не читает.
+- `run_finetune(job, storage)` — вызывает `training.finetune_model.run_training`
+  вне транзакции (долго) с проверкой владения перед регистрацией версии. Если
+  результат `failed` — задача завершается `error`. Итог записывается до пяти раз
+  с паузой при сбое БД.
 
-Общий каркас всех задач (`_run` и `_run_claimed`):
+Общий каркас задач (`_run(job, storage, compute, write)`):
 
-1. `_claim` — `jobs.claim` переводит задачу в `running` и увеличивает `attempts`.
-   Если задача уже завершена (повторная доставка) — ничего не делаем. Если
-   `attempts > JOB_MAX_ATTEMPTS` (по умолчанию 2) — задача завершается ошибкой
-   без запуска работы: так падения воркера не зацикливаются.
-2. Транзакция: `jobs.lock_owned(job_id, attempts)` блокирует строку, только если
-   задача всё ещё `running` с номером **этой** попытки. Затем работа и
-   `jobs.finish(..., attempts=...)`. Это **защита владения**: если сообщение
-   тем временем отдали другому воркеру, устаревшая попытка откатывает всё и
-   ничего не пишет — ни карточку, ни статус, ни webhook.
-3. После фиксации — webhook, если он задан и задача завершилась именно сейчас.
+1. `finish_over_limit` — если `attempts > JOB_MAX_ATTEMPTS` (по умолчанию 2),
+   задача завершается ошибкой без запуска работы: так падения воркера не
+   зацикливаются.
+2. Короткая проверка владения (`jobs.lock_owned` в своей транзакции).
+3. `compute(job)` — долгая работа (LLM, модель) **вне транзакции**: строка задачи
+   не заблокирована, и поток аренды свободно продлевает `locked_until`.
+4. Короткая транзакция: `jobs.lock_owned(job_id, attempts)` блокирует строку,
+   только если задача всё ещё `running` с номером **этой** попытки; затем
+   `write(...)` (карточка, вектор) и `jobs.finish(..., attempts=...)`. Это
+   **защита владения**: если аренда истекла и задачу забрал другой воркер,
+   устаревшая попытка откатывает всё и ничего не пишет — ни карточку, ни статус,
+   ни webhook.
+5. После фиксации — webhook, если он задан и задача завершилась именно сейчас
+   (`notify_webhook`; успешная доставка ставит `delivered_at`).
 
 Правила повторов:
 
-- Исключение в задаче при `acks_late` **не** приводит к повторной доставке.
-  Поэтому сбой инфраструктуры (`psycopg.OperationalError`, `InterfaceError`,
-  ошибка соединения с брокером, `ConnectionError`) превращается в `RetryableError`,
-  а Celery-обёртка вызывает `self.retry` с паузой `min(60, 5·2^n)` секунд —
-  5, 10, 20, 40, 60, 60… — до `INFRA_MAX_RETRIES = 10` раз (около 8 минут).
-  Внутри работы повтор разрешён, пока `attempts < JOB_MAX_ATTEMPTS`.
+- Сбой инфраструктуры (`psycopg.OperationalError`, `InterfaceError`,
+  `ConnectionError`) при `attempts < JOB_MAX_ATTEMPTS` превращается в
+  `RetryableError`. Воркер возвращает задачу в очередь (`jobs.release_for_retry`)
+  с отложенным `available_at`: пауза `min(60, 5·2^n)` секунд — 5, 10, 20, 40, 60….
+  На последней попытке — ошибка.
 - Любая другая ошибка (например, `JobDataError` — нет текста или вектора, ошибка
   LLM) сразу завершает задачу статусом `error`.
 - Дообучение при ошибке не повторяется.
-- Если агент не удалось создать (нет активной модели, битая модель) —
-  `fail_without_agent` завершает задачу ошибкой; следующая задача попробует снова.
-- Остаточный случай: если БД или брокер недоступны дольше всех повторов, строка
-  задачи остаётся `queued`/`running` — фоновой «уборки» таких задач пока нет.
-
-Celery-задачи `classify_appeal`, `search_classifier`, `embed_annotation`,
-`finetune` — тонкие обёртки над `run_*` через `_retrying`.
+- Если агент не удалось создать (нет активной модели, нет папки модели в
+  `MODELS_DIR`), воркер задачи классификации **не берёт** и пишет ошибку в журнал;
+  попытка повторяется при следующей проверке очереди.
+- Если БД недоступна так, что задачу нельзя даже вернуть в очередь, её подберёт
+  другой воркер по истечении аренды.
 
 #### `queueing/dispatcher.py`
 
-Отправка задач со стороны API.
+Только для `STORAGE_BACKEND=memory` (тесты). В PostgreSQL диспетчера нет:
+`get_dispatcher()` возвращает `None`, задачу забирают воркеры.
 
-- `CeleryDispatcher.send(task_name, msg, queue)` — `app.send_task` по строковому
-  имени (модуль задач API не импортирует). Сбой брокера → `DispatchError`.
-- `LocalDispatcher(storage, agent_factory, max_workers)` — выполняет задачи в
-  потоках того же процесса. Используется в тестах и при `STORAGE_BACKEND=memory`.
-  Повторов нет; задача после выполнения гарантированно становится конечной.
-  Дообучение идёт в отдельном потоке, не занимая слот классификации.
-  `shutdown(timeout)` доделывает начатое и останавливает потоки.
-- `get_dispatcher()` — выбирает реализацию по `STORAGE_BACKEND` (одна на процесс).
+- `LocalDispatcher(storage, agent_factory, max_workers)` — захватывает задачу
+  (`jobs.claim`) и выполняет `tasks.run_*` в потоках того же процесса. Повторов
+  нет; задача после выполнения гарантированно становится конечной. Дообучение
+  идёт в отдельном потоке, не занимая слот классификации. `shutdown(timeout)`
+  доделывает начатое и останавливает потоки.
+- `get_dispatcher()` — `LocalDispatcher` для memory, иначе `None` (одна на процесс).
 
 #### `queueing/waiter.py`
 
@@ -428,17 +451,46 @@ Celery-задачи `classify_appeal`, `search_classifier`, `embed_annotation`,
   `X-Signature`; без секрета подписи нет.
 - `deliver(url, payload)` — POST с тремя попытками (паузы 0,5 и 1 с), без
   перехода по редиректам. Возвращает `True` при ответе 2xx, исключений не бросает.
-  Статус задачи от успеха webhook не зависит.
-
-#### `queueing/warmup.py`
-
-Прогрев агента по сигналам Celery. В режиме `prefork` (дочерние процессы) модель
-загружается лениво первой задачей: если грузить её в обработчике запуска
-дочернего процесса, Celery убьёт процесс по таймауту. После `fork` модуль сбрасывает
-унаследованный пул соединений, хранилище и агента (`reset_inherited_state`). В
-режимах `solo`/`threads` агент прогревается сразу после старта воркера.
+  Статус задачи от успеха webhook не зависит; успех лишь помечает результат
+  забранным.
 
 ### 2.3. worker — процесс воркера
+
+#### `worker/run.py`
+
+Цикл воркера очереди. Запуск из корня проекта:
+`PYTHONPATH=src python -m worker.run --queues classify_sync,classify` (воркер
+классификации) или `--queues training` (воркер дообучения). Скрипты `start.*`
+запускают именно эту команду, в Docker — сервисы `worker-classify` и
+`worker-training`.
+
+- `main(argv)` — разбирает `--queues`, создаёт хранилище, для очередей
+  классификации прогревает агента (`worker_main.get_agent`, модель грузится при
+  старте), ставит обработчики сигналов и запускает `Worker.run_forever`.
+  `worker_id = '<имя компьютера>:<pid>'`.
+- `Worker.run_forever(stop)` — открывает отдельное соединение `LISTEN job_queued`
+  с `application_name = 'classifier-worker:<очереди через запятую>'` (по нему
+  `/health` видит живых воркеров) и в цикле: `run_once()`; если задачи не было —
+  ждёт уведомления для своей очереди, но не дольше `QUEUE_POLL_SEC` (5 с).
+  Контрольный опрос ловит потерянный сигнал, наступившие отложенные повторы и
+  истёкшие аренды. Обрыв соединения — переподключение.
+- `Worker.run_once()` — один шаг:
+  1. `_housekeeping`: для очереди `training` — `jobs.fail_lost_training()`
+     (дообучения с истёкшей арендой → ошибка + webhook); не чаще раза в минуту —
+     `jobs.cleanup_expired(JOB_TTL_HOURS)`;
+  2. `_claimable`: агент (`get_agent` — здесь же подхватываются смена модели и
+     `.env`); агент не создан — очереди классификации в этот раз пропускаются;
+  3. `jobs.claim_next(queues, worker_id, JOB_LEASE_SEC)` — одна задача;
+  4. поток `_keep_lease` продлевает аренду (`jobs.extend_lease`) каждые
+     `JOB_LEASE_SEC/3`, пока идёт работа; продление отказано — аренда потеряна,
+     пишется предупреждение;
+  5. `_execute` — `tasks.run_*` по `job_type`; `RetryableError` → `_retry`
+     (`release_for_retry` с паузой `retry_delay(attempts)` или ошибка на последней
+     попытке; дообучение не повторяется).
+- Остановка: первый Ctrl+C / SIGTERM — текущая задача доделывается, затем выход;
+  второй — немедленный выход. Если процесс убит, задачу вернёт истечение аренды.
+- `parse_queues(text)`, `application_name(queues)`, `retry_delay(attempts)` —
+  вспомогательные функции (`retry_delay`: 5, 10, 20, 40, 60, 60… с).
 
 #### `worker/worker_main.py`
 
@@ -477,13 +529,17 @@ Celery-задачи `classify_appeal`, `search_classifier`, `embed_annotation`,
 
 - `__init__(storage=None)` — берёт активную версию из реестра (нет её —
   `RuntimeError` с подсказкой запустить миграцию), готовит клиента LLM по
-  `LLM_PROVIDER`, загружает модель эмбеддингов и записи классификатора из БД.
+  `LLM_PROVIDER`, загружает модель эмбеддингов (путь — через
+  `config.resolve_model_path`, то есть из `MODELS_DIR` этой машины) и записи
+  классификатора из БД.
   При включённых флагах дополнительно загружает CrossEncoder-ранжировщик, веса
   LtR, белый список кодов и адаптер эмбеддингов.
-- `classify(appeal_text, llm_provider=None, llm_model=None, appeal_id=None, log_conn=None)` —
+- `classify(appeal_text, llm_provider=None, llm_model=None, appeal_id=None, log_conn=None, defer_card=False)` —
   основной метод. Возвращает `ClassificationResult`. Если передан `appeal_id`,
   результат пишется в эту карточку; если передан `log_conn`, запись идёт в
-  транзакции воркера, и её ошибка пробрасывается (задача не завершится без карточки).
+  транзакции вызывающего, и её ошибка пробрасывается. С `defer_card=True`
+  (так вызывает воркер) карточка не пишется: результат для неё кладётся в
+  `result.appeal_result`, и воркер записывает его сам в короткой транзакции.
 - `reload_model_if_changed()` — если в реестре активна другая версия, загружает её
   модель и записи. Возвращает `True`, если перезагрузил.
 - `embed_passage(text)` — вектор текста записи или аннотации (с префиксом
@@ -598,7 +654,7 @@ PostgreSQL он отдаёт соединение; его передают в м
 | `ClassifierStore` | `upsert_entries`, `load_entries`, `count_entries`, `add_vectors`, `search`, `pending_annotations`, `vector_text`, `set_embedding`, `add_annotation`, `annotations_for`, `delete_annotations`, `annotations_by_code`, `annotated_codes`, `vectors_for_version` | Записи классификатора, их векторы и аннотации. `search(query, version, top_k, include_annotations)` возвращает пары `(код, близость)`. |
 | `ModelStore` | `register`, `register_new`, `active`, `get`, `list`, `activate`, `next_version` | Реестр версий модели. `activate` делает версию единственной активной и шлёт `NOTIFY model_changed`. `register_new` — только новая версия, под блокировкой. |
 | `AppealStore` | `create`, `save_result`, `get_text`, `set_verification`, `as_log_entries`, `stats`, `backoffice_stats`, `log_llm_request`, `ip_addresses`, `llm_log_count`, `set_request_meta` | Карточки обращений, вопросы, проверки оператора, журнал запросов к LLM. |
-| `JobStore` | `create`, `get`, `claim`, `lock_owned`, `finish`, `position`, `list`, `stats`, `latest`, `has_active`, `cleanup_expired`, `import_job` | Задачи. См. ниже. |
+| `JobStore` | `create`, `get`, `claim`, `lock_owned`, `finish`, `position`, `list`, `stats`, `latest`, `has_active`, `cleanup_expired`, `import_job`, `claim_next`, `fail_lost_training`, `extend_lease`, `release_for_retry`, `mark_delivered`, `delete`, `live_workers` | Задачи и очередь. См. ниже. |
 | `HistoricalStore` | `add`, `count`, `all` | Исторические размеченные обращения. |
 | `MetaStore` | `get`, `set` | Служебные отметки (таблица `schema_meta`). |
 
@@ -606,19 +662,39 @@ PostgreSQL он отдаёт соединение; его передают в м
 
 Методы `JobStore`, на которых держится очередь:
 
-- `create(job_type, payload, ..., max_queued, queue_class)` — новая задача `queued`.
+- `create(job_type, payload, ..., max_queued, queue_class)` — новая задача `queued`
+  в очереди `queue_class` и `NOTIFY job_queued` в той же транзакции.
   С `max_queued` счёт и вставка идут под advisory-блокировкой (блокировка
   PostgreSQL по произвольному ключу), чтобы два параллельных запроса не
   превысили предел. Бросает `QueueFull` или `ActiveJobExists`.
+- `claim_next(queues, worker_id, lease_sec)` — **захват** одной готовой задачи
+  одним `UPDATE ... WHERE id = (SELECT ... FOR UPDATE SKIP LOCKED LIMIT 1)`:
+  `queued` с наступившим `available_at` или `running` с истёкшей арендой (кроме
+  очереди `training`). Порядок: сначала `classify_sync`, затем `available_at`,
+  `created_at`. `SKIP LOCKED` пропускает строки, которые прямо сейчас захватывает
+  другой воркер, — одна задача не достанется двоим. Ставит `running`,
+  `attempts + 1`, `started_at` (первый раз), `locked_until`, `worker_id`.
+- `extend_lease(job_id, attempts, lease_sec)` — продлить аренду; только владелец
+  (`running` с тем же `attempts`).
+- `release_for_retry(job_id, attempts, delay_sec, error)` — вернуть задачу в
+  `queued` с `available_at = now() + delay_sec` (только владелец).
+- `fail_lost_training()` — дообучения с истёкшей арендой → `error`
+  «воркер дообучения пропал…» и `NOTIFY job_done`.
+- `mark_delivered(job_id)` — `delivered_at` для конечной задачи (один раз).
+- `delete(job_id)` — удалить строку (задачи `embed_annotation`).
+- `live_workers(queue)` — `application_name` соединений воркеров этой очереди из
+  `pg_stat_activity`.
 - `claim(job_id)` — `running`, `attempts + 1`, `started_at`; `None`, если задача
-  уже завершена.
+  уже завершена. Только для `LocalDispatcher` (memory).
 - `lock_owned(job_id, attempts, conn)` — `SELECT ... FOR UPDATE` строки задачи,
   только если она `running` с этим номером попытки.
 - `finish(job_id, result, error, conn, attempts)` — `done` или `error`, запись
   результата и `NOTIFY job_done` в той же транзакции. С `attempts` срабатывает,
   только если задачей всё ещё владеет эта попытка. Возвращает, изменилась ли строка.
 - `position(job_id)` — место в очереди среди ждущих задач того же типа и очереди.
-- `cleanup_expired(ttl_hours)` — удаляет завершённые задачи старше срока.
+- `cleanup_expired(ttl_hours, delivered_grace_sec)` — удаляет завершённые задачи:
+  забранные раньше `JOB_DELIVERED_GRACE_SEC` (кроме `finetune`) и все старше
+  `JOB_TTL_HOURS`. Вызывают API при постановке и воркеры раз в минуту.
 
 #### Реализации
 
@@ -627,7 +703,8 @@ PostgreSQL он отдаёт соединение; его передают в м
   метод принимает необязательный `conn`. Поиск — SQL с оператором pgvector
   `<=>` (косинусное расстояние) по `classifier_vectors` нужной версии.
 - `storage/memory.py` — `MemoryStorage` и аналогичные классы на словарях с
-  блокировками. `MemoryJobStore.add_listener` эмулирует `NOTIFY job_done`.
+  блокировками. `MemoryJobStore.add_listener` эмулирует `NOTIFY job_done`,
+  `register_worker` / `unregister_worker` — соединения воркеров для `/health`.
 - `storage/db.py` — пул соединений psycopg (`get_pool`, создаётся лениво,
   регистрирует тип `vector`), `transaction()`, `apply_schema(conn)` (выполняет
   `schema.sql`), `close_pool()`.
@@ -667,7 +744,7 @@ PostgreSQL он отдаёт соединение; его передают в м
 ### 2.6. training — дообучение и векторы
 
 - `training/finetune_model.py`
-  - `run_training(storage, source="combined", force=False)` — полный цикл
+  - `run_training(storage, source="combined", force=False, train_fn=None, still_owner=None)` — полный цикл
     дообучения (см. [раздел 1.3](#13-дообучение-модели)). Исключений не
     бросает, возвращает словарь `{status: completed|failed|skipped, message,
     model_path, version, recall5_before, recall5_after, activated, log_tail}`.
@@ -712,9 +789,13 @@ PostgreSQL он отдаёт соединение; его передают в м
 - `core/config.py` — **единственный источник настроек**. Читает `.env` и
   переменные окружения, задаёт значения по умолчанию. Все модули берут константы
   отсюда. Полный список с комментариями — в `.env.example`.
-- `core/service_urls.py` — `database_url(env)`, `rabbitmq_url(env)`: если
-  `DATABASE_URL` или `RABBITMQ_URL` не заданы, собирают их из `POSTGRES_*` и
-  `RABBITMQ_DEFAULT_*` так же, как это делает docker compose.
+- `core/config.py::resolve_model_path(path, version)` — путь модели из реестра →
+  то, что можно загрузить на этой машине: `MODELS_DIR/<последняя часть пути>`;
+  иначе сам путь, если это существующая папка; имя Hugging Face и версия 0 —
+  как есть; иначе `RuntimeError` «нет папки модели vN в MODELS_DIR=…».
+- `core/service_urls.py` — `database_url(env)`: если `DATABASE_URL` не задан,
+  собирает его из `POSTGRES_*` и `POSTGRES_PORT` так же, как это делает docker
+  compose.
 - `core/env_bootstrap.py` — читает `.env` до импорта библиотек Hugging Face,
   чтобы офлайн-флаги (`HF_HUB_OFFLINE`) дошли до них вовремя. Должен
   импортироваться раньше `torch` и `sentence_transformers`.
@@ -728,7 +809,7 @@ PostgreSQL он отдаёт соединение; его передают в м
 
 ### 2.9. cli — консольные утилиты
 
-Запускаются из корня проекта, работают напрямую с БД и агентом (брокер не нужен):
+Запускаются из корня проекта, работают напрямую с БД и агентом (воркеры не нужны):
 
 - `cli/test_agent.py` — прогон встроенных тестовых обращений.
 - `cli/operator_cli.py` — режим оператора: ввести текст, увидеть результат,
@@ -759,12 +840,17 @@ PostgreSQL он отдаёт соединение; его передают в м
 нужно что-то общее для API и воркера, кладите это в лёгкий модуль вроде
 `api/responses.py`.
 
-**`acks_late` и защита владения.** Сообщение подтверждается брокеру только после
-завершения задачи, поэтому при падении воркера задача будет доставлена снова.
-Чтобы повторная доставка не записала результат дважды, каждая запись идёт в
-транзакции, которая начинается с `jobs.lock_owned(job_id, attempts)`, а
-`jobs.finish` условен по номеру попытки. Новый тип задачи стройте на `_run` или
-`_run_claimed` из `queueing/tasks.py`, а не в обход них.
+**Аренда и защита владения.** Задача принадлежит воркеру, пока не истекла его
+аренда; при падении воркера её берёт другой. Чтобы две попытки не записали
+результат дважды, каждая запись идёт в транзакции, которая начинается с
+`jobs.lock_owned(job_id, attempts)`, а `jobs.finish`, `extend_lease` и
+`release_for_retry` условны по номеру попытки. Долгую работу (LLM, обучение)
+не держите внутри транзакции с блокировкой строки задачи — иначе продление
+аренды будет ждать. Новый тип задачи стройте на `_run` из `queueing/tasks.py` и
+добавляйте в `_HANDLERS` в `worker/run.py`.
+
+**Одна очередь — таблица `jobs`.** Не заводите рядом других таблиц сообщений.
+Новая очередь — новое значение `queue` (и `CHECK jobs_queue_check`).
 
 **LISTEN/NOTIFY.** Любой конечный исход задачи проходит через `jobs.finish`,
 который в той же транзакции делает `NOTIFY job_done`. Если завершить задачу
@@ -774,9 +860,10 @@ PostgreSQL он отдаёт соединение; его передают в м
 
 **Горячая перезагрузка `.env`.** Бэк-офис пишет настройки в `.env`. Процесс API
 применяет их сразу, воркеры — перед следующей задачей (по времени изменения
-файла). Значит, API и все воркеры обязаны читать **один и тот же** файл `.env`.
-Горячо применяются только настройки из формы бэк-офиса; остальные требуют
-перезапуска.
+файла). Значит, API и воркеры одной машины обязаны читать **один и тот же** файл
+`.env`. У воркеров на других машинах `.env` свой — изменения бэк-офиса туда
+переносят вручную. Горячо применяются только настройки из формы бэк-офиса;
+остальные требуют перезапуска.
 
 **Конфигурация в одном месте.** Новые настройки добавляйте в `core/config.py` и
 описывайте в `.env.example`. Не читайте `os.getenv` в других модулях: горячее
@@ -785,7 +872,7 @@ PostgreSQL он отдаёт соединение; его передают в м
 
 **`src` — корень импорта.** Все процессы запускаются с `src` в `PYTHONPATH`
 (в образе Docker — `PYTHONPATH=/app/src`), модули импортируются как
-`from core import config`, `from queueing.celery_app import app`. Скрипты,
+`from core import config`, `from worker import worker_main`. Скрипты,
 которые запускаются файлом (`python src/training/finetune_model.py`), сами
 подставляют `src` в начало `sys.path`. Модуль не должен импортироваться под двумя
 разными именами — это тоже проверяет `tests/test_src_layout.py`. Пакеты
