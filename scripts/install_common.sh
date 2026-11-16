@@ -187,42 +187,22 @@ url_hostport() {
     esac
 }
 
-# Подключение к DATABASE_URL (из окружения) за 5 с. Выводит только класс и текст
-# ошибки libpq — в них нет пароля; сам URL не печатается.
-DB_CHECK_PY='import os, sys; sys.excepthook = lambda t, e, tb: print("   ", t.__name__, str(e).strip().splitlines()[0] if str(e).strip() else "", file=sys.stderr); import psycopg; psycopg.connect(os.environ["DATABASE_URL"], connect_timeout=5).close()'
+# Адрес базы машины «только воркеры» — только через scripts/check_db.py: shell его
+# не читает, не печатает и не переписывает (awk -v портил бы \, а вывод ошибок
+# libpq — показывал бы пароль). Пароль спрашивается скрыто (getpass).
 
-db_reachable() {
-    DATABASE_URL="$1" "$VENV_PY" -c "$DB_CHECK_PY"
+# ask_database_url — адрес базы главного сервера → .env (окружение DATABASE_URL,
+# иначе вопрос; в неинтерактивном режиме — окружение или текущее значение .env).
+ask_database_url() {
+    local flags=()
+    if [ "$NONINTERACTIVE" = "1" ]; then flags=(--non-interactive); fi
+    "$VENV_PY" scripts/check_db.py ask --env-file "$ENV_FILE" ${flags[@]+"${flags[@]}"} \
+        || die "адрес базы главного сервера не записан — причина выше"
 }
 
-# ask_database_url — адрес базы главного сервера для машины «только воркеры».
-# Берётся из окружения (DATABASE_URL) или спрашивается; пишется в .env как есть.
-# Пароль не печатается никогда — в выводе только хост:порт.
-ask_database_url() {
-    local url="${DATABASE_URL:-}" current
-    current="$(get_env_key DATABASE_URL)"
-    if [ -n "$url" ]; then
-        say "DATABASE_URL: из окружения"
-    elif [ "$NONINTERACTIVE" != "1" ]; then
-        say "Адрес базы главного сервера (на нём: POSTGRES_BIND=0.0.0.0, открытый порт,"
-        say "пароль не classifier), вида postgresql://пользователь:пароль@хост:порт/база"
-        if [ -n "$current" ]; then
-            say "Enter — оставить текущий из .env ($(url_hostport "$current" 5432))"
-        fi
-        printf '   DATABASE_URL: '
-        IFS= read -r url || url=''
-        if [ -z "$url" ]; then url="$current"; fi
-    else
-        url="$current"
-    fi
-    case "$url" in
-        postgresql://*|postgres://*) ;;
-        '') die "DATABASE_URL не задан — машине воркеров нужен адрес базы главного сервера" ;;
-        *) die "DATABASE_URL должен начинаться с postgresql:// (адрес базы главного сервера)" ;;
-    esac
-    set_env_key DATABASE_URL "$url"
-    DATABASE_URL="$url"
-    ok "DATABASE_URL записан в .env (база: $(url_hostport "$url" 5432))"
+# db_check — база из .env отвечает за 5 с (печатается только хост:порт и причина).
+db_check() {
+    "$VENV_PY" scripts/check_db.py check
 }
 
 # ── Инфраструктура: PostgreSQL в Docker ──────────────────────────────────────

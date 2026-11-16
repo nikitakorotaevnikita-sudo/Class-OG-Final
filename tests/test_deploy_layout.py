@@ -401,7 +401,14 @@ def test_bat_installers_worker_only_question_skips_setup_infra(name, arg):
     skip = 'if "!WORKER_ONLY!"=="1" goto :infra_done'
     assert skip in text
     assert text.index(skip) < text.index(call) < text.index("\n:infra_done\n")
-    # DATABASE_URL уходит в .env через переменную окружения, а не в текст команды
-    assert "$env:DB_URL_IN" in text
-    assert "DATABASE_URL=!DB_URL!" not in text and "echo !DB_URL!" not in text
+    # Адрес спрашивает и пишет Python (пароль скрыто, «!» и «%» не портятся):
+    # cmd не держит его в переменной под отложенным раскрытием.
+    ask = text[text.index("\n:ask_db_url\n"):]
+    ask = ask[:ask.index("\nexit /b 0\n")]
+    assert "venv\\Scripts\\python.exe scripts\\check_db.py ask" in ask
+    assert "venv\\Scripts\\python.exe scripts\\check_db.py check" in ask
+    assert ask.index("check_db.py ask") < ask.index("check_db.py check")
+    for access in ("set /p", "DB_URL", "DATABASE_URL", "powershell"):
+        assert access not in ask, access
+    assert "set /p DB_URL" not in text and "DB_URL_IN" not in text
     assert "start.cmd worker" in text and "stop.cmd worker" in text

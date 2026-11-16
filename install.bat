@@ -318,31 +318,17 @@ exit /b !INFRA_FAILED!
 :: =============================================================
 :: ask_db_url -- DATABASE_URL of the main server into .env (worker machine)
 :: =============================================================
-:: The value goes to PowerShell through an environment variable, not inside
-:: the command text: a password may hold quotes or $ signs. Only host:port is
-:: printed. Then a 5 s connection check (warning only).
+:: All in Python (scripts\check_db.py): cmd never holds the address, so "!"
+:: and "%" in the password survive, and the password is typed hidden
+:: (getpass). Only host:port is printed. Then a 5 s connection check
+:: (warning only).
 :ask_db_url
 echo.
-echo    Database of the main server. There: POSTGRES_BIND=0.0.0.0, an open port
-echo    and a password other than classifier. Example:
-echo      postgresql://user:password@host:5432/classifier
-set "DB_URL="
-set /p DB_URL=   DATABASE_URL:
-if not defined DB_URL (
-    echo    ERROR: DATABASE_URL is empty - a worker machine needs the main server database.
-    exit /b 1
-)
-set "DB_URL_IN=!DB_URL!"
-powershell -NoProfile -Command "$v = $env:DB_URL_IN; if ($v -notmatch '^postgres(ql)?://') { Write-Output '   ERROR: DATABASE_URL must start with postgresql://'; exit 1 }; $p = '.env'; $found = $false; $out = @(Get-Content $p -Encoding UTF8 | ForEach-Object { if ($_ -match '^DATABASE_URL=') { $found = $true; 'DATABASE_URL=' + $v } else { $_ } }); if (-not $found) { $out += ('DATABASE_URL=' + $v) }; Set-Content $p -Value $out -Encoding UTF8; try { $u = [uri]$v; $port = 5432; if ($u.Port -gt 0) { $port = $u.Port }; Write-Output ('   OK: DATABASE_URL saved to .env (database ' + $u.Host + ':' + $port + ')') } catch { Write-Output '   OK: DATABASE_URL saved to .env' }"
+venv\Scripts\python.exe scripts\check_db.py ask
 if errorlevel 1 exit /b 1
-set "DATABASE_URL=!DB_URL_IN!"
-set "DB_URL_IN="
-venv\Scripts\python.exe -c "import os, sys; sys.excepthook = lambda t, e, tb: print('   ', t.__name__, str(e).strip().splitlines()[0] if str(e).strip() else '', file=sys.stderr); import psycopg; psycopg.connect(os.environ['DATABASE_URL'], connect_timeout=5).close()"
+venv\Scripts\python.exe scripts\check_db.py check
 if errorlevel 1 (
-    echo    WARNING: the database did not answer within 5 s - check DATABASE_URL in .env,
-    echo             POSTGRES_BIND=0.0.0.0 and the open port on the main server.
+    echo    WARNING: the main server database does not answer - see the reason above.
     set "DB_FAILED=1"
-) else (
-    echo    OK: the main server database answers
 )
 exit /b 0

@@ -177,10 +177,8 @@ step "6/7" "Проверка установки"
 # Машина воркеров: контейнеров нет — только проверка, что база главного сервера отвечает.
 if [ "$WORKER_ONLY" = "1" ]; then
     step "7/7" "База главного сервера (машина только для воркеров)"
-    if db_reachable "$DATABASE_URL"; then
-        ok "база $(url_hostport "$DATABASE_URL" 5432) отвечает"
-    else
-        warn "база $(url_hostport "$DATABASE_URL" 5432) не ответила за 5 с — проверить DATABASE_URL в .env, POSTGRES_BIND=0.0.0.0 и открытый порт на главном сервере"
+    if ! db_check; then
+        warn "база главного сервера не отвечает — причина выше; исправить адрес в .env и проверить: ./start.sh worker"
         CHECK_FAILED=1
     fi
     banner "Установка завершена (машина воркеров)"

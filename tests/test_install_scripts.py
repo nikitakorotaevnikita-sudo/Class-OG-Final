@@ -273,45 +273,57 @@ def test_worker_only_installer_skips_setup_infra(name):
     assert "./start.sh worker" in text and "./stop.sh worker" in text
 
 
-def run_ask_db(sandbox, body: str):
-    return run_bash(env_helper(f"unset DATABASE_URL; {body}"), sandbox)
-
-
-def test_ask_database_url_writes_env_and_hides_password(sandbox):
-    (sandbox / ".env").write_text("DATABASE_URL=\nA=1\n", encoding="utf-8")
-    proc = run_ask_db(sandbox, "NONINTERACTIVE=1; "
-                      "export DATABASE_URL='postgresql://u:s3cret@10.0.0.5:5434/classifier'; "
-                      "ask_database_url; echo RC=$?")
-    out = proc.stdout + proc.stderr
-    assert "RC=0" in proc.stdout, out
-    lines = (sandbox / ".env").read_text(encoding="utf-8").splitlines()
-    assert "DATABASE_URL=postgresql://u:s3cret@10.0.0.5:5434/classifier" in lines
-    assert sum(1 for line in lines if line.startswith("DATABASE_URL=")) == 1
-    assert "10.0.0.5:5434" in out
-    assert "s3cret" not in out
-
-
-def test_ask_database_url_interactive_input(sandbox):
+def helper_sandbox(sandbox, code: int = 0):
+    """venv/bin/python — заглушка: пишет аргументы в calls.log и выходит с code."""
+    (sandbox / "venv" / "bin").mkdir(parents=True)
+    py = sandbox / "venv" / "bin" / "python"
+    py.write_text(f'#!/bin/sh\necho "python $*" >> calls.log\nexit {code}\n',
+                  encoding="utf-8", newline="\n")
+    py.chmod(0o755)
     (sandbox / ".env").write_text("A=1\n", encoding="utf-8")
-    proc = run_bash(env_helper(
-        "unset DATABASE_URL; NONINTERACTIVE=0; "
-        "printf 'postgresql://u:pw9@db.local:5432/c\n' | ask_database_url; echo RC=$?"), sandbox)
-    out = proc.stdout + proc.stderr
-    assert "RC=0" in proc.stdout, out
-    assert "DATABASE_URL=postgresql://u:pw9@db.local:5432/c" in (sandbox / ".env").read_text(
-        encoding="utf-8")
-    assert "pw9" not in out and "db.local:5432" in out
+    return sandbox / "calls.log"
 
 
-@pytest.mark.parametrize("value", ["", "http://x:1/y", "localhost:5432"])
-def test_ask_database_url_rejects_missing_or_wrong_scheme(sandbox, value):
-    (sandbox / ".env").write_text("A=1\n", encoding="utf-8")
-    proc = run_ask_db(sandbox, f"NONINTERACTIVE=1; export DATABASE_URL='{value}'; "
-                      "ask_database_url; echo REACHED")
+@pytest.mark.parametrize("nonint,flag", [("1", " --non-interactive"), ("0", "")])
+def test_ask_database_url_delegates_to_the_python_helper(sandbox, nonint, flag):
+    """Адрес спрашивает и пишет scripts/check_db.py (getpass, запись без порчи \\ и !)."""
+    calls = helper_sandbox(sandbox)
+    proc = run_bash(env_helper(f"NONINTERACTIVE={nonint}; ask_database_url; echo RC=$?"), sandbox)
+    assert "RC=0" in proc.stdout, proc.stdout + proc.stderr
+    log = calls.read_text(encoding="utf-8").strip()
+    assert log == f"python scripts/check_db.py ask --env-file .env{flag}", log
+
+
+def test_ask_database_url_stops_when_the_helper_refuses(sandbox):
+    helper_sandbox(sandbox, code=2)
+    proc = run_bash(env_helper("NONINTERACTIVE=1; ask_database_url; echo REACHED"), sandbox)
     assert "REACHED" not in proc.stdout
     assert proc.returncode != 0
-    assert "DATABASE_URL" in proc.stderr
-    assert "DATABASE_URL" not in (sandbox / ".env").read_text(encoding="utf-8")
+    assert (sandbox / ".env").read_text(encoding="utf-8") == "A=1\n"
+
+
+def test_db_check_delegates_to_the_python_helper(sandbox):
+    calls = helper_sandbox(sandbox, code=1)
+    proc = run_bash(env_helper("db_check; echo RC=$?"), sandbox)
+    assert "RC=1" in proc.stdout
+    assert calls.read_text(encoding="utf-8").strip() == "python scripts/check_db.py check"
+
+
+def test_shell_never_handles_the_database_url_itself():
+    """Shell не читает/не печатает/не переписывает адрес базы машины воркеров."""
+    common = (ROOT / "scripts" / "install_common.sh").read_text(encoding="utf-8")
+    for name in ("ask_database_url", "db_check"):
+        body = common[common.index(f"{name}() {{"):]
+        body = body[:body.index("\n}\n")]
+        assert "check_db.py" in body
+        for access in ("$DATABASE_URL", "set_env_key DATABASE_URL", "get_env_key DATABASE_URL",
+                       "read -r"):
+            assert access not in body, (name, access)
+    assert "DB_CHECK_PY" not in common and "db_reachable" not in common
+    for name in ("install.sh", "install_offline.sh"):
+        text = (ROOT / name).read_text(encoding="utf-8")
+        assert "$DATABASE_URL" not in text and "db_reachable" not in text
+        assert "if ! db_check; then" in text
 
 
 def test_launch_sh_default_port_prints_a_real_newline():

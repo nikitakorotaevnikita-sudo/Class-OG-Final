@@ -166,21 +166,55 @@ def test_start_cmd_api_mode_starts_no_workers():
     assert 'set "NEED_AGENT=0"' in local and 'set "NEED_AGENT=1"' in local
 
 
-def test_start_cmd_worker_mode_needs_database_url_and_no_docker():
+# Чтение DATABASE_URL в shell/cmd: в cmd «!» в пароле съедает отложенное
+# раскрытие, а вывод ошибок libpq показывал бы пароль. В режиме worker адрес
+# трогает только scripts/check_db.py (и сами воркеры через core.config).
+CMD_URL_ACCESS = ("env_or_file DATABASE_URL", "!DATABASE_URL!", "%DATABASE_URL%",
+                  'set "DATABASE_URL', "url_hostport DATABASE_URL", "read_env DATABASE_URL")
+SH_URL_ACCESS = ("env_or_file DATABASE_URL", "$DATABASE_URL", "${DATABASE_URL",
+                 "export DATABASE_URL", "get_env_key DATABASE_URL", "url_hostport")
+
+
+def test_start_cmd_worker_mode_leaves_database_url_to_the_helper():
     text = START_CMD.read_text(encoding="utf-8")
     worker = cmd_section(text, "worker", "migrate_only")
     assert "docker" not in worker.lower()
     assert "run_migrate" not in worker and "init_db" not in worker
     assert "uvicorn" not in worker and "resolve_urls" not in worker
-    assert "DATABASE_URL" in worker
-    assert "ERROR: DATABASE_URL is not set" in worker
-    assert "call :check_db" in worker and "call :start_workers" in worker
-    assert worker.index("call :check_db") < worker.index("call :start_workers")
-    check = text[text.index("\n:check_db\n"):]
-    check = check[:check.index("\nexit /b 0\n")]
-    assert "connect_timeout=5" in check
-    assert "!DB_HOST!:!DB_PORT!" in check  # хост:порт, не URL с паролем
-    assert "%DATABASE_URL%" not in check and "!DATABASE_URL!" not in check
+    for access in CMD_URL_ACCESS:
+        assert access not in worker, access
+    assert "%PY% scripts\\check_db.py check" in worker
+    assert worker.index("check_db.py check") < worker.index("call :start_workers")
+    assert ":check_db" not in text and "connect_timeout" not in text
+    # --port в режиме worker — предупреждение, как в docker
+    assert "if defined PORT_ARG" in worker and "ignored in worker mode" in worker
+    workers = text[text.index("\n:start_workers\n"):]
+    workers = workers[:workers.index("\nexit /b 0\n")]
+    for access in CMD_URL_ACCESS:
+        assert access not in workers, access
+
+
+def test_start_sh_worker_mode_leaves_database_url_to_the_helper():
+    text = START_SH.read_text(encoding="utf-8")
+    for name in ("start_worker_mode", "start_workers"):
+        body = text[text.index(f"{name}() {{"):]
+        body = body[:body.index("\n}\n")]
+        for access in SH_URL_ACCESS:
+            assert access not in body, (name, access)
+    worker = text[text.index("start_worker_mode() {"):]
+    worker = worker[:worker.index("\n}\n")]
+    assert '"$VENV_PY" scripts/check_db.py check' in worker
+    assert "PORT_ARG" in worker and "warn" in worker
+
+
+def test_start_cmd_warns_about_workers_already_running():
+    text = START_CMD.read_text(encoding="utf-8")
+    workers = text[text.index("\n:start_workers\n"):]
+    workers = workers[:workers.index("\nexit /b 0\n")]
+    assert "Win32_Process" in workers and "worker\\.run" in workers
+    assert "StartsWith($root" in workers  # только эта папка проекта
+    assert "already running" in workers
+    assert workers.index("already running") < workers.index('start "classifier-worker-')
 
 
 def test_start_cmd_workers_run_the_queue_module_in_titled_windows():
@@ -335,13 +369,25 @@ def test_start_sh_all_mode_starts_classify_workers_and_training(tmp_path):
     assert (tmp_path / "run" / "worker-training.pid").exists()
 
 
+def fail_db_check(tmp_path: Path, code: int) -> None:
+    """Заглушка python: проверка базы (scripts/check_db.py) завершается с кодом code."""
+    py = tmp_path / "venv" / "bin" / "python"
+    py.write_text(py.read_text(encoding="utf-8")
+                  + f'case "$*" in *check_db.py*) exit {code} ;; esac\n',
+                  encoding="utf-8", newline="\n")
+
+
 @needs_bash
-def test_start_sh_worker_mode_needs_database_url(tmp_path):
+@pytest.mark.parametrize("code", [1, 2])  # 1 — база не отвечает, 2 — адреса нет / неверен
+def test_start_sh_worker_mode_stops_when_db_check_fails(tmp_path, code):
     calls = start_sandbox(tmp_path, "{}", "CLASSIFY_WORKERS=2\n")
+    fail_db_check(tmp_path, code)
     proc = run_sandbox(tmp_path, "worker")
     assert proc.returncode != 0
-    assert "DATABASE_URL" in proc.stderr
-    assert "worker.run" not in read_calls(calls)
+    assert "проверка базы не прошла" in proc.stderr
+    log = read_calls(calls)
+    assert "scripts/check_db.py check" in log
+    assert "worker.run" not in log
 
 
 @needs_bash
@@ -356,24 +402,21 @@ def test_start_sh_worker_mode_starts_only_workers(tmp_path):
     assert "docker" not in log
     assert "init_db.py" not in log and "migrate_from_files.py" not in log
     assert "uvicorn" not in log and "curl" not in log
-    assert "connect_timeout=5" in log  # проверка, что база отвечает
+    assert "scripts/check_db.py check" in log  # проверка, что база отвечает
+    assert log.index("check_db.py") < log.index("worker.run")
     assert log.count("-m worker.run --queues classify_sync,classify") == 2, log
     assert log.count("-m worker.run --queues training") == 1, log
-    # адрес печатается, пароль — нет; порт POSTGRES_PORT не сверяется
-    assert "db.example:5434" in out
-    assert "s3cret" not in out
+    # адрес shell не печатает; порт POSTGRES_PORT не сверяется
+    assert "s3cret" not in out and "db.example" not in out
 
 
 @needs_bash
-def test_start_sh_worker_mode_stops_when_database_does_not_answer(tmp_path):
-    calls = start_sandbox(tmp_path, "{}", "DATABASE_URL=postgresql://u:s3cret@db.example:5434/c\n")
-    py = tmp_path / "venv" / "bin" / "python"
-    py.write_text(py.read_text(encoding="utf-8") + "exit 1\n", encoding="utf-8", newline="\n")
-    proc = run_sandbox(tmp_path, "worker")
+def test_start_sh_worker_mode_warns_that_port_is_ignored(tmp_path):
+    start_sandbox(tmp_path, "{}", "CLASSIFY_WORKERS=1\n")
+    proc = run_sandbox(tmp_path, "worker --port 9999")
     out = proc.stdout + proc.stderr
-    assert proc.returncode != 0
-    assert "db.example:5434" in out and "s3cret" not in out
-    assert "worker.run" not in read_calls(calls)
+    assert proc.returncode == 0, out
+    assert "--port 9999" in out and "не действует" in out
 
 
 @needs_bash

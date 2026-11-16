@@ -265,22 +265,20 @@ start_local() {
     say "бэк-офис: http://localhost:$port/backoffice   остановка: ./stop.sh $MODE"
 }
 
-# Режим worker: только воркеры, без Docker, миграции и API. База — DATABASE_URL
-# этой машины (окружение или .env), обычно на другом хосте; сверка с
-# POSTGRES_PORT здесь не делается. Перед запуском — проверка, что база отвечает.
+# Режим worker: только воркеры, без Docker, миграции и API. Адрес базы — в .env
+# этой машины (или в окружении), обычно на другом хосте; сверка с POSTGRES_PORT
+# здесь не делается. Скрипт адрес не читает и не печатает: проверку делает
+# scripts/check_db.py, воркеры читают .env сами (core.config).
 start_worker_mode() {
     require_venv
     ensure_env
     banner "Только воркеры: база данных на главном сервере"
-    local db_url db_hp
-    db_url="$(env_or_file DATABASE_URL "")"
-    [ -n "$db_url" ] || die "DATABASE_URL не задан — указать в .env адрес базы главного сервера (postgresql://пользователь:пароль@хост:порт/база)"
-    db_hp="$(url_hostport "$db_url" 5432)"
-    say "PostgreSQL: $db_hp"
-    export DATABASE_URL="$db_url"
-    db_reachable "$db_url" \
-        || die "PostgreSQL $db_hp не ответил за 5 с — проверить DATABASE_URL в .env, POSTGRES_BIND=0.0.0.0 и открытый порт на главном сервере"
-    ok "база отвечает"
+    if [ -n "$PORT_ARG" ]; then
+        warn "--port $PORT_ARG в режиме worker не действует: у воркеров нет HTTP-порта"
+    fi
+    export_pythonpath
+    "$VENV_PY" scripts/check_db.py check \
+        || die "проверка базы не прошла — причина выше; исправить адрес базы в .env этой машины (postgresql://пользователь:пароль@хост:порт/база)"
     start_workers
     say "логи: run/worker-*.log   остановка: ./stop.sh worker"
 }

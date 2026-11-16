@@ -156,20 +156,23 @@ echo   Back office: http://localhost:!PORT!/backoffice    Stop: stop.cmd !MODE!
 exit /b 0
 
 :: ---------------------------------------------------------------- worker
-:: Workers only: no Docker, no migration, no API. The database is DATABASE_URL
-:: of THIS machine (environment or .env), usually another host - so the
-:: POSTGRES_PORT cross-check of resolve_urls does not apply here.
+:: Workers only: no Docker, no migration, no API. The database address is
+:: in .env of THIS machine (or the environment), usually another host. This
+:: file never reads or prints it (cmd would mangle "!" in a password): the
+:: Python helper and the workers read it through core.config themselves.
+:: The POSTGRES_PORT cross-check of resolve_urls does not apply here.
 :worker
 call :require_venv || exit /b 1
 echo.
 echo === Workers only: the database is on the main server ===
-call :env_or_file DATABASE_URL "" DATABASE_URL
-if not defined DATABASE_URL (
-    echo ERROR: DATABASE_URL is not set. Put the main server database address in .env:
-    echo        DATABASE_URL=postgresql://user:password@host:port/db
+if defined PORT_ARG echo WARNING: --port !PORT_ARG! is ignored in worker mode - workers serve no HTTP port.
+set "PYTHONPATH=%PROJECT%\src"
+%PY% scripts\check_db.py check
+if errorlevel 1 (
+    echo ERROR: the database check failed - see the reason above. Fix the database
+    echo        address in .env of this machine: postgresql://user:password@host:port/db
     exit /b 1
 )
-call :check_db || exit /b 1
 call :start_workers
 echo   Worker windows: classifier-worker-*    Stop: stop.cmd worker
 exit /b 0
@@ -186,8 +189,11 @@ exit /b 0
 :: start_workers - CLASSIFY_WORKERS windows of the classification worker (one
 :: process runs one job at a time and loads the model once), plus the
 :: fine-tuning worker with --training. Titles: classifier-worker-N.
+:: Workers of this folder that are already running (an earlier start.cmd
+:: worker or all) are not stopped: a warning says how to avoid duplicates.
 :start_workers
 set "PYTHONPATH=%PROJECT%\src"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$root = $env:PROJECT.TrimEnd('\') + '\'; $n = @(Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'python.exe' -and $_.CommandLine -match 'worker\.run|worker\\run\.py' -and ((($_.ExecutablePath) -and $_.ExecutablePath.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) -or $_.CommandLine.IndexOf($root, [StringComparison]::OrdinalIgnoreCase) -ge 0) }).Count; if ($n -gt 0) { Write-Output ('  WARNING: ' + $n + ' worker process(es) of this folder are already running - new ones are added. To restart cleanly: stop.cmd worker, then start again.') }"
 call :read_env CLASSIFY_WORKERS 2 WORKERS
 set /a WORKERS=WORKERS+0
 if !WORKERS! LSS 1 set "WORKERS=1"
@@ -198,22 +204,6 @@ for /L %%i in (1,1,!WORKERS!) do (
 if "%TRAINING%"=="1" (
     start "classifier-worker-training" /D "%PROJECT%" cmd /k %PY% -m worker.run --queues training
 )
-exit /b 0
-
-:: check_db - DATABASE_URL answers within 5 s. Prints host:port only, never
-:: the URL (it holds the password); the error text of libpq has no password.
-:check_db
-call :url_hostport DATABASE_URL 5432 DB_HOST DB_PORT
-echo   PostgreSQL: !DB_HOST!:!DB_PORT!
-set "PYTHONPATH=%PROJECT%\src"
-%PY% -c "import os, sys; sys.excepthook = lambda t, e, tb: print('   ', t.__name__, str(e).strip().splitlines()[0] if str(e).strip() else '', file=sys.stderr); import psycopg; psycopg.connect(os.environ['DATABASE_URL'], connect_timeout=5).close()"
-if errorlevel 1 (
-    echo ERROR: PostgreSQL !DB_HOST!:!DB_PORT! did not answer within 5 s.
-    echo        Check DATABASE_URL in .env; on the main server POSTGRES_BIND=0.0.0.0
-    echo        and an open port are needed.
-    exit /b 1
-)
-echo   OK: the database answers
 exit /b 0
 
 :: run_migrate FIRST TOTAL - two steps (schema, import) numbered FIRST/TOTAL
