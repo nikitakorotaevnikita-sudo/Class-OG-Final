@@ -57,6 +57,12 @@ LLM_MAX_RETRIES: int = max(1, int(os.getenv("LLM_MAX_RETRIES", "5")))
 # Фоновая обработка: RX получает идентификатор задачи сразу и опрашивает статус.
 JOB_TTL_HOURS: float = float(os.getenv("JOB_TTL_HOURS", "24"))
 JOB_MAX_QUEUED: int = int(os.getenv("JOB_MAX_QUEUED", "100"))
+# Очередь задач в таблице jobs. Воркер ждёт NOTIFY job_queued не дольше QUEUE_POLL_SEC
+# (контрольный опрос); аренда задачи — JOB_LEASE_SEC, продлевается каждые JOB_LEASE_SEC/3;
+# забранный результат (delivered_at) удаляется через JOB_DELIVERED_GRACE_SEC.
+QUEUE_POLL_SEC: float = float(os.getenv("QUEUE_POLL_SEC", "5"))
+JOB_LEASE_SEC: float = float(os.getenv("JOB_LEASE_SEC", "60"))
+JOB_DELIVERED_GRACE_SEC: float = float(os.getenv("JOB_DELIVERED_GRACE_SEC", "600"))
 
 CUSTOM_LLM_BASE_URL: str = os.getenv("CUSTOM_LLM_BASE_URL", "")
 CUSTOM_LLM_MODEL: str = os.getenv("CUSTOM_LLM_MODEL", "")

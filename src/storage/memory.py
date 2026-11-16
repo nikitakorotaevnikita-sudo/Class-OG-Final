@@ -12,12 +12,15 @@ from datetime import datetime, timedelta, timezone
 
 import numpy as np
 
+from core import config
+
 from . import appeal_common as ac
 from .base import DuplicateError
-from .models import (STATUS_DONE, STATUS_ERROR, STATUS_QUEUED, STATUS_RUNNING,
-                     ActiveJobExists, AppealResult, ClassifierEntry, Job, ModelVersion,
-                     ModelVersionExists, QueueFull, Storage, assign_sort_orders,
-                     check_job_values)
+from .models import (JOB_QUEUES, LOST_TRAINING_ERROR, STATUS_DONE, STATUS_ERROR,
+                     STATUS_QUEUED, STATUS_RUNNING, ActiveJobExists, AppealResult,
+                     ClassifierEntry, Job, ModelVersion, ModelVersionExists, QueueFull,
+                     Storage, assign_sort_orders, check_job_queue, check_job_values,
+                     worker_queues)
 
 logger = logging.getLogger(__name__)
 
@@ -376,6 +379,7 @@ class MemoryJobStore:
         self._seq: dict[str, int] = {}
         self._next_seq = 0
         self._listeners: list = []
+        self._workers: list[str] = []  # эмуляция pg_stat_activity (application_name воркеров)
         self._lock = threading.RLock()
 
     # --- эмуляция NOTIFY job_done ---
@@ -390,7 +394,17 @@ class MemoryJobStore:
 
     @staticmethod
     def _queue_of(job: Job) -> str:
-        return (job.payload or {}).get("queue", "classify")
+        return job.queue
+
+    def _notify_done(self, job_ids) -> None:
+        with self._lock:
+            listeners = list(self._listeners)
+        for job_id in job_ids:
+            for fn in listeners:
+                try:
+                    fn(job_id)
+                except Exception:  # noqa: BLE001 — сбой слушателя не должен ломать вызов
+                    logger.exception("слушатель job_done упал для задачи %s", job_id)
 
     def _order(self, job: Job):
         return (job.created_at, self._seq[job.id])
@@ -403,6 +417,7 @@ class MemoryJobStore:
     def create(self, job_type, payload, appeal_id=None, document_id=None, webhook_url=None,
                max_queued=None, queue_class="classify"):
         check_job_values(job_type)
+        check_job_queue(queue_class)
         with self._lock:
             if max_queued is not None:
                 queued = sum(
@@ -417,12 +432,14 @@ class MemoryJobStore:
                 for j in self._jobs.values()
             ):  # как частичный уникальный индекс one_active_finetune в PostgreSQL
                 raise ActiveJobExists("дообучение уже в очереди или выполняется")
+            now = _utcnow()
             job = Job(
                 id=uuid.uuid4().hex, job_type=job_type, status=STATUS_QUEUED,
                 appeal_id=ac.norm_uuid(appeal_id) if appeal_id else None,
                 document_id=document_id, webhook_url=webhook_url,
                 payload={**copy.deepcopy(payload), "queue": queue_class},
-                result=None, error=None, attempts=0, created_at=_utcnow(),
+                result=None, error=None, attempts=0, created_at=now,
+                queue=queue_class, available_at=now,
             )
             self._store(job)
             return copy.deepcopy(job)
@@ -468,13 +485,116 @@ class MemoryJobStore:
             job.result = copy.deepcopy(result)
             job.error = error
             job.finished_at = _utcnow()
-            listeners = list(self._listeners)
-        for fn in listeners:
-            try:
-                fn(job_id)
-            except Exception:  # noqa: BLE001 — сбой слушателя не должен ломать finish
-                logger.exception("слушатель job_done упал для задачи %s", job_id)
+            job.locked_until = None
+        self._notify_done([job_id])
         return True
+
+    # --- очередь: захват, аренда, повтор, доставка ---
+    def claim_next(self, queues, worker_id, lease_sec):
+        """Взять одну готовую задачу из очередей `queues` (как claim_next в PostgreSQL).
+
+        Сначала classify_sync, затем по available_at, created_at. Задача с истёкшей
+        арендой перехватывается (attempts+1) — кроме очереди training.
+        """
+        queues = set(queues)
+        with self._lock:
+            now = _utcnow()
+            ready = [
+                j for j in self._jobs.values()
+                if j.queue in queues and (
+                    (j.status == STATUS_QUEUED and j.available_at <= now)
+                    or (j.status == STATUS_RUNNING and j.queue != "training"
+                        and j.locked_until is not None and j.locked_until < now))
+            ]
+            if not ready:
+                return None
+            job = min(ready, key=lambda j: (j.queue != "classify_sync", j.available_at,
+                                            j.created_at, self._seq[j.id]))
+            job.status = STATUS_RUNNING
+            job.attempts += 1
+            job.started_at = job.started_at or now
+            job.locked_until = now + timedelta(seconds=lease_sec)
+            job.worker_id = worker_id
+            return copy.deepcopy(job)
+
+    def fail_lost_training(self):
+        """Дообучение с истёкшей арендой → error (не перезапускается); NOTIFY job_done."""
+        with self._lock:
+            now = _utcnow()
+            lost = sorted(
+                (j for j in self._jobs.values()
+                 if j.queue == "training" and j.status == STATUS_RUNNING
+                 and j.locked_until is not None and j.locked_until < now),
+                key=self._order,
+            )
+            for j in lost:
+                j.status = STATUS_ERROR
+                j.error = LOST_TRAINING_ERROR
+                j.finished_at = now
+                j.locked_until = None
+            out = [copy.deepcopy(j) for j in lost]
+        self._notify_done([j.id for j in out])
+        return out
+
+    def _owned(self, job_id, attempts):
+        """Задача running с этим attempts (владелец) или None."""
+        if not _ID_RE.match(job_id or ""):
+            return None
+        job = self._jobs.get(job_id)
+        if job is None or job.status != STATUS_RUNNING or job.attempts != attempts:
+            return None
+        return job
+
+    def extend_lease(self, job_id, attempts, lease_sec):
+        with self._lock:
+            job = self._owned(job_id, attempts)
+            if job is None:
+                return False
+            job.locked_until = _utcnow() + timedelta(seconds=lease_sec)
+            return True
+
+    def release_for_retry(self, job_id, attempts, delay_sec, error):
+        """Вернуть задачу в очередь после сбоя: брать не раньше чем через delay_sec."""
+        with self._lock:
+            job = self._owned(job_id, attempts)
+            if job is None:
+                return False
+            job.status = STATUS_QUEUED
+            job.available_at = _utcnow() + timedelta(seconds=delay_sec)
+            job.locked_until = None
+            job.error = error
+            return True
+
+    def mark_delivered(self, job_id):
+        """Конечный результат отдан потребителю (только done/error, метка не сдвигается)."""
+        if not _ID_RE.match(job_id or ""):
+            return
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if (job is not None and job.status in (STATUS_DONE, STATUS_ERROR)
+                    and job.delivered_at is None):
+                job.delivered_at = _utcnow()
+
+    def delete(self, job_id):
+        if not _ID_RE.match(job_id or ""):
+            return
+        with self._lock:
+            if self._jobs.pop(job_id, None) is not None:
+                del self._seq[job_id]
+
+    # --- живые воркеры (в PostgreSQL — pg_stat_activity) ---
+    def register_worker(self, name):
+        with self._lock:
+            self._workers.append(name)
+
+    def unregister_worker(self, name):
+        with self._lock:
+            if name in self._workers:
+                self._workers.remove(name)
+
+    def live_workers(self, queue):
+        with self._lock:
+            return [n for n in self._workers if queue in worker_queues(n)]
 
     def position(self, job_id):
         if not _ID_RE.match(job_id or ""):
@@ -517,14 +637,24 @@ class MemoryJobStore:
                 for j in self._jobs.values()
             )
 
-    def cleanup_expired(self, ttl_hours):
+    def cleanup_expired(self, ttl_hours, delivered_grace_sec=None):
+        """Удалить конечные задачи: забранные раньше grace (кроме finetune) и все старше TTL.
+
+        delivered_grace_sec=None → config.JOB_DELIVERED_GRACE_SEC.
+        """
+        if delivered_grace_sec is None:
+            delivered_grace_sec = config.JOB_DELIVERED_GRACE_SEC
         # Сравнение нестрогое (как в старой очереди): метки времени могут совпасть.
-        deadline = _utcnow() - timedelta(hours=ttl_hours)
+        now = _utcnow()
+        deadline = now - timedelta(hours=ttl_hours)
+        delivered_deadline = now - timedelta(seconds=delivered_grace_sec)
         with self._lock:
             stale = [
                 j.id for j in self._jobs.values()
-                if j.status in (STATUS_DONE, STATUS_ERROR)
-                and (j.finished_at or j.created_at) <= deadline
+                if j.status in (STATUS_DONE, STATUS_ERROR) and (
+                    (j.finished_at or j.created_at) <= deadline
+                    or (j.job_type != "finetune" and j.delivered_at is not None
+                        and j.delivered_at <= delivered_deadline))
             ]
             for jid in stale:
                 del self._jobs[jid]
@@ -535,7 +665,12 @@ class MemoryJobStore:
         check_job_values(job.job_type, job.status)
         with self._lock:
             if job.id not in self._jobs:
-                self._store(copy.deepcopy(job))
+                stored = copy.deepcopy(job)
+                # как backfill в schema.sql: очередь из payload, иначе classify
+                queue = (stored.payload or {}).get("queue")
+                stored.queue = queue if queue in JOB_QUEUES else "classify"
+                stored.available_at = stored.available_at or stored.created_at
+                self._store(stored)
 
 
 class MemoryHistoricalStore:

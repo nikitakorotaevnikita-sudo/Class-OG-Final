@@ -11,11 +11,15 @@ import numpy as np
 import psycopg
 from psycopg.types.json import Jsonb
 
+from core import config
+
 from . import appeal_common as ac
 from . import db
 from .base import DuplicateError
-from .models import (ActiveJobExists, ClassifierEntry, Job, ModelVersion, ModelVersionExists,
-                     QueueFull, Storage, assign_sort_orders, check_job_values)
+from .models import (JOB_QUEUES, LOST_TRAINING_ERROR, WORKER_APP_PREFIX, ActiveJobExists,
+                     ClassifierEntry, Job, ModelVersion, ModelVersionExists, QueueFull,
+                     Storage, assign_sort_orders, check_job_queue, check_job_values,
+                     worker_queues)
 
 _ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
@@ -520,8 +524,8 @@ class PgAppealStore(_PgBase):
 
 
 _JOB_COLS = ("id, job_type, status, appeal_id, document_id, webhook_url, payload, result, "
-             "error, attempts, created_at, started_at, finished_at")
-_QUEUE_EXPR = "coalesce(payload->>'queue', 'classify')"
+             "error, attempts, created_at, started_at, finished_at, "
+             "queue, available_at, locked_until, worker_id, delivered_at")
 
 
 def _job(r) -> Job:
@@ -530,13 +534,17 @@ def _job(r) -> Job:
         appeal_id=None if r[3] is None else str(r[3]),
         document_id=r[4], webhook_url=r[5], payload=r[6] or {}, result=r[7], error=r[8],
         attempts=r[9], created_at=r[10], started_at=r[11], finished_at=r[12],
+        queue=r[13], available_at=r[14], locked_until=r[15], worker_id=r[16],
+        delivered_at=r[17],
     )
 
 
 class PgJobStore(_PgBase):
     def create(self, job_type, payload, appeal_id=None, document_id=None, webhook_url=None,
                max_queued=None, queue_class="classify", conn=None):
+        """Поставить задачу в очередь queue_class; NOTIFY job_queued уходит при commit."""
         check_job_values(job_type)
+        check_job_queue(queue_class)
         job_id = uuid.uuid4().hex
         aid = ac.norm_uuid(appeal_id) if appeal_id else None
         with self._tx(conn) as c:
@@ -549,7 +557,7 @@ class PgJobStore(_PgBase):
                 )
                 queued = c.execute(
                     f"""SELECT count(*) FROM jobs
-                        WHERE status = 'queued' AND job_type = %s AND {_QUEUE_EXPR} = %s""",
+                        WHERE status = 'queued' AND job_type = %s AND queue = %s""",
                     (job_type, queue_class),
                 ).fetchone()[0]
                 if queued >= max_queued:
@@ -559,16 +567,20 @@ class PgJobStore(_PgBase):
                 with c.transaction():
                     row = c.execute(
                         f"""INSERT INTO jobs (id, job_type, status, appeal_id, document_id,
-                                              webhook_url, payload, created_at)
-                            VALUES (%s, %s, 'queued', %s, %s, %s, %s, clock_timestamp())
+                                              webhook_url, payload, queue, created_at,
+                                              available_at)
+                            VALUES (%s, %s, 'queued', %s, %s, %s, %s, %s, clock_timestamp(),
+                                    now())
                             RETURNING {_JOB_COLS}""",
                         (job_id, job_type, aid, document_id, webhook_url,
-                         Jsonb({**payload, "queue": queue_class})),
+                         Jsonb({**payload, "queue": queue_class}), queue_class),
                     ).fetchone()
             except psycopg.errors.UniqueViolation as exc:
                 if exc.diag.constraint_name == "one_active_finetune":
                     raise ActiveJobExists("дообучение уже в очереди или выполняется") from exc
                 raise
+            # Будит воркеры этой очереди; доставляется при commit этой же транзакции.
+            c.execute("SELECT pg_notify('job_queued', %s)", (queue_class,))
         return _job(row)
 
     def get(self, job_id, conn=None):
@@ -615,7 +627,7 @@ class PgJobStore(_PgBase):
         with self._tx(conn) as c:
             row = c.execute(
                 """UPDATE jobs SET status = %s, result = %s, error = %s,
-                          finished_at = clock_timestamp()
+                          finished_at = clock_timestamp(), locked_until = NULL
                    WHERE id = %s AND status IN ('queued', 'running')
                      AND (%s::int IS NULL OR (status = 'running' AND attempts = %s))
                    RETURNING id""",
@@ -629,17 +641,116 @@ class PgJobStore(_PgBase):
             c.execute("SELECT pg_notify('job_done', %s)", (job_id,))
         return True
 
+    # --- очередь: захват, аренда, повтор, доставка ---
+    def claim_next(self, queues, worker_id, lease_sec, conn=None):
+        """Взять одну готовую задачу из очередей `queues` одним атомарным запросом.
+
+        Сначала classify_sync, затем по available_at, created_at. SKIP LOCKED: параллельные
+        воркеры не берут одну строку. Задача с истёкшей арендой (воркер умер) перехватывается
+        с attempts+1 — кроме очереди training (её закрывает fail_lost_training).
+        """
+        with self._tx(conn) as c:
+            row = c.execute(
+                f"""UPDATE jobs SET status = 'running', attempts = attempts + 1,
+                           started_at = coalesce(started_at, now()),
+                           locked_until = now() + make_interval(secs => %s),
+                           worker_id = %s
+                    WHERE id = (
+                      SELECT id FROM jobs
+                      WHERE queue = ANY(%s)
+                        AND ((status = 'queued' AND available_at <= now())
+                             OR (status = 'running' AND queue <> 'training'
+                                 AND locked_until < now()))
+                      ORDER BY (queue = 'classify_sync') DESC, available_at, created_at, id
+                      FOR UPDATE SKIP LOCKED
+                      LIMIT 1)
+                    RETURNING {_JOB_COLS}""",
+                (float(lease_sec), worker_id, list(queues)),
+            ).fetchone()
+        return _job(row) if row else None
+
+    def fail_lost_training(self, conn=None):
+        """Дообучение с истёкшей арендой → error (не перезапускается); NOTIFY job_done."""
+        with self._tx(conn) as c:
+            rows = c.execute(
+                f"""UPDATE jobs SET status = 'error', error = %s,
+                           finished_at = now(), locked_until = NULL
+                    WHERE queue = 'training' AND status = 'running'
+                      AND locked_until < now()
+                    RETURNING {_JOB_COLS}""",
+                (LOST_TRAINING_ERROR,),
+            ).fetchall()
+            for r in rows:
+                c.execute("SELECT pg_notify('job_done', %s)", (r[0].strip(),))
+        return sorted((_job(r) for r in rows), key=lambda j: (j.created_at, j.id))
+
+    def extend_lease(self, job_id, attempts, lease_sec, conn=None):
+        """Продлить аренду; только владелец (running с тем же attempts)."""
+        if not _ID_RE.match(job_id or ""):
+            return False
+        with self._tx(conn) as c:
+            row = c.execute(
+                """UPDATE jobs SET locked_until = now() + make_interval(secs => %s)
+                   WHERE id = %s AND status = 'running' AND attempts = %s
+                   RETURNING id""",
+                (float(lease_sec), job_id, attempts),
+            ).fetchone()
+        return row is not None
+
+    def release_for_retry(self, job_id, attempts, delay_sec, error, conn=None):
+        """Вернуть задачу в очередь после сбоя: брать не раньше чем через delay_sec."""
+        if not _ID_RE.match(job_id or ""):
+            return False
+        with self._tx(conn) as c:
+            row = c.execute(
+                """UPDATE jobs SET status = 'queued', locked_until = NULL, error = %s,
+                          available_at = now() + make_interval(secs => %s)
+                   WHERE id = %s AND status = 'running' AND attempts = %s
+                   RETURNING id""",
+                (error, float(delay_sec), job_id, attempts),
+            ).fetchone()
+        return row is not None
+
+    def mark_delivered(self, job_id, conn=None):
+        """Конечный результат отдан потребителю (только done/error, метка не сдвигается)."""
+        if not _ID_RE.match(job_id or ""):
+            return
+        with self._tx(conn) as c:
+            c.execute(
+                """UPDATE jobs SET delivered_at = clock_timestamp()
+                   WHERE id = %s AND status IN ('done', 'error') AND delivered_at IS NULL""",
+                (job_id,),
+            )
+
+    def delete(self, job_id, conn=None):
+        if not _ID_RE.match(job_id or ""):
+            return
+        with self._tx(conn) as c:
+            c.execute("DELETE FROM jobs WHERE id = %s", (job_id,))
+
+    def live_workers(self, queue, conn=None):
+        """application_name живых соединений воркеров, обслуживающих очередь `queue`."""
+        with self._tx(conn) as c:
+            rows = c.execute(
+                """SELECT application_name FROM pg_stat_activity
+                   WHERE datname = current_database()
+                     AND application_name LIKE %s
+                   ORDER BY backend_start""",
+                (WORKER_APP_PREFIX + "%",),
+            ).fetchall()
+        return [r[0] for r in rows if queue in worker_queues(r[0])]
+
     def position(self, job_id, conn=None):
         if not _ID_RE.match(job_id or ""):
             return None
         with self._tx(conn) as c:
             row = c.execute(
-                f"""SELECT rn FROM (
+                """SELECT rn FROM (
                       SELECT id, row_number() OVER (ORDER BY created_at, id) AS rn
                       FROM jobs
                       WHERE status = 'queued'
                         AND job_type = (SELECT job_type FROM jobs WHERE id = %s)
-                        AND {_QUEUE_EXPR} = (SELECT {_QUEUE_EXPR} FROM jobs WHERE id = %s)
+                        AND queue = (SELECT queue FROM jobs WHERE id = %s)
                     ) t WHERE id = %s""",
                 (job_id, job_id, job_id),
             ).fetchone()
@@ -678,29 +789,41 @@ class PgJobStore(_PgBase):
                 (job_type,),
             ).fetchone()[0]
 
-    def cleanup_expired(self, ttl_hours, conn=None):
+    def cleanup_expired(self, ttl_hours, delivered_grace_sec=None, conn=None):
+        """Удалить конечные задачи: забранные раньше grace (кроме finetune) и все старше TTL.
+
+        delivered_grace_sec=None → config.JOB_DELIVERED_GRACE_SEC.
+        """
+        if delivered_grace_sec is None:
+            delivered_grace_sec = config.JOB_DELIVERED_GRACE_SEC
         with self._tx(conn) as c:
             cur = c.execute(
                 """DELETE FROM jobs
                    WHERE status IN ('done', 'error')
-                     AND coalesce(finished_at, created_at) <= now() - make_interval(secs => %s)""",
-                (ttl_hours * 3600,),
+                     AND (coalesce(finished_at, created_at) <= now() - make_interval(secs => %s)
+                          OR (job_type <> 'finetune'
+                              AND delivered_at <= now() - make_interval(secs => %s)))""",
+                (float(ttl_hours) * 3600, float(delivered_grace_sec)),
             )
             return cur.rowcount
 
     def import_job(self, job, conn=None):
         check_job_values(job.job_type, job.status)
+        # как backfill в schema.sql: очередь из payload, иначе classify
+        queue = (job.payload or {}).get("queue")
+        queue = queue if queue in JOB_QUEUES else "classify"
         with self._tx(conn) as c:
             c.execute(
                 """INSERT INTO jobs (id, job_type, status, appeal_id, document_id, webhook_url,
                                      payload, result, error, attempts, created_at, started_at,
-                                     finished_at)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                                     finished_at, queue, available_at)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                    ON CONFLICT (id) DO NOTHING""",
                 (job.id, job.job_type, job.status, job.appeal_id, job.document_id,
                  job.webhook_url, Jsonb(job.payload),
                  None if job.result is None else Jsonb(job.result), job.error, job.attempts,
-                 job.created_at, job.started_at, job.finished_at),
+                 job.created_at, job.started_at, job.finished_at, queue,
+                 job.available_at or job.created_at),
             )
 
 

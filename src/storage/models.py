@@ -93,6 +93,20 @@ STATUS_ERROR = "error"
 # Допустимые значения — как CHECK таблицы jobs в schema.sql.
 JOB_TYPES = ("classify", "search", "finetune", "embed_annotation")
 JOB_STATUSES = (STATUS_QUEUED, STATUS_RUNNING, STATUS_DONE, STATUS_ERROR)
+# Виды очереди (колонка jobs.queue); первой берётся classify_sync.
+JOB_QUEUES = ("classify_sync", "classify", "training")
+# Задача дообучения с истёкшей арендой не перезапускается, а завершается этой ошибкой.
+LOST_TRAINING_ERROR = "воркер дообучения пропал, запустите дообучение заново"
+# Префикс application_name соединения воркера: 'classifier-worker:<очереди через запятую>'.
+WORKER_APP_PREFIX = "classifier-worker:"
+
+
+def worker_queues(application_name: str) -> list[str]:
+    """Очереди из application_name воркера ([] — не воркер)."""
+    if not (application_name or "").startswith(WORKER_APP_PREFIX):
+        return []
+    rest = application_name[len(WORKER_APP_PREFIX):]
+    return [q.strip() for q in rest.split(",") if q.strip()]
 
 
 def check_job_values(job_type: str, status: str = STATUS_QUEUED) -> None:
@@ -101,6 +115,12 @@ def check_job_values(job_type: str, status: str = STATUS_QUEUED) -> None:
         raise ValueError(f"неизвестный тип задачи: {job_type!r}")
     if status not in JOB_STATUSES:
         raise ValueError(f"неизвестный статус задачи: {status!r}")
+
+
+def check_job_queue(queue: str) -> None:
+    """ValueError, если очередь вне CHECK jobs_queue_check (одинаково в обоих бэкендах)."""
+    if queue not in JOB_QUEUES:
+        raise ValueError(f"неизвестная очередь задач: {queue!r}")
 
 
 class QueueFull(RuntimeError):
@@ -131,6 +151,11 @@ class Job:
     created_at: datetime
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
+    queue: str = "classify"
+    available_at: Optional[datetime] = None   # с какого момента задачу можно брать
+    locked_until: Optional[datetime] = None   # аренда воркера (running)
+    worker_id: Optional[str] = None           # кто взял: hostname:pid
+    delivered_at: Optional[datetime] = None   # когда конечный результат отдан потребителю
 
     @property
     def elapsed_sec(self) -> float:

@@ -117,6 +117,29 @@ CREATE TABLE IF NOT EXISTS jobs (
   finished_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS jobs_status ON jobs(job_type, status, created_at);
+-- Очередь задач в этой же таблице (без брокера). queue - вид очереди; available_at - с какого
+-- момента задачу можно брать (отложенный повтор); locked_until - аренда воркера; worker_id -
+-- кто взял (hostname:pid); delivered_at - когда конечный результат отдан потребителю.
+-- Существующие строки: queue берётся из payload->>'queue', иначе 'classify'. Идемпотентно.
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS queue TEXT;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS available_at TIMESTAMPTZ NOT NULL DEFAULT now();
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS worker_id TEXT;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMPTZ;
+UPDATE jobs SET queue = CASE WHEN payload->>'queue' IN ('classify_sync','classify','training')
+                             THEN payload->>'queue' ELSE 'classify' END
+  WHERE queue IS NULL;
+ALTER TABLE jobs ALTER COLUMN queue SET DEFAULT 'classify';
+ALTER TABLE jobs ALTER COLUMN queue SET NOT NULL;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conname = 'jobs_queue_check' AND conrelid = 'jobs'::regclass) THEN
+    ALTER TABLE jobs ADD CONSTRAINT jobs_queue_check
+      CHECK (queue IN ('classify_sync','classify','training'));
+  END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS jobs_queue_ready ON jobs(queue, available_at) WHERE status = 'queued';
 -- Не больше одного активного дообучения: двойной запуск получает 409 (ActiveJobExists).
 -- БД, созданная до индекса, могла накопить несколько активных дообучений: все, кроме
 -- выполняющегося (running; при нескольких или без них - самого нового), закрываются
