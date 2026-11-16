@@ -3,31 +3,40 @@ setlocal enabledelayedexpansion
 
 :: Start the appeals classifier (Windows). Linux analogue: start.sh
 ::
-::   start.cmd [docker]            whole stack in Docker (default)
-::   start.cmd local [--port N]    PostgreSQL + RabbitMQ in Docker, API and workers from venv
-::                                 (--port is local only; docker mode uses HOST_PORT)
-::   start.cmd migrate             schema + file import only (the DB must be running)
+::   start.cmd [all] [--port N]     PostgreSQL in Docker, API and workers from venv
+::                                  (default; "local" is the old name of this mode)
+::   start.cmd api [--port N]       PostgreSQL in Docker, API from venv - no workers
+::                                  (the workers run on other machines)
+::   start.cmd worker               workers only; the DB is DATABASE_URL from .env
+::   start.cmd docker [--no-workers]  whole stack in Docker (--no-workers: postgres,
+::                                  migrate and api only; the API port is HOST_PORT)
+::   start.cmd migrate              schema + file import only (the DB must be running)
 ::
-::   --training                    also start the fine-tuning worker
+::   --training                     also start the fine-tuning worker (all, worker, docker)
 ::
-:: Stop: stop.cmd [docker or local]. This file stays ASCII-only: cmd.exe reads
-:: it in the console code page (CP866/CP1251) and breaks on UTF-8 text.
+:: Stop: stop.cmd [all, api, worker or docker]. This file stays ASCII-only:
+:: cmd.exe reads it in the console code page (CP866/CP1251) and breaks on UTF-8.
 
 set "PROJECT=%~dp0"
 if "%PROJECT:~-1%"=="\" set "PROJECT=%PROJECT:~0,-1%"
 cd /d "%PROJECT%"
 
 set "PY=venv\Scripts\python.exe"
-set "MODE=docker"
+set "MODE=all"
 set "TRAINING=0"
+set "NO_WORKERS=0"
 set "PORT_ARG="
 
 :parse
 if "%~1"=="" goto :parsed
+if /i "%~1"=="all"        ( set "MODE=all"     & goto :next )
+if /i "%~1"=="local"      ( set "MODE=all"     & goto :next )
+if /i "%~1"=="api"        ( set "MODE=api"     & goto :next )
+if /i "%~1"=="worker"     ( set "MODE=worker"  & goto :next )
 if /i "%~1"=="docker"     ( set "MODE=docker"  & goto :next )
-if /i "%~1"=="local"      ( set "MODE=local"   & goto :next )
 if /i "%~1"=="migrate"    ( set "MODE=migrate" & goto :next )
 if /i "%~1"=="--training" ( set "TRAINING=1"   & goto :next )
+if /i "%~1"=="--no-workers" ( set "NO_WORKERS=1" & goto :next )
 if /i "%~1"=="--port" goto :port_arg
 if /i "%~1"=="-h"     goto :help
 if /i "%~1"=="--help" goto :help
@@ -53,8 +62,14 @@ if not exist ".env" (
     echo          Fill in the LLM keys and passwords, then restart.
 )
 
+if "%NO_WORKERS%"=="1" if /i not "%MODE%"=="docker" (
+    echo WARNING: --no-workers applies to docker mode only ^(no venv workers: start.cmd api^).
+)
+
+if /i "%MODE%"=="all"     goto :local
+if /i "%MODE%"=="api"     goto :local
+if /i "%MODE%"=="worker"  goto :worker
 if /i "%MODE%"=="docker"  goto :docker
-if /i "%MODE%"=="local"   goto :local
 if /i "%MODE%"=="migrate" goto :migrate_only
 exit /b 2
 
@@ -63,33 +78,47 @@ exit /b 2
 call :require_docker || exit /b 1
 set "PROFILE="
 if "%TRAINING%"=="1" set "PROFILE=--profile training"
+set "NEED_AGENT=1"
 echo.
 echo === Starting the stack in Docker ===
 if defined PORT_ARG (
     call :read_env HOST_PORT 8010 HPORT
     echo WARNING: --port !PORT_ARG! is ignored in docker mode - the API port is HOST_PORT in .env ^(!HPORT!^).
 )
-docker compose %PROFILE% up -d --build
+if "%NO_WORKERS%"=="1" (
+    if "%TRAINING%"=="1" echo WARNING: --training is ignored together with --no-workers.
+    set "NEED_AGENT=0"
+    docker compose up -d --build postgres migrate api
+) else (
+    docker compose %PROFILE% up -d --build
+)
 if errorlevel 1 (
     echo ERROR: docker compose up failed. See: docker compose logs migrate api
     exit /b 1
 )
 call :read_env HOST_PORT 8010 PORT
-call :wait_health !PORT! || exit /b 1
+call :wait_health !PORT! !NEED_AGENT! || exit /b 1
 echo   Back office: http://localhost:!PORT!/backoffice
 exit /b 0
 
-:: ---------------------------------------------------------------- local
+:: ---------------------------------------------------------------- all / api
+:: all: PostgreSQL in Docker, migration, API and workers from venv.
+:: api: the same without workers - they run on other machines (start.cmd worker).
 :local
 call :require_docker || exit /b 1
 call :require_venv || exit /b 1
 echo.
-echo === Local mode: infrastructure in Docker, service from venv ===
+if /i "%MODE%"=="all" (
+    echo === Everything: PostgreSQL in Docker, API and workers from venv ===
+) else (
+    echo === Without workers: PostgreSQL in Docker, API from venv ===
+    if "%TRAINING%"=="1" echo WARNING: --training is ignored in api mode ^(no workers^).
+)
 call :resolve_urls || exit /b 1
-echo [1/4] PostgreSQL and RabbitMQ
-docker compose up -d --wait postgres rabbitmq
+echo [1/4] PostgreSQL
+docker compose up -d --wait postgres
 if errorlevel 1 (
-    echo ERROR: postgres/rabbitmq did not become healthy. See: docker compose logs postgres rabbitmq
+    echo ERROR: postgres did not become healthy. See: docker compose logs postgres
     exit /b 1
 )
 call :run_migrate 2 4 || exit /b 1
@@ -97,35 +126,52 @@ call :run_migrate 2 4 || exit /b 1
 call :read_env API_PORT 8010 PORT
 if defined PORT_ARG set "PORT=%PORT_ARG%"
 call :read_env API_HOST 0.0.0.0 HOST
-call :read_env CLASSIFY_WORKERS 2 WORKERS
-set /a WORKERS=WORKERS+0
-if !WORKERS! LSS 1 set "WORKERS=1"
 
-:: Child windows inherit this environment (PYTHONPATH) and the working dir.
-:: Window titles start with "classifier-": stop.cmd local closes them by title.
+:: Child windows inherit this environment (PYTHONPATH, DATABASE_URL) and the
+:: working dir. Window titles start with "classifier-": stop.cmd closes them.
 :: cmd /k keeps a window open after a crash so the error stays readable.
-echo [4/4] API and !WORKERS! classify worker^(s^)
+if /i "%MODE%"=="all" (
+    echo [4/4] API and workers
+) else (
+    echo [4/4] API
+)
 :: A busy API port usually means the Docker stack is running (its api publishes
-:: HOST_PORT=8010) or an earlier start.cmd local: uvicorn would die in its window
+:: HOST_PORT=8010) or an earlier start.cmd: uvicorn would die in its window
 :: and /health would be answered by the other service. Stop with a clear error.
 netstat -ano -p TCP | findstr /R /C:"^ *TCP *[0-9.]*:!PORT! .*LISTENING" >nul 2>&1
 if not errorlevel 1 (
     echo ERROR: port !PORT! is already in use.
-    echo        Docker stack running? Stop it: stop.cmd   Earlier local start? stop.cmd local
-    echo        Or use another port: start.cmd local --port N
+    echo        Docker stack running? Stop it: stop.cmd docker   Earlier start? stop.cmd
+    echo        Or use another port: start.cmd !MODE! --port N
     exit /b 1
 )
 start "classifier-api" /D "%PROJECT%" cmd /k %PY% -m uvicorn api.api_server:app --app-dir src --host !HOST! --port !PORT!
-:: The solo pool runs one task per process (prefork does not work on Windows),
-:: so parallelism comes from CLASSIFY_WORKERS separate processes.
-for /L %%i in (1,1,!WORKERS!) do (
-    start "classifier-worker-%%i" /D "%PROJECT%" cmd /k %PY% -m celery -A queueing.celery_app worker -Q classify_sync,classify --pool=solo -n classify%%i@%COMPUTERNAME% --loglevel=INFO
+set "NEED_AGENT=0"
+if /i "%MODE%"=="all" (
+    set "NEED_AGENT=1"
+    call :start_workers
 )
-if "%TRAINING%"=="1" (
-    start "classifier-worker-training" /D "%PROJECT%" cmd /k %PY% -m celery -A queueing.celery_app worker -Q training --pool=solo -n training@%COMPUTERNAME% --loglevel=INFO
+call :wait_health !PORT! !NEED_AGENT! || exit /b 1
+echo   Back office: http://localhost:!PORT!/backoffice    Stop: stop.cmd !MODE!
+exit /b 0
+
+:: ---------------------------------------------------------------- worker
+:: Workers only: no Docker, no migration, no API. The database is DATABASE_URL
+:: of THIS machine (environment or .env), usually another host - so the
+:: POSTGRES_PORT cross-check of resolve_urls does not apply here.
+:worker
+call :require_venv || exit /b 1
+echo.
+echo === Workers only: the database is on the main server ===
+call :env_or_file DATABASE_URL "" DATABASE_URL
+if not defined DATABASE_URL (
+    echo ERROR: DATABASE_URL is not set. Put the main server database address in .env:
+    echo        DATABASE_URL=postgresql://user:password@host:port/db
+    exit /b 1
 )
-call :wait_health !PORT! || exit /b 1
-echo   Back office: http://localhost:!PORT!/backoffice    Stop: stop.cmd local
+call :check_db || exit /b 1
+call :start_workers
+echo   Worker windows: classifier-worker-*    Stop: stop.cmd worker
 exit /b 0
 
 :: ---------------------------------------------------------------- migrate
@@ -137,8 +183,41 @@ exit /b 0
 
 :: ================================================================ helpers
 
+:: start_workers - CLASSIFY_WORKERS windows of the classification worker (one
+:: process runs one job at a time and loads the model once), plus the
+:: fine-tuning worker with --training. Titles: classifier-worker-N.
+:start_workers
+set "PYTHONPATH=%PROJECT%\src"
+call :read_env CLASSIFY_WORKERS 2 WORKERS
+set /a WORKERS=WORKERS+0
+if !WORKERS! LSS 1 set "WORKERS=1"
+echo   !WORKERS! classify worker^(s^)
+for /L %%i in (1,1,!WORKERS!) do (
+    start "classifier-worker-%%i" /D "%PROJECT%" cmd /k %PY% -m worker.run --queues classify_sync,classify
+)
+if "%TRAINING%"=="1" (
+    start "classifier-worker-training" /D "%PROJECT%" cmd /k %PY% -m worker.run --queues training
+)
+exit /b 0
+
+:: check_db - DATABASE_URL answers within 5 s. Prints host:port only, never
+:: the URL (it holds the password); the error text of libpq has no password.
+:check_db
+call :url_hostport DATABASE_URL 5432 DB_HOST DB_PORT
+echo   PostgreSQL: !DB_HOST!:!DB_PORT!
+set "PYTHONPATH=%PROJECT%\src"
+%PY% -c "import os, sys; sys.excepthook = lambda t, e, tb: print('   ', t.__name__, str(e).strip().splitlines()[0] if str(e).strip() else '', file=sys.stderr); import psycopg; psycopg.connect(os.environ['DATABASE_URL'], connect_timeout=5).close()"
+if errorlevel 1 (
+    echo ERROR: PostgreSQL !DB_HOST!:!DB_PORT! did not answer within 5 s.
+    echo        Check DATABASE_URL in .env; on the main server POSTGRES_BIND=0.0.0.0
+    echo        and an open port are needed.
+    exit /b 1
+)
+echo   OK: the database answers
+exit /b 0
+
 :: run_migrate FIRST TOTAL - two steps (schema, import) numbered FIRST/TOTAL
-:: and FIRST+1/TOTAL: local mode 2/4 and 3/4, migrate mode 1/2 and 2/2.
+:: and FIRST+1/TOTAL: all/api mode 2/4 and 3/4, migrate mode 1/2 and 2/2.
 :run_migrate
 set "S_NO=%~1"
 set "S_TOTAL=%~2"
@@ -161,17 +240,15 @@ if errorlevel 1 (
 )
 exit /b 0
 
-:: resolve_urls - DATABASE_URL / RABBITMQ_URL for local and migrate modes.
+:: resolve_urls - DATABASE_URL for all, api and migrate modes.
 :: Not set (environment or .env): built from the compose credentials and the
-:: host ports POSTGRES_PORT / RABBITMQ_PORT. Otherwise config would fall back
-:: to localhost:5432/5672, where a native PostgreSQL/RabbitMQ may be running.
-:: Set, but the port differs from POSTGRES_PORT / RABBITMQ_PORT: stop.
-:: Child windows inherit the exported values. Passwords are never printed.
+:: host port POSTGRES_PORT. Otherwise config would fall back to
+:: localhost:5432, where a native PostgreSQL may be running.
+:: Set, but the port differs from POSTGRES_PORT: stop.
+:: Child windows inherit the exported value. Passwords are never printed.
 :resolve_urls
 call :env_or_file POSTGRES_PORT "" PG_PORT_SET
-call :env_or_file RABBITMQ_PORT "" MQ_PORT_SET
 call :env_or_file DATABASE_URL "" DATABASE_URL
-call :env_or_file RABBITMQ_URL "" RABBITMQ_URL
 if not defined DATABASE_URL (
     set "_PORT=!PG_PORT_SET!"
     if not defined _PORT set "_PORT=5432"
@@ -186,21 +263,8 @@ if defined PG_PORT_SET if not "!DB_PORT!"=="!PG_PORT_SET!" (
     echo        Fix one of them in .env - otherwise another PostgreSQL would be used.
     exit /b 1
 )
-if not defined RABBITMQ_URL (
-    set "_PORT=!MQ_PORT_SET!"
-    if not defined _PORT set "_PORT=5672"
-    call :env_or_file RABBITMQ_DEFAULT_USER classifier _U
-    call :env_or_file RABBITMQ_DEFAULT_PASS classifier _P
-    set "RABBITMQ_URL=amqp://!_U!:!_P!@localhost:!_PORT!//"
-)
-call :url_hostport RABBITMQ_URL 5672 MQ_HOST MQ_PORT
-if defined MQ_PORT_SET if not "!MQ_PORT!"=="!MQ_PORT_SET!" (
-    echo ERROR: RABBITMQ_URL points to port !MQ_PORT!, but RABBITMQ_PORT=!MQ_PORT_SET!.
-    echo        Fix one of them in .env - otherwise another RabbitMQ would be used.
-    exit /b 1
-)
 set "_U=" & set "_P=" & set "_D="
-echo   PostgreSQL: !DB_HOST!:!DB_PORT!   RabbitMQ: !MQ_HOST!:!MQ_PORT!
+echo   PostgreSQL: !DB_HOST!:!DB_PORT!
 exit /b 0
 
 :: env_or_file KEY DEFAULT OUTVAR - environment value, else read_env.
@@ -264,19 +328,28 @@ for /f "tokens=1,* delims==" %%a in ('findstr /B /C:"%~1=" .env 2^>nul') do set 
 if defined _RV for /f "tokens=1 delims=# " %%v in ("!_RV!") do set "%~3=%%v"
 exit /b 0
 
-:: wait_health PORT - GET /health, 60 attempts x 2 s. /health always answers
-:: 200, so readiness is read from the body: "db":true and "broker":true
-:: (findstr regex db.:true - the dot stands for the closing quote).
+:: wait_health PORT NEED_AGENT - GET /health every 2 s. /health always answers
+:: 200, so readiness is read from the body (findstr regex db.:true - the dot
+:: stands for the closing quote):
+::   NEED_AGENT=1 (all, docker): "db":true and "agent_ready":true - a classify
+::                worker loaded the model and listens; 150 attempts (300 s).
+::   NEED_AGENT=0 (api, docker --no-workers): "db":true only, 60 attempts,
+::                then a warning that no workers are running.
 :wait_health
 set "URL=http://localhost:%~1/health"
+set "H_NEED=%~2"
+if not defined H_NEED set "H_NEED=1"
+set "H_TRIES=60"
+if "!H_NEED!"=="1" set "H_TRIES=150"
+set /a H_SECS=H_TRIES*2
 set "HFILE=%TEMP%\classifier-health-%RANDOM%.json"
 echo   Waiting for the API: !URL!
 set "HAVE_CURL=0"
 where curl.exe >nul 2>&1 && set "HAVE_CURL=1"
 set "H_SEEN=0"
 set "H_DB=0"
-set "H_MQ=0"
-for /L %%n in (1,1,60) do (
+set "H_AGENT=0"
+for /L %%n in (1,1,!H_TRIES!) do (
     del "!HFILE!" >nul 2>&1
     if "!HAVE_CURL!"=="1" (
         curl.exe -fsS -o "!HFILE!" --max-time 5 "!URL!" >nul 2>&1
@@ -286,12 +359,19 @@ for /L %%n in (1,1,60) do (
     if exist "!HFILE!" (
         set "H_SEEN=1"
         set "H_DB=0"
-        set "H_MQ=0"
+        set "H_AGENT=0"
         findstr /R /C:"db.:true" "!HFILE!" >nul 2>&1 && set "H_DB=1"
-        findstr /R /C:"broker.:true" "!HFILE!" >nul 2>&1 && set "H_MQ=1"
-        if "!H_DB!!H_MQ!"=="11" (
+        findstr /R /C:"agent_ready.:true" "!HFILE!" >nul 2>&1 && set "H_AGENT=1"
+        if "!H_NEED!!H_DB!"=="01" (
             del "!HFILE!" >nul 2>&1
-            echo   OK: API is up, database and broker reachable: !URL!
+            echo   OK: API is up, database reachable: !URL!
+            echo   WARNING: no workers are running - jobs wait in the queue until a
+            echo            worker connects ^(start.cmd worker on a worker machine^).
+            exit /b 0
+        )
+        if "!H_NEED!!H_DB!!H_AGENT!"=="111" (
+            del "!HFILE!" >nul 2>&1
+            echo   OK: API is up, database reachable, a classify worker is ready: !URL!
             exit /b 0
         )
     )
@@ -300,17 +380,20 @@ for /L %%n in (1,1,60) do (
 del "!HFILE!" >nul 2>&1
 if "!H_SEEN!"=="1" (
     if "!H_DB!"=="0" echo ERROR: the API cannot reach PostgreSQL ^(/health: db false^).
-    if "!H_MQ!"=="0" echo ERROR: the API cannot reach RabbitMQ ^(/health: broker false^).
+    if "!H_NEED!!H_AGENT!"=="10" echo ERROR: no classify worker is ready ^(/health: agent_ready false^). See the classifier-worker-* windows or: docker compose logs worker-classify
     echo        Docker: docker compose logs api.  Local: see the classifier-api window.
     exit /b 1
 )
-echo ERROR: the API did not answer within 120 s.
+echo ERROR: the API did not answer within !H_SECS! s.
 echo        Docker: docker compose logs api.  Local: see the classifier-api window.
 exit /b 1
 
 :help
-echo   start.cmd [docker]            whole stack in Docker (default)
-echo   start.cmd local [--port N]    infrastructure in Docker, API and workers from venv
-echo   start.cmd migrate             schema + file import only
-echo   --training                    also start the fine-tuning worker
+echo   start.cmd [all] [--port N]       PostgreSQL in Docker, API and workers from venv (default)
+echo   start.cmd api [--port N]         PostgreSQL in Docker, API from venv, no workers
+echo   start.cmd worker                 workers only, DB = DATABASE_URL in .env
+echo   start.cmd docker [--no-workers]  whole stack in Docker
+echo   start.cmd migrate                schema + file import only
+echo   --training                       also start the fine-tuning worker
+echo   "local" = "all" ^(old name^)
 exit /b 0

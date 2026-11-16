@@ -112,10 +112,57 @@ def test_empty_menu_input_does_not_loop():
 
 # ── Новый стек: PostgreSQL + воркеры ────────────────────────────────────────
 
-def test_server_mode_delegates_to_start_local():
-    """Классифицируют Celery-воркеры — один uvicorn без них ничего не обработает."""
-    assert "start.cmd\" local --port" in BAT
-    assert "start.sh local --port" in SH
+def test_server_mode_delegates_to_start_all():
+    """Классифицируют воркеры — один uvicorn без них ничего не обработает."""
+    assert 'start.cmd" all --port' in BAT
+    assert "start.sh all --port" in SH
+    assert "celery" not in BAT.lower() and "celery" not in SH.lower()
+    assert "rabbit" not in BAT.lower() and "rabbit" not in SH.lower()
+
+
+# Пункт меню → чем он заканчивается в launch.bat (метка) и в launch.sh (ветка case).
+MENU = {
+    "1": (":server", 'run_server all "$port"'),
+    "2": (":server_api", 'run_server api "$port"'),
+    "3": (":server_worker", "run_server worker"),
+    "4": (":ask_port", 'run_server all "$srv_port"'),
+    "5": (":check", "check_offline.py"),
+    "6": (":tests", "pytest"),
+    "7": (":classify", "classify_manual.py"),
+    "8": (":operator", "operator_cli.py"),
+    "9": (":select_llm", "select_llm"),
+}
+
+
+def test_menus_match_item_for_item():
+    bat_items = re.findall(r"^echo   \[(\d)\] ", BAT, re.MULTILINE)
+    menu_sh = SH[SH.index("menu() {"):]
+    sh_items = re.findall(r"printf '   \[(\d)\] ", menu_sh[:menu_sh.index("ask choice")])
+    bat_menu = BAT[BAT.index("\n:menu\n"):BAT.index("\n:ask_port\n")]
+    assert bat_items[:len(MENU)] == list(MENU), bat_items
+    assert sh_items == list(MENU), sh_items
+    assert "Select (1-9) [1]" in BAT and '"Выбор (1-9)" "1"' in SH
+    for no, (label, sh_action) in MENU.items():
+        assert f'if "%CHOICE%"=="{no}" goto {label}' in bat_menu, no
+        branch = re.search(rf"^\s*{no}(\|\"\")?\) (.*)$", menu_sh, re.MULTILINE)
+        assert branch and sh_action in branch.group(2), (no, branch and branch.group(0))
+
+
+def test_bat_menu_titles_name_the_three_start_modes():
+    assert "[1] Start everything" in BAT
+    assert "[2] Start without workers" in BAT
+    assert "[3] Start workers only" in BAT
+    assert "[1] Запустить всё" in SH
+    assert "[2] Запустить без воркеров" in SH
+    assert "[3] Запустить только воркеры" in SH
+
+
+def test_mode_labels_call_start_with_the_mode():
+    api = BAT[BAT.index("\n:server_api\n"):]
+    assert 'start.cmd" api --port !PORT!' in api[:api.index("goto :end")]
+    worker = BAT[BAT.index("\n:server_worker\n"):]
+    assert 'start.cmd" worker' in worker[:worker.index("goto :end")]
+    assert "--port" not in worker[:worker.index("goto :end")]
 
 
 def test_missing_file_vector_db_does_not_block_startup():

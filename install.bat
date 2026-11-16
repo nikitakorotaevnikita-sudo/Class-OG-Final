@@ -105,6 +105,25 @@ if not exist ".env" (
     echo    Created .env from .env.example
 )
 
+:: --- Worker-only machine ---
+:: Workers for the API of another machine: no Docker and no ports here. The
+:: database is the main server's DATABASE_URL, written into .env as typed and
+:: never printed back (it holds the password).
+set "WORKER_ONLY=0"
+set "DB_FAILED=0"
+set "WO_ANSWER="
+echo.
+set /p WO_ANSWER=   Is this machine only for workers? [y/N]:
+if /i "!WO_ANSWER!"=="y" set "WORKER_ONLY=1"
+if /i "!WO_ANSWER!"=="yes" set "WORKER_ONLY=1"
+if "!WORKER_ONLY!"=="1" (
+    call :ask_db_url
+    if errorlevel 1 (
+        pause
+        exit /b 1
+    )
+)
+
 :: --- Select LLM Provider ---
 echo.
 echo    Select LLM provider:
@@ -258,16 +277,20 @@ echo [5/6] Vector database
 echo    Vectors are imported into PostgreSQL on step 6 (retry: start.cmd migrate).
 
 :: =============================================================
-:: STEP 6: PostgreSQL + RabbitMQ in Docker, migration
+:: STEP 6: PostgreSQL in Docker, migration
 :: =============================================================
-:: Free host ports go to .env (values already there are kept), then
-:: docker compose up postgres rabbitmq and start.cmd migrate. No Docker or the
+:: A free host port goes to .env (a value already there is kept), then
+:: docker compose up postgres and start.cmd migrate. No Docker or the
 :: engine is stopped: not a failure - run "start.cmd migrate" later.
+:: A worker-only machine skips this step: its database is on the main server.
 echo.
-echo [6/6] PostgreSQL and RabbitMQ in Docker, data migration
-set "INFRA_FAILED=0"
+set "INFRA_FAILED=!DB_FAILED!"
+if "!WORKER_ONLY!"=="1" echo [6/6] Worker-only machine: PostgreSQL is not started here ^(DATABASE_URL^)
+if "!WORKER_ONLY!"=="1" goto :infra_done
+echo [6/6] PostgreSQL in Docker, data migration
 call "%PROJECT%\scripts\setup_infra.cmd"
 if errorlevel 1 set "INFRA_FAILED=1"
+:infra_done
 
 :: =============================================================
 :: DONE
@@ -279,10 +302,47 @@ if "!INFRA_FAILED!"=="1" (
 ) else (
     echo   Installation complete! Run launch.bat to start.
 )
-echo   launch.bat server = start.cmd local ^(API + workers from venv, DB in Docker^)
-echo   Full stack in Docker: start.cmd
+if "!WORKER_ONLY!"=="1" (
+    echo   Worker machine: start.cmd worker ^(launch.bat item 3^), stop: stop.cmd worker
+    echo   MODELS_DIR in .env: a folder shared with the main server, or its copy.
+) else (
+    echo   launch.bat server = start.cmd all ^(API + workers from venv, DB in Docker^)
+    echo   Full stack in Docker: start.cmd docker
+)
 echo =====================================================
 echo.
 pause
 :: Same as install_offline.bat: nonzero when the infrastructure step failed.
 exit /b !INFRA_FAILED!
+
+:: =============================================================
+:: ask_db_url -- DATABASE_URL of the main server into .env (worker machine)
+:: =============================================================
+:: The value goes to PowerShell through an environment variable, not inside
+:: the command text: a password may hold quotes or $ signs. Only host:port is
+:: printed. Then a 5 s connection check (warning only).
+:ask_db_url
+echo.
+echo    Database of the main server. There: POSTGRES_BIND=0.0.0.0, an open port
+echo    and a password other than classifier. Example:
+echo      postgresql://user:password@host:5432/classifier
+set "DB_URL="
+set /p DB_URL=   DATABASE_URL:
+if not defined DB_URL (
+    echo    ERROR: DATABASE_URL is empty - a worker machine needs the main server database.
+    exit /b 1
+)
+set "DB_URL_IN=!DB_URL!"
+powershell -NoProfile -Command "$v = $env:DB_URL_IN; if ($v -notmatch '^postgres(ql)?://') { Write-Output '   ERROR: DATABASE_URL must start with postgresql://'; exit 1 }; $p = '.env'; $found = $false; $out = @(Get-Content $p -Encoding UTF8 | ForEach-Object { if ($_ -match '^DATABASE_URL=') { $found = $true; 'DATABASE_URL=' + $v } else { $_ } }); if (-not $found) { $out += ('DATABASE_URL=' + $v) }; Set-Content $p -Value $out -Encoding UTF8; try { $u = [uri]$v; $port = 5432; if ($u.Port -gt 0) { $port = $u.Port }; Write-Output ('   OK: DATABASE_URL saved to .env (database ' + $u.Host + ':' + $port + ')') } catch { Write-Output '   OK: DATABASE_URL saved to .env' }"
+if errorlevel 1 exit /b 1
+set "DATABASE_URL=!DB_URL_IN!"
+set "DB_URL_IN="
+venv\Scripts\python.exe -c "import os, sys; sys.excepthook = lambda t, e, tb: print('   ', t.__name__, str(e).strip().splitlines()[0] if str(e).strip() else '', file=sys.stderr); import psycopg; psycopg.connect(os.environ['DATABASE_URL'], connect_timeout=5).close()"
+if errorlevel 1 (
+    echo    WARNING: the database did not answer within 5 s - check DATABASE_URL in .env,
+    echo             POSTGRES_BIND=0.0.0.0 and the open port on the main server.
+    set "DB_FAILED=1"
+) else (
+    echo    OK: the main server database answers
+)
+exit /b 0

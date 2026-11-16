@@ -146,7 +146,7 @@ def test_pid_is_classifier_checks_command_line(sandbox):
     # командная строка — текст этого скрипта, и цельный маркер дал бы ложное «наш».
     proc = run_bash(env_helper(f'''
         sleep 30 & other=$!
-        M1=queueing; bash -c 'sleep 30; :' "$M1.celery_app" & ours=$!
+        M1=worker; bash -c 'sleep 30; :' "$M1.run" & ours=$!
         sleep 1
         pid_is_classifier "$other" && echo "OTHER=yes" || echo "OTHER=no"
         pid_is_classifier "$ours" && echo "OURS=yes" || echo "OURS=no"
@@ -159,7 +159,7 @@ def test_pid_is_classifier_checks_command_line(sandbox):
     assert "DEAD=no" in proc.stdout and "EMPTY=no" in proc.stdout
 
 
-# ── setup_infra: порты, PostgreSQL + RabbitMQ в Docker, миграция ────────────
+# ── setup_infra: порт, PostgreSQL в Docker, миграция ────────────────────────
 
 def infra_sandbox(sandbox, docker_body: str):
     """Заглушки: venv/bin/python, docker и start.sh пишут вызовы в calls.log."""
@@ -194,7 +194,8 @@ def test_setup_infra_happy_path(sandbox):
     log = calls.read_text(encoding="utf-8")
     assert "RC=0" in proc.stdout and "FAILED=0" in proc.stdout, proc.stdout + proc.stderr
     assert "python scripts/setup_infra_env.py --env-file .env" in log
-    assert "docker compose up -d --wait postgres rabbitmq" in log
+    assert "docker compose up -d --wait postgres" in log
+    assert "rabbit" not in log
     assert "start.sh migrate" in log
     # порты выбираются до запуска контейнеров, миграция — после
     assert log.index("setup_infra_env.py") < log.index("compose up") < log.index("start.sh migrate")
@@ -228,7 +229,8 @@ def test_setup_infra_offline_without_images_skips(sandbox):
     assert "RC=0" in proc.stdout and "FAILED=0" in proc.stdout, out
     assert "docker load" in out and "docker save" in out
     log = calls.read_text(encoding="utf-8")
-    assert "docker image inspect pgvector/pgvector:pg16 rabbitmq:3.13-management" in log
+    assert "docker image inspect pgvector/pgvector:pg16" in log
+    assert "rabbit" not in log
     assert "compose up" not in log
 
 
@@ -246,6 +248,70 @@ def test_installers_run_setup_infra(name, offline):
     assert "setup_infra" in text
     # шаг инфраструктуры — после настройки .env
     assert text.index("set_env_key LLM_PROVIDER") < text.index("setup_infra")
+
+
+# ── Машина «только воркеры»: --worker-only, DATABASE_URL, без Docker ────────
+
+@pytest.mark.parametrize("name", ["install.sh", "install_offline.sh"])
+def test_worker_only_installer_skips_setup_infra(name):
+    text = (ROOT / name).read_text(encoding="utf-8")
+    parse = text[text.index("while [ $# -gt 0 ]"):text.index("\ndone\n")]
+    assert "--worker-only)" in parse and "WORKER_ONLY=1" in parse
+    assert "--worker-only" in text[:text.index("set -euo pipefail")]  # в справке
+    # DATABASE_URL спрашивается только на машине воркеров
+    assert 'if [ "$WORKER_ONLY" = "1" ]; then\n    ask_database_url' in text
+    # шаг инфраструктуры: ветка worker-only без setup_infra
+    branch = text.rindex('if [ "$WORKER_ONLY" = "1" ]; then')
+    end = text.index("\nfi\n", branch)
+    block = text[branch:end]
+    worker_part, rest = block.split("\nelse\n")
+    assert "setup_infra" not in worker_part and "docker compose" not in worker_part
+    assert "setup_infra" in rest
+    calls = [s for s in (line.strip() for line in text.splitlines())
+             if s.startswith("setup_infra")]
+    assert len(calls) == 1, calls  # единственный вызов — в ветке обычной установки
+    assert "./start.sh worker" in text and "./stop.sh worker" in text
+
+
+def run_ask_db(sandbox, body: str):
+    return run_bash(env_helper(f"unset DATABASE_URL; {body}"), sandbox)
+
+
+def test_ask_database_url_writes_env_and_hides_password(sandbox):
+    (sandbox / ".env").write_text("DATABASE_URL=\nA=1\n", encoding="utf-8")
+    proc = run_ask_db(sandbox, "NONINTERACTIVE=1; "
+                      "export DATABASE_URL='postgresql://u:s3cret@10.0.0.5:5434/classifier'; "
+                      "ask_database_url; echo RC=$?")
+    out = proc.stdout + proc.stderr
+    assert "RC=0" in proc.stdout, out
+    lines = (sandbox / ".env").read_text(encoding="utf-8").splitlines()
+    assert "DATABASE_URL=postgresql://u:s3cret@10.0.0.5:5434/classifier" in lines
+    assert sum(1 for line in lines if line.startswith("DATABASE_URL=")) == 1
+    assert "10.0.0.5:5434" in out
+    assert "s3cret" not in out
+
+
+def test_ask_database_url_interactive_input(sandbox):
+    (sandbox / ".env").write_text("A=1\n", encoding="utf-8")
+    proc = run_bash(env_helper(
+        "unset DATABASE_URL; NONINTERACTIVE=0; "
+        "printf 'postgresql://u:pw9@db.local:5432/c\n' | ask_database_url; echo RC=$?"), sandbox)
+    out = proc.stdout + proc.stderr
+    assert "RC=0" in proc.stdout, out
+    assert "DATABASE_URL=postgresql://u:pw9@db.local:5432/c" in (sandbox / ".env").read_text(
+        encoding="utf-8")
+    assert "pw9" not in out and "db.local:5432" in out
+
+
+@pytest.mark.parametrize("value", ["", "http://x:1/y", "localhost:5432"])
+def test_ask_database_url_rejects_missing_or_wrong_scheme(sandbox, value):
+    (sandbox / ".env").write_text("A=1\n", encoding="utf-8")
+    proc = run_ask_db(sandbox, f"NONINTERACTIVE=1; export DATABASE_URL='{value}'; "
+                      "ask_database_url; echo REACHED")
+    assert "REACHED" not in proc.stdout
+    assert proc.returncode != 0
+    assert "DATABASE_URL" in proc.stderr
+    assert "DATABASE_URL" not in (sandbox / ".env").read_text(encoding="utf-8")
 
 
 def test_launch_sh_default_port_prints_a_real_newline():

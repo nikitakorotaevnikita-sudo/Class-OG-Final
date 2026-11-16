@@ -1,13 +1,11 @@
-"""RabbitMQ / Celery убраны из кода, compose, образа, зависимостей и .env.example.
-
-Скрипты запуска (.cmd/.bat/.sh/.ps1) сюда пока не входят — их чистит отдельная задача.
-"""
+"""RabbitMQ / Celery убраны из кода, compose, образа, зависимостей, .env.example
+и скриптов запуска, остановки и установки (.cmd/.bat/.sh/.ps1)."""
 
 import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-FORBIDDEN = re.compile(r"rabbit|celery|kombu", re.IGNORECASE)
+FORBIDDEN = re.compile(r"rabbit|celery|kombu|amqp", re.IGNORECASE)
 
 NEW_KEYS = ("QUEUE_POLL_SEC", "JOB_LEASE_SEC", "JOB_DELIVERED_GRACE_SEC")
 REMOVED_KEYS = ("RABBITMQ_URL", "RABBITMQ_PORT", "RABBITMQ_MGMT_PORT", "RABBITMQ_BIND",
@@ -19,8 +17,23 @@ def _files():
     files = [p for p in (ROOT / "src").rglob("*.py")]
     files += sorted((ROOT / "scripts").glob("*.py"))
     files += [ROOT / n for n in ("docker-compose.yml", "Dockerfile", "requirements.txt",
-                                 ".env.example")]
+                                 ".env.example", ".gitattributes")]
+    files += SCRIPT_FILES
     return files
+
+
+SCRIPT_FILES = [ROOT / n for n in (
+    "start.cmd", "stop.cmd", "launch.bat", "install.bat", "install_offline.bat",
+    "scripts/setup_infra.cmd", "start.sh", "stop.sh", "launch.sh", "install.sh",
+    "install_offline.sh", "scripts/install_common.sh", "setup.ps1")]
+
+
+def test_every_project_script_is_checked():
+    """Новый скрипт в корне или scripts/ не должен пройти мимо проверки."""
+    found = set()
+    for pattern in ("*.cmd", "*.bat", "*.sh", "*.ps1"):
+        found |= set(ROOT.glob(pattern)) | set((ROOT / "scripts").glob(pattern))
+    assert found <= set(SCRIPT_FILES), sorted(str(p) for p in found - set(SCRIPT_FILES))
 
 
 def test_no_rabbit_celery_kombu_mentions():

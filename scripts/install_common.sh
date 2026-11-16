@@ -168,69 +168,121 @@ pid_is_classifier() {
     kill -0 "$pid" 2>/dev/null || return 1
     cmd="$(pid_cmdline "$pid")"
     case "$cmd" in
-        *api_server:app*|*queueing.celery_app*) return 0 ;;
+        *api_server:app*|*worker.run*|*worker/run.py*) return 0 ;;
     esac
     return 1
 }
 
-# ── Инфраструктура: PostgreSQL + RabbitMQ в Docker ──────────────────────────
+# ── База данных: адрес и проверка связи ─────────────────────────────────────
 
-INFRA_IMAGES="pgvector/pgvector:pg16 rabbitmq:3.13-management"
+# host:port из URL вида scheme://user:pass@host:port/...; без порта — порт по умолчанию.
+# Пароль в вывод не попадает: печатать можно только результат этой функции.
+url_hostport() {
+    local rest="${1#*://}"
+    rest="${rest##*@}"
+    rest="${rest%%/*}"
+    case "$rest" in
+        *:*) printf '%s\n' "$rest" ;;
+        *) printf '%s:%s\n' "$rest" "$2" ;;
+    esac
+}
+
+# Подключение к DATABASE_URL (из окружения) за 5 с. Выводит только класс и текст
+# ошибки libpq — в них нет пароля; сам URL не печатается.
+DB_CHECK_PY='import os, sys; sys.excepthook = lambda t, e, tb: print("   ", t.__name__, str(e).strip().splitlines()[0] if str(e).strip() else "", file=sys.stderr); import psycopg; psycopg.connect(os.environ["DATABASE_URL"], connect_timeout=5).close()'
+
+db_reachable() {
+    DATABASE_URL="$1" "$VENV_PY" -c "$DB_CHECK_PY"
+}
+
+# ask_database_url — адрес базы главного сервера для машины «только воркеры».
+# Берётся из окружения (DATABASE_URL) или спрашивается; пишется в .env как есть.
+# Пароль не печатается никогда — в выводе только хост:порт.
+ask_database_url() {
+    local url="${DATABASE_URL:-}" current
+    current="$(get_env_key DATABASE_URL)"
+    if [ -n "$url" ]; then
+        say "DATABASE_URL: из окружения"
+    elif [ "$NONINTERACTIVE" != "1" ]; then
+        say "Адрес базы главного сервера (на нём: POSTGRES_BIND=0.0.0.0, открытый порт,"
+        say "пароль не classifier), вида postgresql://пользователь:пароль@хост:порт/база"
+        if [ -n "$current" ]; then
+            say "Enter — оставить текущий из .env ($(url_hostport "$current" 5432))"
+        fi
+        printf '   DATABASE_URL: '
+        IFS= read -r url || url=''
+        if [ -z "$url" ]; then url="$current"; fi
+    else
+        url="$current"
+    fi
+    case "$url" in
+        postgresql://*|postgres://*) ;;
+        '') die "DATABASE_URL не задан — машине воркеров нужен адрес базы главного сервера" ;;
+        *) die "DATABASE_URL должен начинаться с postgresql:// (адрес базы главного сервера)" ;;
+    esac
+    set_env_key DATABASE_URL "$url"
+    DATABASE_URL="$url"
+    ok "DATABASE_URL записан в .env (база: $(url_hostport "$url" 5432))"
+}
+
+# ── Инфраструктура: PostgreSQL в Docker ──────────────────────────────────────
+
+INFRA_IMAGES="pgvector/pgvector:pg16"
 
 # Подсказка, когда поднять инфраструктуру сейчас не вышло.
 infra_later() {
     say "позже, когда Docker будет работать: ./start.sh migrate"
-    say "(или сразу ./launch.sh server — ./start.sh local поднимет PostgreSQL и RabbitMQ сам)"
+    say "(или сразу ./launch.sh server — ./start.sh all поднимет PostgreSQL сам)"
 }
 
-# setup_infra [--offline]: свободные порты в .env (scripts/setup_infra_env.py),
-# docker compose up postgres rabbitmq с ожиданием healthcheck, миграция
+# setup_infra [--offline]: свободный порт в .env (scripts/setup_infra_env.py),
+# docker compose up postgres с ожиданием healthcheck, миграция
 # (./start.sh migrate; повторный запуск — по отметке в БД, без переноса).
 # Нет Docker или он не запущен — не ошибка установки: подсказка и выход.
-# --offline: образов нет локально — как их загрузить, без попытки скачать.
+# --offline: образа нет локально — как его загрузить, без попытки скачать.
 # Сбой compose или миграции отмечается в CHECK_FAILED.
 setup_infra() {
     local offline="${1:-}"
     if ! "$VENV_PY" scripts/setup_infra_env.py --env-file "$ENV_FILE"; then
-        warn "порты PostgreSQL/RabbitMQ не выбраны — см. ошибку выше, исправить POSTGRES_PORT / RABBITMQ_PORT / RABBITMQ_MGMT_PORT в .env и повторить"
+        warn "порт PostgreSQL не выбран — см. ошибку выше, исправить POSTGRES_PORT в .env и повторить"
         CHECK_FAILED=1
         return 0
     fi
     if ! command -v docker >/dev/null 2>&1; then
-        warn "Docker не установлен — PostgreSQL и RabbitMQ не подняты (нужен Docker Engine с плагином compose)"
+        warn "Docker не установлен — PostgreSQL не поднят (нужен Docker Engine с плагином compose)"
         infra_later
         return 0
     fi
     if ! docker info >/dev/null 2>&1; then
-        warn "Docker Engine не запущен (или нет прав на docker.sock) — PostgreSQL и RabbitMQ не подняты"
+        warn "Docker Engine не запущен (или нет прав на docker.sock) — PostgreSQL не поднят"
         infra_later
         return 0
     fi
     if ! docker compose version >/dev/null 2>&1; then
-        warn "нет плагина docker compose (нужен Compose v2) — PostgreSQL и RabbitMQ не подняты"
+        warn "нет плагина docker compose (нужен Compose v2) — PostgreSQL не поднят"
         infra_later
         return 0
     fi
     if [ "$offline" = "--offline" ]; then
         # shellcheck disable=SC2086
         if ! docker image inspect $INFRA_IMAGES >/dev/null 2>&1; then
-            warn "нет образов $INFRA_IMAGES — без интернета их не скачать"
+            warn "нет образа $INFRA_IMAGES — без интернета его не скачать"
             say "на машине с интернетом:"
-            say "    docker pull pgvector/pgvector:pg16 && docker pull rabbitmq:3.13-management"
+            say "    docker pull $INFRA_IMAGES"
             say "    docker save -o infra-images.tar $INFRA_IMAGES"
             say "здесь:  docker load -i infra-images.tar"
             infra_later
             return 0
         fi
     fi
-    say "docker compose up -d --wait postgres rabbitmq"
-    if ! docker compose up -d --wait postgres rabbitmq; then
-        warn "PostgreSQL / RabbitMQ не поднялись — см. docker compose logs postgres rabbitmq"
+    say "docker compose up -d --wait postgres"
+    if ! docker compose up -d --wait postgres; then
+        warn "PostgreSQL не поднялся — см. docker compose logs postgres"
         infra_later
         CHECK_FAILED=1
         return 0
     fi
-    ok "PostgreSQL и RabbitMQ работают"
+    ok "PostgreSQL работает"
     if bash ./start.sh migrate; then
         ok "схема и перенос данных в PostgreSQL готовы"
     else

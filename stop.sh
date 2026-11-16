@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Остановка классификатора на Linux. Аналог stop.cmd.
 #
-#   ./stop.sh [docker]   остановить и удалить контейнеры стека (по умолчанию)
-#   ./stop.sh local      остановить API и воркеры из run/*.pid, затем PostgreSQL и RabbitMQ
+#   ./stop.sh [all]      остановить API и воркеры из run/*.pid, затем контейнеры проекта
+#                        (docker compose stop; по умолчанию; local и api — то же самое)
+#   ./stop.sh worker     остановить только воркеры из run/worker-*.pid (машина воркеров)
+#   ./stop.sh docker     остановить и удалить контейнеры стека
 #
 # Том pgdata НЕ удаляется никогда: в нём тексты обращений (ПДн по 59-ФЗ),
 # результаты, верификации и реестр моделей. Поэтому ключ -v у down не используется.
@@ -13,10 +15,10 @@ cd "$(dirname "$(readlink -f "$0")")"
 # shellcheck source=scripts/install_common.sh
 . scripts/install_common.sh
 
-MODE="${1:-docker}"
+MODE="${1:-all}"
 
-# Мягкая остановка (TERM): uvicorn и celery дорабатывают текущее. Через 30 с — KILL.
-# Задача, прерванная KILL, не потеряется: acks_late вернёт её в очередь.
+# Мягкая остановка (TERM): uvicorn и воркер дорабатывают текущее. Через 30 с — KILL.
+# Задача, прерванная KILL, не потеряется: по истечении аренды её возьмёт другой воркер.
 stop_pidfile() {
     local pidfile="$1" name pid i
     name="$(basename "$pidfile" .pid)"
@@ -46,18 +48,29 @@ stop_pidfile() {
     ok "$name остановлен"
 }
 
-stop_local() {
-    local found=0 pidfile
-    for pidfile in run/*.pid; do
+# stop_pidfiles ШАБЛОН — все run/ШАБЛОН.pid; 1, если ни одного не было.
+stop_pidfiles() {
+    local found=1 pidfile
+    for pidfile in run/$1.pid; do
         [ -e "$pidfile" ] || continue
-        found=1
+        found=0
         stop_pidfile "$pidfile"
     done
-    [ "$found" = "1" ] || say "pid-файлов в run/ нет — локальные процессы не запускались"
+    return "$found"
+}
+
+stop_local() {
+    stop_pidfiles '*' || say "pid-файлов в run/ нет — процессы из venv не запускались"
     if command -v docker >/dev/null 2>&1; then
-        # stop, а не down: контейнеры и том с данными остаются.
-        docker compose stop postgres rabbitmq
+        # stop, а не down: контейнеры и том с данными остаются. Все сервисы
+        # проекта — и postgres режимов all/api, и стек, поднятый ./start.sh docker.
+        docker compose --profile training stop
     fi
+}
+
+# Только воркеры этой папки проекта (run/worker-*.pid); API и Docker не трогаются.
+stop_workers() {
+    stop_pidfiles 'worker-*' || say "pid-файлов воркеров в run/ нет — воркеры не запускались"
 }
 
 stop_docker() {
@@ -69,8 +82,9 @@ stop_docker() {
 }
 
 case "$MODE" in
+    all|local|api) stop_local ;;
+    worker) stop_workers ;;
     docker) stop_docker ;;
-    local) stop_local ;;
-    -h|--help) sed -n '2,8p' "$0" ;;
-    *) printf 'Неизвестный режим: %s (docker | local)\n' "$MODE" >&2; exit 2 ;;
+    -h|--help) sed -n '2,11p' "$0" ;;
+    *) printf 'Неизвестный режим: %s (all | api | worker | docker)\n' "$MODE" >&2; exit 2 ;;
 esac

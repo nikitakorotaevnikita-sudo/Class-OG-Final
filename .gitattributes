@@ -8,9 +8,6 @@
 *.service text eol=lf
 *.service.template text eol=lf
 
-# Конфиг RabbitMQ монтируется в Linux-контейнер — только LF.
-deploy/rabbitmq/*.conf text eol=lf
-
 # Пакетные файлы Windows только с CRLF: в репозитории хранятся с LF, при checkout
 # всегда получают CRLF — независимо от core.autocrlf у клона и в zip-архиве
 # GitHub. cmd.exe с LF-окончаниями ошибается в метках и goto.

@@ -1,35 +1,39 @@
 #!/usr/bin/env bash
 # Установка прототипа классификатора обращений на Linux.
 # Аналог install.bat: venv, зависимости, диалог по .env, проверка, затем
-# PostgreSQL + RabbitMQ в Docker на свободных портах (пишутся в .env) и миграция.
+# PostgreSQL в Docker на свободном порту (пишется в .env) и миграция.
 #
 #   ./install.sh                    обычная установка (torch для CPU)
 #   ./install.sh --gpu              torch с CUDA (образ втрое тяжелее)
 #   ./install.sh --non-interactive  без вопросов: значения из окружения
+#   ./install.sh --worker-only      машина только для воркеров: спрашивает DATABASE_URL
+#                                   базы главного сервера, Docker и порты не трогает
 #   ./install.sh --systemd          не поддерживается (см. ./start.sh)
 #
 # Неинтерактивный режим читает те же имена, что и .env:
 #   LLM_PROVIDER, ARIO_API_KEY, ARIO_BASE_URL, CUSTOM_LLM_BASE_URL,
 #   CUSTOM_LLM_MODEL, CUSTOM_LLM_API_KEY, OLLAMA_BASE_URL,
-#   RX_ODATA_URL, RX_USER, RX_PASSWORD, PORT
+#   RX_ODATA_URL, RX_USER, RX_PASSWORD, PORT, DATABASE_URL (для --worker-only)
 
 set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")"
 
 TORCH_FLAVOUR=cpu
 PORT="${PORT:-8010}"
+WORKER_ONLY=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --gpu)             TORCH_FLAVOUR=cuda ;;
         --non-interactive) NONINTERACTIVE=1 ;;
+        --worker-only)     WORKER_ONLY=1 ;;
         --systemd)
-            printf 'systemd-юниты для нового состава (API + воркеры + PostgreSQL + RabbitMQ)\n' >&2
+            printf 'systemd-юниты для нового состава (API + воркеры + PostgreSQL)\n' >&2
             printf 'не поддерживаются: unit запускал бы только API без воркеров.\n' >&2
-            printf 'Используйте docker compose (./start.sh) или ./start.sh local.\n' >&2
+            printf 'Используйте docker compose (./start.sh docker) или ./start.sh local (= ./start.sh all).\n' >&2
             exit 1 ;;
         --port)            shift; PORT="${1:-8010}" ;;
-        -h|--help)         sed -n '2,20p' "$0"; exit 0 ;;
+        -h|--help)         sed -n '2,22p' "$0"; exit 0 ;;
         *)                 printf 'Неизвестный аргумент: %s\n' "$1" >&2; exit 2 ;;
     esac
     shift
@@ -73,6 +77,11 @@ step "4/7" "Настройки (.env)"
 if [ ! -f "$ENV_FILE" ]; then
     cp .env.example "$ENV_FILE"
     say "создан .env из .env.example"
+fi
+
+# Машина воркеров: база — на главном сервере, её адрес пишется в .env как есть.
+if [ "$WORKER_ONLY" = "1" ]; then
+    ask_database_url
 fi
 
 if [ "$NONINTERACTIVE" != "1" ]; then
@@ -162,15 +171,29 @@ step "6/7" "Проверка установки"
     CHECK_FAILED=1
 }
 
-# ── 7. PostgreSQL + RabbitMQ ──────────────────────────────────────────────────
-# Свободные порты хоста → .env, контейнеры postgres и rabbitmq, миграция.
+# ── 7. PostgreSQL ─────────────────────────────────────────────────────────────
+# Свободный порт хоста → .env, контейнер postgres, миграция.
 # Нет Docker или он не запущен — не ошибка: подсказка запустить позже.
-step "7/7" "PostgreSQL и RabbitMQ в Docker, перенос данных"
-setup_infra
-
-banner "Установка завершена"
-printf '   Запуск:      ./launch.sh server %s  (= ./start.sh local; весь стек в Docker: ./start.sh)\n' "$PORT"
-printf '   Остановка:   ./stop.sh local\n'
-printf '   Проверка:    curl http://127.0.0.1:%s/health\n' "$PORT"
-printf '   Бэк-офис:    http://<адрес-машины>:%s/backoffice\n\n' "$PORT"
+# Машина воркеров: контейнеров нет — только проверка, что база главного сервера отвечает.
+if [ "$WORKER_ONLY" = "1" ]; then
+    step "7/7" "База главного сервера (машина только для воркеров)"
+    if db_reachable "$DATABASE_URL"; then
+        ok "база $(url_hostport "$DATABASE_URL" 5432) отвечает"
+    else
+        warn "база $(url_hostport "$DATABASE_URL" 5432) не ответила за 5 с — проверить DATABASE_URL в .env, POSTGRES_BIND=0.0.0.0 и открытый порт на главном сервере"
+        CHECK_FAILED=1
+    fi
+    banner "Установка завершена (машина воркеров)"
+    printf '   Запуск:      ./start.sh worker  (или ./launch.sh worker; с дообучением: --training)\n'
+    printf '   Остановка:   ./stop.sh worker\n'
+    printf '   Модели:      MODELS_DIR в .env — общая папка с главным сервером или её копия\n\n'
+else
+    step "7/7" "PostgreSQL в Docker, перенос данных"
+    setup_infra
+    banner "Установка завершена"
+    printf '   Запуск:      ./launch.sh server %s  (= ./start.sh all; весь стек в Docker: ./start.sh docker)\n' "$PORT"
+    printf '   Остановка:   ./stop.sh\n'
+    printf '   Проверка:    curl http://127.0.0.1:%s/health\n' "$PORT"
+    printf '   Бэк-офис:    http://<адрес-машины>:%s/backoffice\n\n' "$PORT"
+fi
 exit "${CHECK_FAILED:-0}"

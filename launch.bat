@@ -4,7 +4,9 @@ setlocal enabledelayedexpansion
 :: Launcher for the appeals classifier (Windows). Linux analogue: launch.sh
 ::
 ::   launch.bat                menu
-::   launch.bat server [port]  local stack via start.cmd local (default 8010)
+::   launch.bat server [port]  everything via start.cmd all (default 8010)
+::   launch.bat api [port]     without workers via start.cmd api
+::   launch.bat worker         workers only via start.cmd worker
 ::   launch.bat check          verify the installation
 ::   launch.bat tests          test suite
 ::   launch.bat operator       operator mode (verification)
@@ -43,6 +45,11 @@ if not "%~1"=="" (
         if not "%~2"=="" set "PORT=%~2"
         goto :server
     )
+    if /i "%~1"=="api" (
+        if not "%~2"=="" set "PORT=%~2"
+        goto :server_api
+    )
+    if /i "%~1"=="worker"   goto :server_worker
     if /i "%~1"=="check"    goto :check
     if /i "%~1"=="tests"    goto :tests
     if /i "%~1"=="operator" goto :operator
@@ -59,31 +66,35 @@ echo.
 echo ================================================
 echo   Citizens Appeals Classification Agent
 echo ================================================
-echo   [1] Start API server (port !PORT!)
-echo   [2] Start API server on another port
-echo   [3] Verify the installation
-echo   [4] Run tests
-echo   [5] Classify manually (type appeal text)
-echo   [6] Operator mode  (verify + fine-tuning)
-echo   [7] Select LLM provider
+echo   [1] Start everything: API + workers (port !PORT!)
+echo   [2] Start without workers: API only (port !PORT!)
+echo   [3] Start workers only (DB = DATABASE_URL in .env)
+echo   [4] Start everything on another port
+echo   [5] Verify the installation
+echo   [6] Run tests
+echo   [7] Classify manually (type appeal text)
+echo   [8] Operator mode  (verify + fine-tuning)
+echo   [9] Select LLM provider
 echo ================================================
 
 echo   Current LLM: !CURRENT_LLM!
 echo.
 
 set "CHOICE="
-set /p CHOICE=Select (1-7) [1]:
+set /p CHOICE=Select (1-9) [1]:
 
 :: Empty input means [1], as in launch.sh. Without this the menu loops:
 :: at end of input "set /p" leaves CHOICE empty and we jump back here.
 if "%CHOICE%"=="" goto :server
 if "%CHOICE%"=="1" goto :server
-if "%CHOICE%"=="2" goto :ask_port
-if "%CHOICE%"=="3" goto :check
-if "%CHOICE%"=="4" goto :tests
-if "%CHOICE%"=="5" goto :classify
-if "%CHOICE%"=="6" goto :operator
-if "%CHOICE%"=="7" goto :select_llm
+if "%CHOICE%"=="2" goto :server_api
+if "%CHOICE%"=="3" goto :server_worker
+if "%CHOICE%"=="4" goto :ask_port
+if "%CHOICE%"=="5" goto :check
+if "%CHOICE%"=="6" goto :tests
+if "%CHOICE%"=="7" goto :classify
+if "%CHOICE%"=="8" goto :operator
+if "%CHOICE%"=="9" goto :select_llm
 goto :menu
 
 :ask_port
@@ -94,14 +105,32 @@ set /p ASK_PORT=Port [!PORT!]:
 if not "!ASK_PORT!"=="" set "PORT=!ASK_PORT!"
 
 :server
-:: Classifier vectors live in PostgreSQL now and classification runs in Celery
-:: workers, so "server" starts the whole local stack through start.cmd local:
-:: PostgreSQL + RabbitMQ in Docker, migration, API window and worker windows.
+:: Classifier vectors live in PostgreSQL and classification runs in queue
+:: workers, so "server" starts everything through start.cmd all:
+:: PostgreSQL in Docker, migration, API window and worker windows.
 echo.
-echo   NOTE: "server" now runs "start.cmd local" ^(API + workers, DB in Docker^).
+echo   NOTE: "server" runs "start.cmd all" ^(API + workers, DB in Docker^).
 echo   LLM provider: !CURRENT_LLM!
 echo.
-call "%PROJECT%\start.cmd" local --port !PORT!
+call "%PROJECT%\start.cmd" all --port !PORT!
+goto :end
+
+:server_api
+:: Main server whose workers run on other machines: jobs wait in the queue
+:: until a worker connects.
+echo.
+echo   NOTE: "api" runs "start.cmd api" ^(API without workers, DB in Docker^).
+echo.
+call "%PROJECT%\start.cmd" api --port !PORT!
+goto :end
+
+:server_worker
+:: Worker machine: the database is DATABASE_URL in .env of this machine.
+echo.
+echo   NOTE: "worker" runs "start.cmd worker" ^(workers only, no Docker^).
+echo   LLM provider: !CURRENT_LLM!
+echo.
+call "%PROJECT%\start.cmd" worker
 goto :end
 
 :check
@@ -122,7 +151,9 @@ goto :end
 
 :help
 echo   launch.bat                menu
-echo   launch.bat server [port]  local stack via start.cmd local (default %DEFAULT_PORT%)
+echo   launch.bat server [port]  everything via start.cmd all (default %DEFAULT_PORT%)
+echo   launch.bat api [port]     without workers via start.cmd api
+echo   launch.bat worker         workers only via start.cmd worker
 echo   launch.bat check          verify the installation
 echo   launch.bat tests          test suite
 echo   launch.bat operator       operator mode

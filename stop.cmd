@@ -3,8 +3,12 @@ setlocal
 
 :: Stop the appeals classifier (Windows). Linux analogue: stop.sh
 ::
-::   stop.cmd [docker]   stop and remove the stack containers (default)
-::   stop.cmd local      close the classifier-* windows, then stop PostgreSQL and RabbitMQ
+::   stop.cmd [all]     close the API and worker windows of this project, then
+::                      stop the project containers (default; "local" and "api"
+::                      do the same - compose stop keeps containers and data)
+::   stop.cmd worker    close only the worker windows of this project folder
+::                      (worker machine: nothing else is touched)
+::   stop.cmd docker    stop and remove the stack containers
 ::
 :: The pgdata volume is NEVER removed here: it holds appeal texts (personal data
 :: under 59-FZ), results, verifications and the model registry. That is why the
@@ -14,15 +18,19 @@ setlocal
 :: ASCII-only on purpose: cmd.exe reads this file in the console code page.
 
 cd /d "%~dp0"
+set "PROJ=%~dp0"
 
 set "MODE=%~1"
-if "%MODE%"=="" set "MODE=docker"
+if "%MODE%"=="" set "MODE=all"
 
-if /i "%MODE%"=="docker" goto :docker
+if /i "%MODE%"=="all"    goto :local
 if /i "%MODE%"=="local"  goto :local
+if /i "%MODE%"=="api"    goto :local
+if /i "%MODE%"=="worker" goto :worker
+if /i "%MODE%"=="docker" goto :docker
 if /i "%MODE%"=="-h"     goto :help
 if /i "%MODE%"=="--help" goto :help
-echo Unknown mode: %MODE%  ^(docker or local^)
+echo Unknown mode: %MODE%  ^(all, api, worker or docker^)
 exit /b 2
 
 :docker
@@ -35,29 +43,46 @@ if errorlevel 1 (
 docker compose --profile training down
 exit /b %errorlevel%
 
+:: stop_procs - Python processes of THIS project whose command line matches
+:: the regex in PAT: the executable path or the command line lies under the
+:: project folder. Window titles are not reliable: an elevated console
+:: prefixes them ("Administrator: classifier-api"). /T also ends children
+:: (the venv launcher starts the real interpreter). The "cmd /k" window of
+:: each process is closed by parent PID, whatever its title.
+:: A job killed mid-classification is not lost: when its lease expires,
+:: another worker takes it. $root ends with a backslash, so D:\proj does not
+:: match D:\proj-old\...
+:stop_procs
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$root = $env:PROJ.TrimEnd('\') + '\'; $all = Get-CimInstance Win32_Process; $all | Where-Object { $_.Name -eq 'python.exe' -and $_.CommandLine -match $env:PAT -and ((($_.ExecutablePath) -and $_.ExecutablePath.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) -or $_.CommandLine.IndexOf($root, [StringComparison]::OrdinalIgnoreCase) -ge 0) } | ForEach-Object { $p = $_; $win = $all | Where-Object { $_.ProcessId -eq $p.ParentProcessId -and $_.Name -eq 'cmd.exe' -and $_.CommandLine -match '/k ' }; taskkill /F /T /PID $p.ProcessId 2>$null | Out-Null; Write-Output ('  stopped PID ' + $p.ProcessId); if ($win) { taskkill /F /PID $win.ProcessId 2>$null | Out-Null; Write-Output ('  closed window PID ' + $win.ProcessId) } }"
+exit /b 0
+
 :local
-:: 1) Python processes of THIS project: API (uvicorn api.api_server:app) and
-::    Celery workers (queueing.celery_app) whose executable path or command
-::    line lies under the project folder. Window titles are not reliable: an
-::    elevated console prefixes them ("Administrator: classifier-api").
-::    /T also ends children (the venv launcher starts the real interpreter).
-::    A task killed mid-classification is not lost: acks_late re-queues it.
-::    $root ends with a backslash, so D:\proj does not match D:\proj-old\...
-set "PROJ=%~dp0"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$root = $env:PROJ.TrimEnd('\') + '\'; $all = Get-CimInstance Win32_Process; $all | Where-Object { $_.Name -eq 'python.exe' -and $_.CommandLine -match 'queueing\.celery_app|api\.api_server:app|uvicorn' -and ((($_.ExecutablePath) -and $_.ExecutablePath.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) -or $_.CommandLine.IndexOf($root, [StringComparison]::OrdinalIgnoreCase) -ge 0) } | ForEach-Object { $p = $_; $win = $all | Where-Object { $_.ProcessId -eq $p.ParentProcessId -and $_.Name -eq 'cmd.exe' -and $_.CommandLine -match '/k ' }; taskkill /F /T /PID $p.ProcessId 2>$null | Out-Null; Write-Output ('  stopped PID ' + $p.ProcessId); if ($win) { taskkill /F /PID $win.ProcessId 2>$null | Out-Null; Write-Output ('  closed window PID ' + $win.ProcessId) } }"
-:: 2) Windows left from older runs (titles start with "classifier-"). The
-::    "cmd /k" window of each process stopped above is closed by parent PID,
-::    whatever the console prefixes to its title ("Administrator: ...").
+:: 1) API (uvicorn api.api_server:app) and queue workers (worker.run, also
+::    started as src\worker\run.py) of this project folder.
+set "PAT=worker\.run|worker\\run\.py|api\.api_server:app|uvicorn"
+call :stop_procs
+:: 2) Windows left from older runs (titles start with "classifier-").
 taskkill /F /T /FI "WINDOWTITLE eq classifier-*" >nul 2>&1
 echo   OK: classifier processes and windows closed ^(if any were open^).
+:: 3) Project containers: stop, not down - containers and the data volume
+::    stay. Covers PostgreSQL of all/api and a stack from start.cmd docker.
 where docker >nul 2>&1
 if not errorlevel 1 (
-    rem stop, not down: containers and the data volume stay.
-    docker compose stop postgres rabbitmq
+    docker compose --profile training stop
 )
 exit /b 0
 
+:worker
+:: Only the queue workers of this project folder; the API, other projects
+:: and containers are left alone (no title-based fallback: a title says
+:: nothing about the folder).
+set "PAT=worker\.run|worker\\run\.py"
+call :stop_procs
+echo   OK: worker processes of this folder stopped ^(if any were running^).
+exit /b 0
+
 :help
-echo   stop.cmd [docker]   stop and remove the stack containers (default)
-echo   stop.cmd local      close the classifier-* windows, stop PostgreSQL and RabbitMQ
+echo   stop.cmd [all]     close API and worker windows, stop the project containers
+echo   stop.cmd worker    close only the worker windows of this project folder
+echo   stop.cmd docker    stop and remove the stack containers
 exit /b 0

@@ -4,6 +4,8 @@
 #
 #   ./install_offline.sh
 #   ./install_offline.sh --non-interactive
+#   ./install_offline.sh --worker-only   машина только для воркеров: спрашивает DATABASE_URL
+#                                        базы главного сервера, Docker и порты не трогает
 #
 # Комплект собирается на машине с интернетом:
 #   python scripts/make_offline_bundle.py --python-version 3.11 --platform manylinux2014_x86_64
@@ -13,13 +15,15 @@ cd "$(dirname "$(readlink -f "$0")")"
 
 PORT="${PORT:-8010}"
 FORCE=0
+WORKER_ONLY=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --non-interactive) NONINTERACTIVE=1 ;;
         --force)           FORCE=1 ;;
+        --worker-only)     WORKER_ONLY=1 ;;
         --port)            shift; PORT="${1:-8010}" ;;
-        -h|--help)         sed -n '2,14p' "$0"; exit 0 ;;
+        -h|--help)         sed -n '2,16p' "$0"; exit 0 ;;
         *)                 printf 'Неизвестный аргумент: %s\n' "$1" >&2; exit 2 ;;
     esac
     shift
@@ -90,6 +94,11 @@ if [ ! -f "$ENV_FILE" ]; then
         cp .env.example "$ENV_FILE"
         say "создан .env из .env.example"
     fi
+fi
+
+# Машина воркеров: база — на главном сервере, её адрес пишется в .env как есть.
+if [ "$WORKER_ONLY" = "1" ]; then
+    ask_database_url
 fi
 
 if [ "$NONINTERACTIVE" != "1" ]; then
@@ -171,14 +180,28 @@ say "векторы переносятся в PostgreSQL на шаге 7 (пов
     CHECK_FAILED=1
 }
 
-# ── 7. PostgreSQL + RabbitMQ ──────────────────────────────────────────────────
-# Как в install.sh, но образы без интернета не скачать: нет их локально —
+# ── 7. PostgreSQL ─────────────────────────────────────────────────────────────
+# Как в install.sh, но образ без интернета не скачать: нет его локально —
 # подсказка, как загрузить (docker save / docker load), и пропуск шага.
-step "7/7" "PostgreSQL и RabbitMQ в Docker, перенос данных"
-setup_infra --offline
-
-banner "Установка завершена"
-printf '   Запуск:      ./launch.sh server %s  (= ./start.sh local; весь стек в Docker: ./start.sh)\n' "$PORT"
-printf '   Остановка:   ./stop.sh local\n'
-printf '   Проверка:    curl http://127.0.0.1:%s/health\n\n' "$PORT"
+# Машина воркеров: контейнеров нет — только проверка, что база главного сервера отвечает.
+if [ "$WORKER_ONLY" = "1" ]; then
+    step "7/7" "База главного сервера (машина только для воркеров)"
+    if db_reachable "$DATABASE_URL"; then
+        ok "база $(url_hostport "$DATABASE_URL" 5432) отвечает"
+    else
+        warn "база $(url_hostport "$DATABASE_URL" 5432) не ответила за 5 с — проверить DATABASE_URL в .env, POSTGRES_BIND=0.0.0.0 и открытый порт на главном сервере"
+        CHECK_FAILED=1
+    fi
+    banner "Установка завершена (машина воркеров)"
+    printf '   Запуск:      ./start.sh worker  (или ./launch.sh worker; с дообучением: --training)\n'
+    printf '   Остановка:   ./stop.sh worker\n'
+    printf '   Модели:      MODELS_DIR в .env — общая папка с главным сервером или её копия\n\n'
+else
+    step "7/7" "PostgreSQL в Docker, перенос данных"
+    setup_infra --offline
+    banner "Установка завершена"
+    printf '   Запуск:      ./launch.sh server %s  (= ./start.sh all; весь стек в Docker: ./start.sh docker)\n' "$PORT"
+    printf '   Остановка:   ./stop.sh\n'
+    printf '   Проверка:    curl http://127.0.0.1:%s/health\n\n' "$PORT"
+fi
 exit "${CHECK_FAILED:-0}"

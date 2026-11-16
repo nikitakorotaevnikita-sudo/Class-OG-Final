@@ -2,7 +2,9 @@
 # Запуск классификатора на Linux. Аналог launch.bat — меню и команды совпадают.
 #
 #   ./launch.sh                 меню
-#   ./launch.sh server [порт]   локальный стек через start.sh local (порт 8010)
+#   ./launch.sh server [порт]   всё через start.sh all (порт 8010)
+#   ./launch.sh api [порт]      без воркеров через start.sh api
+#   ./launch.sh worker          только воркеры через start.sh worker
 #   ./launch.sh check           проверка установки
 #   ./launch.sh tests           тесты
 #   ./launch.sh operator        режим оператора (верификация + дообучение)
@@ -33,14 +35,26 @@ current_llm() {
     printf '%s\n' "${provider:-groq}"
 }
 
-# Векторы классификатора в PostgreSQL, классифицируют Celery-воркеры:
-# «server» поднимает весь локальный стек через start.sh local (PostgreSQL и
-# RabbitMQ в Docker, миграция, API и воркеры из venv).
+# Векторы классификатора в PostgreSQL, классифицируют воркеры очереди.
+# run_server РЕЖИМ [порт]:
+#   all    — всё через start.sh all (PostgreSQL в Docker, миграция, API и воркеры из venv);
+#   api    — без воркеров (воркеры на других машинах, задачи ждут в очереди);
+#   worker — только воркеры, база — DATABASE_URL из .env этой машины.
 run_server() {
-    local port="${1:-$(default_port)}"
-    say "server запускает ./start.sh local (API + воркеры, БД в Docker)"
+    local mode="$1" port="${2:-}"
+    if [ -z "$port" ]; then port="$(default_port)"; fi
     say "провайдер LLM: $(current_llm)"
-    exec bash ./start.sh local --port "$port"
+    case "$mode" in
+        all)
+            say "запуск всего: ./start.sh all (API + воркеры, БД в Docker)"
+            exec bash ./start.sh all --port "$port" ;;
+        api)
+            say "запуск без воркеров: ./start.sh api (API, БД в Docker)"
+            exec bash ./start.sh api --port "$port" ;;
+        worker)
+            say "запуск только воркеров: ./start.sh worker (без Docker)"
+            exec bash ./start.sh worker ;;
+    esac
 }
 
 # Меню выбора провайдера LLM: меняет только LLM_PROVIDER в .env.
@@ -77,36 +91,42 @@ menu() {
     while true; do
         port="$(default_port)"
         banner "Классификатор обращений граждан"
-        printf '   [1] Запустить сервис (порт %s)\n' "$port"
-        printf '   [2] Запустить сервис на другом порту\n'
-        printf '   [3] Проверить установку\n'
-        printf '   [4] Тесты\n'
-        printf '   [5] Разовая классификация (ввести текст обращения)\n'
-        printf '   [6] Режим оператора (верификация + дообучение)\n'
-        printf '   [7] Выбрать провайдера LLM\n'
+        printf '   [1] Запустить всё: API + воркеры (порт %s)\n' "$port"
+        printf '   [2] Запустить без воркеров: только API (порт %s)\n' "$port"
+        printf '   [3] Запустить только воркеры (база — DATABASE_URL в .env)\n'
+        printf '   [4] Запустить всё на другом порту\n'
+        printf '   [5] Проверить установку\n'
+        printf '   [6] Тесты\n'
+        printf '   [7] Разовая классификация (ввести текст обращения)\n'
+        printf '   [8] Режим оператора (верификация + дообучение)\n'
+        printf '   [9] Выбрать провайдера LLM\n'
         printf '   Текущий LLM: %s\n\n' "$(current_llm)"
         choice=""
-        ask choice "Выбор (1-7)" "1"
+        ask choice "Выбор (1-9)" "1"
         case "$choice" in
-            1|"") run_server "$port" ;;
-            2) local srv_port=""; ask srv_port "Порт" "$port"; run_server "$srv_port" ;;
-            3) exec "$VENV_PY" scripts/check_offline.py --stage post --online ;;
-            4) exec "$VENV_PY" -m pytest tests/ -q --ignore=tests/e2e ;;
-            5) exec "$VENV_PY" src/cli/classify_manual.py ;;
-            6) exec "$VENV_PY" src/cli/operator_cli.py ;;
-            7) select_llm ;;
+            1|"") run_server all "$port" ;;
+            2) run_server api "$port" ;;
+            3) run_server worker ;;
+            4) local srv_port=""; ask srv_port "Порт" "$port"; run_server all "$srv_port" ;;
+            5) exec "$VENV_PY" scripts/check_offline.py --stage post --online ;;
+            6) exec "$VENV_PY" -m pytest tests/ -q --ignore=tests/e2e ;;
+            7) exec "$VENV_PY" src/cli/classify_manual.py ;;
+            8) exec "$VENV_PY" src/cli/operator_cli.py ;;
+            9) select_llm ;;
             *) warn "нет такого пункта"; [ -t 0 ] || exit 2 ;;
         esac
     done
 }
 
 case "${1:-menu}" in
-    server)   run_server "${2:-}" ;;
+    server)   run_server all "${2:-}" ;;
+    api)      run_server api "${2:-}" ;;
+    worker)   run_server worker ;;
     check)    exec "$VENV_PY" scripts/check_offline.py --stage post --online ;;
     tests)    exec "$VENV_PY" -m pytest tests/ -q --ignore=tests/e2e ;;
     operator) exec "$VENV_PY" src/cli/operator_cli.py ;;
     classify) exec "$VENV_PY" src/cli/classify_manual.py ;;
     menu)     menu ;;
-    -h|--help) sed -n '2,12p' "$0" ;;
+    -h|--help) sed -n '2,14p' "$0" ;;
     *) printf 'Неизвестная команда: %s (см. --help)\n' "$1" >&2; exit 2 ;;
 esac

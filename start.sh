@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 # Запуск классификатора на Linux. Аналог start.cmd.
 #
-#   ./start.sh [docker]             весь стек в Docker (по умолчанию)
-#   ./start.sh local [--port N]     PostgreSQL и RabbitMQ в Docker, API и воркеры из venv
+#   ./start.sh [all] [--port N]     PostgreSQL в Docker, API и воркеры из venv (по умолчанию;
+#                                   local — прежнее имя этого режима)
+#   ./start.sh api [--port N]       PostgreSQL в Docker, API — без воркеров (воркеры на других машинах)
+#   ./start.sh worker               только воркеры; база — DATABASE_URL из .env (другая машина)
+#   ./start.sh docker [--no-workers]  весь стек в Docker (--no-workers: postgres, migrate, api)
 #   ./start.sh migrate              только схема БД + импорт файлов (БД уже должна работать)
 #
-#   --training                      дополнительно поднять воркер дообучения
-#   (--port только для local; в docker порт API задаёт HOST_PORT в .env)
+#   --training                      дополнительно поднять воркер дообучения (all, worker, docker)
+#   (--port для all/api; в docker порт API задаёт HOST_PORT в .env)
 #
-# Остановка: ./stop.sh [docker|local]. Логи локального режима — run/*.log.
+# Остановка: ./stop.sh [all|api|worker|docker]. Логи процессов из venv — run/*.log.
 
 set -euo pipefail
 cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
@@ -16,16 +19,19 @@ cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 # shellcheck source=scripts/install_common.sh
 . scripts/install_common.sh
 
-MODE="docker"
+MODE="all"
 TRAINING=0
+NO_WORKERS=0
 PORT_ARG=""
 
-usage() { sed -n '2,11p' "$0"; }
+usage() { sed -n '2,15p' "$0"; }
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        docker|local|migrate) MODE="$1" ;;
+        all|api|worker|docker|migrate) MODE="$1" ;;
+        local) MODE=all ;;
         --training) TRAINING=1 ;;
+        --no-workers) NO_WORKERS=1 ;;
         --port)
             [ $# -ge 2 ] || { printf 'После --port нужен номер порта\n' >&2; exit 2; }
             shift; PORT_ARG="$1" ;;
@@ -63,12 +69,17 @@ require_venv() {
     [ -x "$VENV_PY" ] || die "нет venv — сначала ./install.sh (или ./install_offline.sh)"
 }
 
-# Ждёт GET /health: 60 попыток по 2 секунды. /health всегда отвечает 200 —
-# готовность определяется по телу: нужны "db":true и "broker":true.
+# wait_health ПОРТ НУЖНЫ_ВОРКЕРЫ — ждёт GET /health. /health всегда отвечает 200 —
+# готовность определяется по телу: "db":true, а при НУЖНЫ_ВОРКЕРЫ=1 ещё и
+# "agent_ready":true (воркер классификации загрузил модель и слушает очередь;
+# поэтому и ожидание дольше: 150 попыток по 2 с против 60).
+# НУЖНЫ_ВОРКЕРЫ=0 (режимы api и docker --no-workers) — только БД и предупреждение.
 wait_health() {
-    local url="http://localhost:$1/health" i body seen=0 db=0 mq=0
+    local url="http://localhost:$1/health" need_agent="${2:-1}" tries=60 i body
+    local seen=0 db=0 agent=0
+    if [ "$need_agent" = "1" ]; then tries=150; fi
     say "жду готовности API: $url"
-    for i in $(seq 1 60); do
+    for i in $(seq 1 "$tries"); do
         if command -v curl >/dev/null 2>&1; then
             body="$(curl -fsS --max-time 5 "$url" 2>/dev/null)" || body=""
         else
@@ -77,9 +88,14 @@ wait_health() {
         if [ -n "$body" ]; then
             seen=1
             case "$body" in *'"db":true'*) db=1 ;; *) db=0 ;; esac
-            case "$body" in *'"broker":true'*) mq=1 ;; *) mq=0 ;; esac
-            if [ "$db$mq" = "11" ]; then
-                ok "API отвечает, БД и брокер доступны: $url"
+            case "$body" in *'"agent_ready":true'*) agent=1 ;; *) agent=0 ;; esac
+            if [ "$db" = "1" ] && [ "$need_agent" != "1" ]; then
+                ok "API отвечает, БД доступна: $url"
+                warn "воркеров нет — задачи копятся в очереди, пока не подключится воркер (./start.sh worker на машине воркеров)"
+                return 0
+            fi
+            if [ "$db$agent" = "11" ]; then
+                ok "API отвечает, БД доступна, воркер классификации готов: $url"
                 return 0
             fi
         fi
@@ -87,10 +103,12 @@ wait_health() {
     done
     if [ "$seen" = "1" ]; then
         [ "$db" = "1" ] || warn "API не видит PostgreSQL (\"db\": false)"
-        [ "$mq" = "1" ] || warn "API не видит RabbitMQ (\"broker\": false)"
-        die "API отвечает, но не готов за 120 с. Docker: docker compose logs api; локально: run/api.log"
+        if [ "$need_agent" = "1" ] && [ "$agent" != "1" ]; then
+            warn "нет готового воркера классификации (\"agent_ready\": false) — смотреть run/worker-classify-*.log или docker compose logs worker-classify"
+        fi
+        die "API отвечает, но не готов за $((tries * 2)) с. Docker: docker compose logs api; локально: run/api.log"
     fi
-    die "API не ответил за 120 с. Docker: docker compose logs api; локально: run/api.log"
+    die "API не ответил за $((tries * 2)) с. Docker: docker compose logs api; локально: run/api.log"
 }
 
 # Значение: переменная окружения, иначе активная строка .env, иначе по умолчанию.
@@ -103,28 +121,15 @@ env_or_file() {
     fi
 }
 
-# host:port из URL вида scheme://user:pass@host:port/...; без порта — порт по умолчанию.
-url_hostport() {
-    local rest="${1#*://}"
-    rest="${rest##*@}"
-    rest="${rest%%/*}"
-    case "$rest" in
-        *:*) printf '%s\n' "$rest" ;;
-        *) printf '%s:%s\n' "$rest" "$2" ;;
-    esac
-}
-
-# DATABASE_URL / RABBITMQ_URL для local и migrate. Не заданы (ни в окружении, ни в
-# .env) — собираются из учётных данных compose и портов POSTGRES_PORT /
-# RABBITMQ_PORT: иначе config взял бы localhost:5432/5672, где может работать
-# чужой («родной») PostgreSQL или RabbitMQ. Заданы, но порт расходится с
-# POSTGRES_PORT / RABBITMQ_PORT — остановка с понятной ошибкой.
+# DATABASE_URL для all, api и migrate. Не задан (ни в окружении, ни в .env) —
+# собирается из учётных данных compose и порта POSTGRES_PORT: иначе config взял
+# бы localhost:5432, где может работать чужой («родной») PostgreSQL. Задан, но
+# порт расходится с POSTGRES_PORT — остановка с понятной ошибкой.
+# В режиме worker не применяется: там адрес задан явно, обычно на другой хост.
 resolve_service_urls() {
-    local db_url mq_url pg_port_set mq_port_set db_hp mq_hp
+    local db_url pg_port_set db_hp
     db_url="$(env_or_file DATABASE_URL "")"
-    mq_url="$(env_or_file RABBITMQ_URL "")"
     pg_port_set="$(env_or_file POSTGRES_PORT "")"
-    mq_port_set="$(env_or_file RABBITMQ_PORT "")"
 
     if [ -z "$db_url" ]; then
         db_url="postgresql://$(env_or_file POSTGRES_USER classifier):$(env_or_file POSTGRES_PASSWORD classifier)@localhost:${pg_port_set:-5432}/$(env_or_file POSTGRES_DB classifier)"
@@ -134,25 +139,17 @@ resolve_service_urls() {
         die "DATABASE_URL указывает на порт ${db_hp##*:}, а POSTGRES_PORT=$pg_port_set — исправить одно из них в .env (иначе подключение уйдёт к другому PostgreSQL)"
     fi
 
-    if [ -z "$mq_url" ]; then
-        mq_url="amqp://$(env_or_file RABBITMQ_DEFAULT_USER classifier):$(env_or_file RABBITMQ_DEFAULT_PASS classifier)@localhost:${mq_port_set:-5672}//"
-    fi
-    mq_hp="$(url_hostport "$mq_url" 5672)"
-    if [ -n "$mq_port_set" ] && [ "${mq_hp##*:}" != "$mq_port_set" ]; then
-        die "RABBITMQ_URL указывает на порт ${mq_hp##*:}, а RABBITMQ_PORT=$mq_port_set — исправить одно из них в .env (иначе подключение уйдёт к другому RabbitMQ)"
-    fi
-
-    export DATABASE_URL="$db_url" RABBITMQ_URL="$mq_url"
-    say "PostgreSQL: $db_hp   RabbitMQ: $mq_hp"
+    export DATABASE_URL="$db_url"
+    say "PostgreSQL: $db_hp"
 }
 
-# src/ — корень импорта, модули разложены по пакетам (from core import config, queueing.celery_app).
+# src/ — корень импорта, модули разложены по пакетам (from core import config, worker.run).
 export_pythonpath() {
     export PYTHONPATH="$PWD/src${PYTHONPATH:+:$PYTHONPATH}"
 }
 
 # run_migrate ПЕРВЫЙ_ШАГ ВСЕГО_ШАГОВ — два шага: схема и импорт (номера в выводе
-# сквозные: local — 2/4 и 3/4, migrate — 1/2 и 2/2).
+# сквозные: all/api — 2/4 и 3/4, migrate — 1/2 и 2/2).
 run_migrate() {
     local first="${1:-1}" total="${2:-2}"
     require_venv
@@ -191,52 +188,101 @@ start_bg() {
     say "$name: pid $!, лог run/$name.log"
 }
 
+# Воркеры очереди из venv: CLASSIFY_WORKERS процессов классификации (один процесс —
+# одна задача, модель загружается один раз на процесс) и воркер дообучения при --training.
+start_workers() {
+    local workers i
+    workers="$(env_value CLASSIFY_WORKERS 2)"
+    case "$workers" in ''|*[!0-9]*) workers=2 ;; esac
+    if [ "$workers" -lt 1 ]; then workers=1; fi
+    mkdir -p run
+    export_pythonpath
+    for i in $(seq 1 "$workers"); do
+        start_bg "worker-classify-$i" "$VENV_PY" -m worker.run --queues classify_sync,classify
+    done
+    if [ "$TRAINING" = "1" ]; then
+        start_bg worker-training "$VENV_PY" -m worker.run --queues training
+    fi
+}
+
 start_docker() {
     require_docker
     ensure_env
-    local profile=()
+    local profile=() need_agent=1
     if [ "$TRAINING" = "1" ]; then profile=(--profile training); fi
     banner "Запуск стека в Docker"
     if [ -n "$PORT_ARG" ]; then
         warn "--port $PORT_ARG в режиме docker не действует: порт API задаёт HOST_PORT в .env ($(env_value HOST_PORT 8010))"
     fi
-    docker compose ${profile[@]+"${profile[@]}"} up -d --build
-    wait_health "$(env_value HOST_PORT 8010)"
+    if [ "$NO_WORKERS" = "1" ]; then
+        if [ "$TRAINING" = "1" ]; then warn "--training вместе с --no-workers не действует"; fi
+        need_agent=0
+        docker compose up -d --build postgres migrate api
+    else
+        docker compose ${profile[@]+"${profile[@]}"} up -d --build
+    fi
+    wait_health "$(env_value HOST_PORT 8010)" "$need_agent"
     say "бэк-офис: http://localhost:$(env_value HOST_PORT 8010)/backoffice"
 }
 
+# Режимы all и api: PostgreSQL в Docker, миграция, API из venv; в all — и воркеры.
 start_local() {
     require_docker
     require_venv
     ensure_env
-    banner "Локальный запуск: инфраструктура в Docker, сервис из venv"
-    resolve_service_urls  # до docker compose: ошибка портов — сразу
-    step "1/4" "PostgreSQL и RabbitMQ"
-    docker compose up -d --wait postgres rabbitmq
+    local port host need_agent=0
+    if [ "$MODE" = "all" ]; then
+        banner "Запуск всего: PostgreSQL в Docker, API и воркеры из venv"
+    else
+        banner "Запуск без воркеров: PostgreSQL в Docker, API из venv"
+        if [ "$TRAINING" = "1" ]; then warn "--training в режиме api не действует (воркеров нет)"; fi
+    fi
+    resolve_service_urls  # до docker compose: ошибка порта — сразу
+    step "1/4" "PostgreSQL"
+    docker compose up -d --wait postgres
     run_migrate 2 4
 
-    local port host concurrency
     port="${PORT_ARG:-$(env_value API_PORT 8010)}"
     host="$(env_value API_HOST 0.0.0.0)"
-    concurrency="$(env_value CLASSIFY_CONCURRENCY 2)"
     mkdir -p run
 
-    step "4/4" "API и воркеры"
-    # Порт занят не нашим API (обычно — api docker-стека: ./start.sh публикует
+    if [ "$MODE" = "all" ]; then
+        step "4/4" "API и воркеры"
+    else
+        step "4/4" "API"
+    fi
+    # Порт занят не нашим API (обычно — api docker-стека: ./start.sh docker публикует
     # HOST_PORT=8010): uvicorn упал бы в фоне, а /health ответил бы чужой сервис.
     if ! pidfile_alive api && port_in_use "$port"; then
-        die "порт $port уже занят. Если запущен docker-стек — остановить: ./stop.sh; иначе другой порт: ./start.sh local --port N"
+        die "порт $port уже занят. Если запущен docker-стек — остановить: ./stop.sh docker; иначе другой порт: ./start.sh $MODE --port N"
     fi
     start_bg api "$VENV_PY" -m uvicorn api.api_server:app --app-dir src --host "$host" --port "$port"
-    # prefork: один процесс-мастер, CLASSIFY_CONCURRENCY дочерних классификаций.
-    start_bg worker-classify "$VENV_PY" -m celery -A queueing.celery_app worker \
-        -Q classify_sync,classify --pool=prefork -c "$concurrency" -n "classify@%h" --loglevel=INFO
-    if [ "$TRAINING" = "1" ]; then
-        start_bg worker-training "$VENV_PY" -m celery -A queueing.celery_app worker \
-            -Q training --pool=prefork -c 1 -n "training@%h" --loglevel=INFO
+    if [ "$MODE" = "all" ]; then
+        need_agent=1
+        start_workers
     fi
-    wait_health "$port"
-    say "бэк-офис: http://localhost:$port/backoffice   остановка: ./stop.sh local"
+    wait_health "$port" "$need_agent"
+    say "бэк-офис: http://localhost:$port/backoffice   остановка: ./stop.sh $MODE"
+}
+
+# Режим worker: только воркеры, без Docker, миграции и API. База — DATABASE_URL
+# этой машины (окружение или .env), обычно на другом хосте; сверка с
+# POSTGRES_PORT здесь не делается. Перед запуском — проверка, что база отвечает.
+start_worker_mode() {
+    require_venv
+    ensure_env
+    banner "Только воркеры: база данных на главном сервере"
+    local db_url db_hp
+    db_url="$(env_or_file DATABASE_URL "")"
+    [ -n "$db_url" ] || die "DATABASE_URL не задан — указать в .env адрес базы главного сервера (postgresql://пользователь:пароль@хост:порт/база)"
+    db_hp="$(url_hostport "$db_url" 5432)"
+    say "PostgreSQL: $db_hp"
+    export DATABASE_URL="$db_url"
+    db_reachable "$db_url" \
+        || die "PostgreSQL $db_hp не ответил за 5 с — проверить DATABASE_URL в .env, POSTGRES_BIND=0.0.0.0 и открытый порт на главном сервере"
+    ok "база отвечает"
+    start_workers
+    say "логи: run/worker-*.log   остановка: ./stop.sh worker"
 }
 
 # Подключение через `source` (тесты функций) — без запуска.
@@ -244,8 +290,14 @@ if [ "${BASH_SOURCE[0]}" != "$0" ]; then
     return 0
 fi
 
+if [ "$NO_WORKERS" = "1" ] && [ "$MODE" != "docker" ]; then
+    warn "--no-workers действует только в режиме docker (без воркеров из venv: ./start.sh api)"
+fi
+
 case "$MODE" in
+    all) start_local ;;
+    api) start_local ;;
+    worker) start_worker_mode ;;
     docker) start_docker ;;
-    local) start_local ;;
     migrate) ensure_env; run_migrate 1 2; ok "миграция завершена" ;;
 esac

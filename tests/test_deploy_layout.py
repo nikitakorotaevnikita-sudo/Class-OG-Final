@@ -19,8 +19,10 @@ START_SH = ROOT / "start.sh"
 STOP_SH = ROOT / "stop.sh"
 START_CMD = ROOT / "start.cmd"
 STOP_CMD = ROOT / "stop.cmd"
-SH_SCRIPTS = [START_SH, STOP_SH]
-CMD_SCRIPTS = [START_CMD, STOP_CMD]
+SH_SCRIPTS = [START_SH, STOP_SH, ROOT / "launch.sh", ROOT / "install.sh",
+              ROOT / "install_offline.sh"]
+CMD_SCRIPTS = [START_CMD, STOP_CMD, ROOT / "launch.bat", ROOT / "install.bat",
+               ROOT / "install_offline.bat", ROOT / "scripts" / "setup_infra.cmd"]
 ALL_SCRIPTS = SH_SCRIPTS + CMD_SCRIPTS
 
 EXPECTED_SERVICES = {"postgres", "migrate", "api",
@@ -188,17 +190,20 @@ def test_sh_files_have_lf_and_strict_mode():
 
 def test_start_sh_has_modes():
     text = START_SH.read_text(encoding="utf-8")
-    for mode in ("docker)", "local)", "migrate)"):
+    for mode in ("all)", "api)", "worker)", "docker)", "migrate)"):
         assert mode in text, f"start.sh: нет режима {mode}"
-    assert "--training" in text
+    assert "--training" in text and "--no-workers" in text
     assert "run/" in text and ".pid" in text
+    assert "-m worker.run --queues classify_sync,classify" in text
+    assert "-m worker.run --queues training" in text
 
 
 def test_start_cmd_has_modes():
     text = START_CMD.read_text(encoding="utf-8")
-    for mode in ("docker", "local", "migrate", "--training"):
+    for mode in ("docker", "local", "all", "api", "worker", "migrate", "--training",
+                 "--no-workers"):
         assert mode in text
-    assert "--pool=solo" in text
+    assert "-m worker.run --queues classify_sync,classify" in text
     assert "CLASSIFY_WORKERS" in text
     assert 'start "classifier-' in text
 
@@ -291,7 +296,7 @@ def test_step_labels_are_numbered_consistently():
     assert "run_migrate 1 2" in sh  # режим migrate
     migrate_sh = body_of_sh(sh, "run_migrate")
     assert 'step "$first/$total"' in migrate_sh
-    local_cmd = body_of_cmd(cmd, "local", "migrate_only")
+    local_cmd = body_of_cmd(cmd, "local", "worker")
     assert "[1/4]" in local_cmd and "[4/4]" in local_cmd
     assert "call :run_migrate 2 4" in local_cmd
     assert "call :run_migrate 1 2" in body_of_cmd(cmd, "migrate_only", "run_migrate")
@@ -312,7 +317,7 @@ def test_local_mode_refuses_a_busy_api_port():
     sh = body_of_sh(START_SH.read_text(encoding="utf-8"), "start_local")
     assert "port_in_use" in sh
     assert sh.index("port_in_use") < sh.index("start_bg api")
-    cmd = body_of_cmd(START_CMD.read_text(encoding="utf-8"), "local", "migrate_only")
+    cmd = body_of_cmd(START_CMD.read_text(encoding="utf-8"), "local", "worker")
     assert "netstat" in cmd and "LISTENING" in cmd
     assert cmd.index("netstat") < cmd.index('start "classifier-api"')
 
@@ -360,8 +365,8 @@ SETUP_INFRA_CMD = ROOT / "scripts" / "setup_infra.cmd"
 def test_setup_infra_cmd_flow():
     text = SETUP_INFRA_CMD.read_text(encoding="utf-8")
     order = ["setup_infra_env.py", "docker info", "docker compose version",
-             "docker image inspect pgvector/pgvector:pg16 rabbitmq:3.13-management",
-             "docker compose up -d --wait postgres rabbitmq", 'start.cmd" migrate']
+             "docker image inspect pgvector/pgvector:pg16 >nul",
+             "docker compose up -d --wait postgres\n", 'start.cmd" migrate']
     code = text[text.index('cd /d "%~dp0.."'):]  # без шапки-комментария
     positions = [code.index(item) for item in order]
     assert positions == sorted(positions), order
@@ -383,3 +388,20 @@ def test_bat_installers_run_setup_infra(name, arg):
     assert text.index("LLM_PROVIDER") < text.index(call)
     # код выхода — неуспех шага инфраструктуры (оба установщика одинаково)
     assert "\nexit /b !INFRA_FAILED!\n" in text
+
+
+@pytest.mark.parametrize("name,arg", [("install.bat", ""), ("install_offline.bat", " offline")])
+def test_bat_installers_worker_only_question_skips_setup_infra(name, arg):
+    """Машина «только воркеры»: DATABASE_URL в .env, без Docker и setup_infra."""
+    text = (ROOT / name).read_text(encoding="utf-8", errors="replace")
+    assert "only for workers? [y/N]" in text
+    assert 'set "WORKER_ONLY=1"' in text
+    call = 'call "%PROJECT%\\scripts\\setup_infra.cmd"' + arg
+    assert text.count(call) == 1
+    skip = 'if "!WORKER_ONLY!"=="1" goto :infra_done'
+    assert skip in text
+    assert text.index(skip) < text.index(call) < text.index("\n:infra_done\n")
+    # DATABASE_URL уходит в .env через переменную окружения, а не в текст команды
+    assert "$env:DB_URL_IN" in text
+    assert "DATABASE_URL=!DB_URL!" not in text and "echo !DB_URL!" not in text
+    assert "start.cmd worker" in text and "stop.cmd worker" in text
