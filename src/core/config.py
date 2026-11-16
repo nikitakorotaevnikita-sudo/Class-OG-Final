@@ -35,7 +35,7 @@ OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
 
 # ── Ario API (OpenAI-compatible) ───────────────────────────────────────────────
 ARIO_API_KEY: str = os.environ.get("ARIO_API_KEY", "")
-ARIO_BASE_URL: str = os.getenv("ARIO_BASE_URL", "https://gpt.ario.directum360.ru/v1")
+ARIO_BASE_URL: str = os.getenv("ARIO_BASE_URL", "https://llm.ario.directum360.ru/v1")
 ARIO_MODEL: str = os.getenv("ARIO_MODEL", "Qwen/Qwen3-32B-AWQ")
 
 # ── Произвольный OpenAI-совместимый endpoint ───────────────────────────────────

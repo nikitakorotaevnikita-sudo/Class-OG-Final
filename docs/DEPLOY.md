@@ -40,7 +40,7 @@
 # LLM
 LLM_PROVIDER=ario
 ARIO_API_KEY=<ключ>
-ARIO_BASE_URL=https://gpt.ario.directum360.ru/v1
+ARIO_BASE_URL=https://llm.ario.directum360.ru/v1
 ARIO_MODEL=Qwen/Qwen3.6-35B-A3B
 
 # Доступ к Directum RX — НЕОБЯЗАТЕЛЕН.

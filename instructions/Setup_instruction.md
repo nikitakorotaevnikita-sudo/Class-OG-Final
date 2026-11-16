@@ -84,7 +84,7 @@ Python нужен для режима «local», для установщиков
 | `huggingface.co` | Скачать модель эмбеддингов при первом запуске воркера | Если модели ещё нет в кеше. Без интернета — см. [раздел 5](#5-установка-без-интернета) |
 | PyPI и `download.pytorch.org` | Установить библиотеки Python, собрать образ Docker | При установке и при сборке образа |
 | Docker Hub | Скачать образы `pgvector/pgvector:pg16` и `rabbitmq:3.13-management` | При первой установке |
-| Адрес LLM | Классификация. Например, `https://gpt.ario.directum360.ru/v1` (Ario, доступен из корпоративной сети или по VPN) или адрес vLLM Заказчика в его сети | Всегда |
+| Адрес LLM | Классификация. Например, `https://llm.ario.directum360.ru/v1` (Ario, доступен из корпоративной сети или по VPN) или адрес vLLM Заказчика в его сети | Всегда |
 | OData Directum RX | Забрать текст документа по его номеру | Только если RX вызывает сервис по `document_id` без текста |
 | Входящие подключения на порт API (8010) | RX и пользователи обращаются к сервису | Всегда |
 
@@ -140,8 +140,7 @@ Python нужен для режима «local», для установщиков
    | `5` | `gemini` — облако, 20 запросов в сутки бесплатно | `GEMINI_API_KEY` |
 
    Для Ario в квадратных скобках предлагается адрес `https://llm.ario.directum360.ru/v1`; Enter
-   принимает его. Если вам выдали другой адрес (в `.env.example` стоит
-   `https://gpt.ario.directum360.ru/v1`), введите его. Если ключ не ввести, скрипт напишет
+   принимает его. Если вам выдали другой адрес, введите его. Если ключ не ввести, скрипт напишет
    `SKIPPED` — ключ можно вписать в `.env` позже.
 
 2. `RX OData URL`, `RX User`, `RX Password` — подключение к Directum RX. Нужны **только** если RX
@@ -398,7 +397,7 @@ curl http://localhost:8010/health
 | Ключ | Пример | Что задаёт |
 |---|---|---|
 | `LLM_PROVIDER` | `ario` | Какая LLM отвечает: `ario`, `custom`, `ollama`, `groq`, `gemini` |
-| `ARIO_BASE_URL` | `https://gpt.ario.directum360.ru/v1` | Адрес Ario |
+| `ARIO_BASE_URL` | `https://llm.ario.directum360.ru/v1` | Адрес Ario |
 | `ARIO_MODEL` | `Qwen/Qwen3.8-27B-Ario` | Имя модели на Ario |
 | `ARIO_API_KEY` | — | Токен Ario |
 | `CUSTOM_LLM_BASE_URL` | `http://10.0.0.5:8000/v1` | Адрес OpenAI-совместимого сервера Заказчика (vLLM, LM Studio) |
