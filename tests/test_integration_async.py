@@ -32,7 +32,8 @@ class _FakeAgent:
         self.boom = boom
         self.calls = 0
 
-    def classify(self, text, llm_provider=None, llm_model=None, appeal_id=None, log_conn=None):
+    def classify(self, text, llm_provider=None, llm_model=None, appeal_id=None, log_conn=None,
+                 defer_card=False):
         self.calls += 1
         time.sleep(self.delay)
         if self.boom:

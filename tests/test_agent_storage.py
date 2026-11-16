@@ -180,6 +180,26 @@ def test_classify_reraises_logging_error_with_log_conn(fake_st, monkeypatch):
         agent.classify("текст", appeal_id=appeal_id, log_conn=object())
 
 
+def test_classify_defer_card_returns_result_without_writing(fake_st, monkeypatch):
+    """Воркер: карточку пишет он сам в финальной транзакции задачи (defer_card)."""
+    storage = _storage()
+    agent = ClassifierAgent(storage=storage)
+    _classify_ready(monkeypatch, agent)
+    writes = []
+    monkeypatch.setattr(storage.appeals, "save_result", lambda *a, **k: writes.append(1))
+    appeal_id = storage.appeals.create("Прошу помочь с вопросом")
+
+    result = agent.classify("Прошу помочь с вопросом", appeal_id=appeal_id, defer_card=True)
+
+    assert writes == []
+    assert result.log_id == appeal_id
+    card = result.appeal_result
+    assert card.summary == "суть" and card.llm_model == "test-model"
+    assert card.questions[0].selected_code == "0001.0001.0001.0001"
+    # журнал запросов к LLM пишется сразу, без транзакции воркера
+    assert any(r["appeal_id"] == appeal_id for r in storage.appeals._llm_log)
+
+
 def test_reload_model_if_changed(fake_st):
     storage = _storage()
     agent = ClassifierAgent(storage=storage)

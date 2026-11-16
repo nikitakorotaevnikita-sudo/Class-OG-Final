@@ -17,7 +17,8 @@ def _question(code=CODE, name="Вывоз мусора"):
 
 
 class FakeAgent:
-    """Агент без модели: пишет карточку через storage на log_conn, как настоящий."""
+    """Агент без модели, как настоящий: пишет карточку через storage (на log_conn),
+    а с defer_card=True только возвращает её в result.appeal_result."""
 
     model_version = 0
 
@@ -28,9 +29,10 @@ class FakeAgent:
         self.delay = delay
         self.calls = []
 
-    def classify(self, text, llm_provider=None, llm_model=None, appeal_id=None, log_conn=None):
+    def classify(self, text, llm_provider=None, llm_model=None, appeal_id=None, log_conn=None,
+                 defer_card=False):
         self.calls.append(dict(text=text, llm_provider=llm_provider, llm_model=llm_model,
-                               appeal_id=appeal_id, log_conn=log_conn))
+                               appeal_id=appeal_id, log_conn=log_conn, defer_card=defer_card))
         if self.delay:
             import time
 
@@ -38,7 +40,7 @@ class FakeAgent:
         if self.error is not None:
             raise self.error
         questions = [_question(c) for c in self.codes]
-        self.storage.appeals.save_result(appeal_id, AppealResult(
+        card = AppealResult(
             summary="суть", applicant_fio="Иванов И.И.", applicant_email=None,
             vid_obrascheniya="Заявление", tip_obrascheniya="Письменное", is_ustnoe=False,
             overall_confidence=0.9, needs_verification=False, full_fallback_used=False,
@@ -50,13 +52,16 @@ class FakeAgent:
                                   alternative_codes=[])
                 for i, q in enumerate(questions, 1)
             ],
-        ), conn=log_conn)
+        )
+        if not defer_card:
+            self.storage.appeals.save_result(appeal_id, card, conn=log_conn)
         return SimpleNamespace(
             questions=questions, log_id=appeal_id, vid_obrascheniya="Заявление",
             tip_obrascheniya="Письменное", is_ustное=False, overall_confidence=0.9,
             needs_verification=False, llm_provider=llm_provider or "ario",
             llm_model=llm_model or "qwen", full_fallback_used=False,
             applicant_fio="Иванов И.И.", applicant_email=None, summary="суть",
+            appeal_result=card if defer_card else None,
         )
 
     def format_for_operator(self, result):

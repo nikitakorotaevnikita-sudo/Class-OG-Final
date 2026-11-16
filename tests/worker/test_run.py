@@ -254,7 +254,7 @@ def test_training_worker_needs_no_agent(storage, hooks, monkeypatch):
     seen = {}
 
     def fake_training(st, source="combined", force=False, still_owner=None):
-        seen.update(source=source, force=force, owner=still_owner())
+        seen.update(source=source, force=force, owner=still_owner(None))
         return {"status": "completed", "message": "ok"}
 
     monkeypatch.setattr(finetune_model, "run_training", fake_training)
@@ -339,3 +339,141 @@ def test_entry_point_help(how):
                           encoding="utf-8", errors="replace", timeout=120)
     assert proc.returncode == 0, proc.stderr
     assert "--queues" in proc.stdout
+
+
+# ── PostgreSQL: аренда под реальными блокировками строк и соединение LISTEN ──
+
+@pytest.fixture
+def pg_url(pg_conn):
+    return os.environ["TEST_DATABASE_URL"]
+
+
+@pytest.fixture
+def pg_storage(pg_conn, pg_url):
+    """PgStorage с отдельным соединением на транзакцию (как пул), в схеме теста."""
+    from contextlib import contextmanager
+
+    from pgvector.psycopg import register_vector
+    from storage.pg import PgStorage
+
+    schema = pg_conn.execute("SELECT current_schema()").fetchone()[0]
+
+    @contextmanager
+    def connect():
+        with psycopg.connect(pg_url, options=f"-c search_path={schema},public") as conn:
+            register_vector(conn)
+            yield conn
+
+    return PgStorage(connect)
+
+
+@pytest.mark.db
+def test_lease_extended_on_postgres_during_long_task(pg_storage, hooks, caplog):
+    """Работа (LLM) идёт вне транзакции: продление аренды не ждёт блокировку строки."""
+    storage = pg_storage
+    job = _classify_job(storage)
+    slow = FakeAgent(storage, delay=1.5)
+    other = FakeAgent(storage)
+    first = worker_run.Worker(storage, CLASSIFY_QUEUES, "host:1", lambda: slow,
+                              poll_sec=0.1, lease_sec=0.6, listen_dsn=None)
+    second = worker_run.Worker(storage, CLASSIFY_QUEUES, "host:2", lambda: other,
+                               poll_sec=0.1, lease_sec=0.6, listen_dsn=None)
+    leases = []
+
+    t = threading.Thread(target=first.run_once)
+    with caplog.at_level("WARNING", logger="worker.run"):
+        t.start()
+        try:
+            time.sleep(0.2)
+            while t.is_alive():
+                assert second.run_once() is False
+                current = storage.jobs.get(job.id)
+                if current.status == "running":
+                    leases.append(current.locked_until)
+                time.sleep(0.15)
+        finally:
+            t.join(10)
+
+    done = storage.jobs.get(job.id)
+    assert done.status == "done" and done.attempts == 1 and done.worker_id == "host:1"
+    assert other.calls == []
+    assert len(set(leases)) >= 3 and max(leases) > min(leases)  # locked_until сдвигался
+    assert "аренда потеряна" not in caplog.text
+    n = storage.appeals.as_log_entries()
+    assert [q["selected_code"] for q in n[0]["agent_questions"]] == [CODE]
+
+
+def _notify_later(url, payload, delay=0.3):
+    def go():
+        time.sleep(delay)
+        with psycopg.connect(url, autocommit=True) as c:
+            c.execute("SELECT pg_notify('job_queued', %s)", (payload,))
+
+    threading.Thread(target=go, daemon=True).start()
+
+
+@pytest.fixture
+def listener(pg_url):
+    lst = worker_run._Listener(pg_url, worker_run.application_name(["classify"]), ["classify"])
+    assert lst.connect()
+    yield lst
+    lst.close()
+
+
+@pytest.mark.db
+def test_listener_wakes_on_own_queue(listener, pg_url):
+    _notify_later(pg_url, "classify")
+    start = time.monotonic()
+    listener.wait(5, threading.Event())
+    assert time.monotonic() - start < 3
+
+
+@pytest.mark.db
+def test_listener_ignores_foreign_queue(listener, pg_url):
+    _notify_later(pg_url, "training", delay=0.1)
+    start = time.monotonic()
+    listener.wait(1.5, threading.Event())
+    assert time.monotonic() - start >= 1.3
+
+
+@pytest.mark.db
+def test_listener_reconnects_after_backend_terminated(listener, pg_conn, pg_url):
+    old_pid = listener._conn.info.backend_pid
+    pg_conn.execute("SELECT pg_terminate_backend(%s)", (old_pid,))
+    stop = threading.Event()
+    for _ in range(3):  # обрыв замечается, затем переподключение
+        listener.wait(1, stop)
+        if listener._conn is not None and listener._conn.info.backend_pid != old_pid:
+            break
+    assert listener._conn is not None and listener._conn.info.backend_pid != old_pid
+    # и снова слушает
+    _notify_later(pg_url, "classify")
+    start = time.monotonic()
+    listener.wait(5, stop)
+    assert time.monotonic() - start < 3
+
+
+@pytest.mark.db
+def test_listener_application_name_in_pg_stat_activity(listener, pg_conn, pg_storage):
+    pid = listener._conn.info.backend_pid
+    row = pg_conn.execute("SELECT application_name FROM pg_stat_activity WHERE pid = %s",
+                          (pid,)).fetchone()
+    assert row == ("classifier-worker:classify",)
+    assert "classifier-worker:classify" in pg_storage.jobs.live_workers("classify")
+
+
+def test_second_signal_restores_default_handler(monkeypatch):
+    import signal
+
+    installed = {}
+    monkeypatch.setattr(signal, "signal", lambda sig, h: installed.__setitem__(sig, h))
+    stop = threading.Event()
+    worker_run._install_signal_handlers(stop)
+    handler = installed[signal.SIGINT]
+    assert callable(handler) and handler is not signal.SIG_DFL
+
+    handler(signal.SIGINT, None)
+
+    assert stop.is_set()
+    assert installed[signal.SIGINT] is signal.SIG_DFL  # второй Ctrl+C — немедленный выход
+    assert installed[signal.SIGTERM] is signal.SIG_DFL

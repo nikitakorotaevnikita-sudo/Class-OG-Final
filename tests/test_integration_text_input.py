@@ -33,7 +33,8 @@ class _FakeAgent:
     def __init__(self):
         self.seen_text = None
 
-    def classify(self, text, llm_provider=None, llm_model=None, appeal_id=None, log_conn=None):
+    def classify(self, text, llm_provider=None, llm_model=None, appeal_id=None, log_conn=None,
+                 defer_card=False):
         self.seen_text = text
         return _Result(applicant_fio="Иванов И.И.", summary="суть",
                        questions=[_Q(code="0005.0005.0056.1160",
@@ -115,7 +116,8 @@ def test_applicant_email_returned_in_response(monkeypatch):
     monkeypatch.setattr(rx_client, "get_document_text", _boom)
 
     class _AgentWithEmail(_FakeAgent):
-        def classify(self, text, llm_provider=None, llm_model=None, appeal_id=None, log_conn=None):
+        def classify(self, text, llm_provider=None, llm_model=None, appeal_id=None, log_conn=None,
+                     defer_card=False):
             result = super().classify(text)
             result.applicant_email = "zayavitel@mail.ru"
             return result

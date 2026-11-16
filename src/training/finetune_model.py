@@ -215,7 +215,7 @@ def _train_and_register(storage, active, version: int, output_path: Path, source
                         train_fn: TrainFn, train_examples: list, val_examples: list,
                         annotated_codes: int, total_pairs: int, verified_pairs: int,
                         historical_pairs: int, say,
-                        still_owner: Optional[Callable[[], bool]] = None,
+                        still_owner: Optional[Callable[[object], bool]] = None,
                         ) -> tuple[bool, float, float]:
     """Обучение в output_path, векторы версии N, регистрация (одна транзакция).
 
@@ -269,11 +269,11 @@ def _train_and_register(storage, active, version: int, output_path: Path, source
         report=report,
         adapter=None,
     )
-    if still_owner is not None and not still_owner():
-        # Аренда задачи истекла (воркер дообучения признан пропавшим): версию
-        # регистрирует только владелец задачи.
-        raise RuntimeError(NOT_OWNER_MESSAGE)
     with storage.transaction() as conn:
+        if still_owner is not None and not still_owner(conn):
+            # Аренда задачи истекла (воркер дообучения признан пропавшим): версию
+            # регистрирует только владелец задачи.
+            raise RuntimeError(NOT_OWNER_MESSAGE)
         kw = {} if conn is None else {"conn": conn}
         try:
             storage.models.register_new(mv, **kw)
@@ -288,7 +288,7 @@ def _train_and_register(storage, active, version: int, output_path: Path, source
 
 def run_training(storage, source: str = "combined", force: bool = False,
                  train_fn: Optional[TrainFn] = None,
-                 still_owner: Optional[Callable[[], bool]] = None) -> dict:
+                 still_owner: Optional[Callable[[object], bool]] = None) -> dict:
     """Дообучение с регистрацией версии в ml_model_registry.
 
     Возвращает {status: completed|failed|skipped, message, model_path, version,
@@ -296,9 +296,10 @@ def run_training(storage, source: str = "combined", force: bool = False,
     пробрасываются (status "failed"); версия регистрируется только после того,
     как построены её векторы.
 
-    still_owner — проверка владения задачей дообучения (воркер очереди): вызывается
-    непосредственно перед регистрацией версии; False → версия не регистрируется,
-    папка модели удаляется, status "failed".
+    still_owner(conn) — проверка владения задачей дообучения (воркер очереди):
+    вызывается первой внутри транзакции регистрации версии, с её соединением
+    (блокировка строки задачи держится до commit регистрации); False → версия
+    не регистрируется, папка модели удаляется, status "failed".
     """
     log: list[str] = []
 
@@ -325,7 +326,7 @@ def run_training(storage, source: str = "combined", force: bool = False,
 
 
 def _train(storage, source: str, force: bool, train_fn: TrainFn, result: dict, say,
-           still_owner: Optional[Callable[[], bool]] = None) -> None:
+           still_owner: Optional[Callable[[object], bool]] = None) -> None:
     if source not in SOURCES:
         raise ValueError(f"Неизвестный источник данных: {source!r} (ожидается {', '.join(SOURCES)})")
 

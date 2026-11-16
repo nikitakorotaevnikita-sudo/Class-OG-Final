@@ -50,7 +50,7 @@ elif str(_SRC) not in sys.path:
 
 from core import config  # noqa: E402
 from queueing import tasks  # noqa: E402
-from storage.models import JOB_QUEUES, STATUS_DONE, WORKER_APP_PREFIX  # noqa: E402
+from storage.models import JOB_QUEUES, WORKER_APP_PREFIX  # noqa: E402
 
 log = logging.getLogger("worker.run")
 
@@ -117,7 +117,11 @@ class _Listener:
         return True
 
     def wait(self, timeout: float, stop: threading.Event) -> None:
-        """Ждать сигнала для своей очереди не дольше timeout секунд."""
+        """Ждать сигнала для своей очереди не дольше timeout секунд.
+
+        stop проверяется только между уведомлениями: остановка простаивающего
+        воркера занимает до timeout (QUEUE_POLL_SEC, 5 с) — это допустимо.
+        """
         if self._conn is None or self._conn.closed:
             if not self.connect():
                 stop.wait(timeout)
@@ -230,8 +234,9 @@ class Worker:
         while not done.wait(interval):
             try:
                 if not self.storage.jobs.extend_lease(job.id, job.attempts, self.lease_sec):
-                    log.warning("Задача %s: аренда потеряна (задачей владеет другая попытка)",
-                                job.id)
+                    if not done.is_set():  # не гонка с только что завершённой задачей
+                        log.warning("Задача %s: аренда потеряна (задачей владеет другая "
+                                    "попытка)", job.id)
                     return
             except Exception as exc:  # noqa: BLE001 — БД недоступна: пробуем снова
                 log.warning("Задача %s: продление аренды не удалось (%s: %s)",
@@ -253,18 +258,7 @@ class Worker:
             log.exception("Задача %s: непредвиденный сбой", job.id)
             self._finish_error(job, f"{type(exc).__name__}: {exc}")
             return
-        if job.job_type == "embed_annotation" and transitioned:
-            self._delete_if_done(job)
-
-    def _delete_if_done(self, job) -> None:
-        """Векторы аннотаций никто не опрашивает: успешную задачу удаляем сразу."""
-        try:
-            finished = self.storage.jobs.get(job.id)
-            if finished is not None and finished.status == STATUS_DONE:
-                self.storage.jobs.delete(job.id)
-        except Exception as exc:  # noqa: BLE001 — строку удалит чистка по TTL
-            log.warning("Задача %s: удалить не удалось (%s: %s)",
-                        job.id, type(exc).__name__, exc)
+        tasks.delete_if_embed_done(self.storage, job, transitioned)
 
     def _retry(self, job, error: str) -> None:
         """Сбой инфраструктуры: вернуть задачу в очередь с паузой или завершить ошибкой."""
@@ -324,15 +318,25 @@ class Worker:
             log.info("Воркер %s остановлен", self.worker_id)
 
 
-def _install_signal_handlers(stop: threading.Event) -> None:
-    def handler(signum, _frame):
-        log.info("Сигнал %s: доделываем текущую задачу и выходим", signum)
-        stop.set()
+_STOP_SIGNALS = ("SIGINT", "SIGTERM", "SIGBREAK")
 
-    for name in ("SIGINT", "SIGTERM", "SIGBREAK"):
-        sig = getattr(signal, name, None)
-        if sig is None:
-            continue
+
+def _install_signal_handlers(stop: threading.Event) -> None:
+    """Первый сигнал — мягкая остановка (задача доделывается); после него
+    обработчики сброшены по умолчанию, и второй Ctrl+C завершает процесс сразу."""
+    sigs = [getattr(signal, name) for name in _STOP_SIGNALS if hasattr(signal, name)]
+
+    def handler(signum, _frame):
+        log.info("Сигнал %s: доделываем текущую задачу и выходим "
+                 "(повторный сигнал — немедленный выход)", signum)
+        stop.set()
+        for sig in sigs:
+            try:
+                signal.signal(sig, signal.SIG_DFL)
+            except (ValueError, OSError):
+                pass
+
+    for sig in sigs:
         try:
             signal.signal(sig, handler)
         except (ValueError, OSError):  # не главный поток / сигнал недоступен

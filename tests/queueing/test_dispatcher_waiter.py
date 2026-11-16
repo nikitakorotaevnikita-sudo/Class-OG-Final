@@ -475,6 +475,30 @@ def test_local_dispatcher_shutdown_waits_for_finetune_thread(monkeypatch):
     assert disp._finetune_threads and not any(t.is_alive() for t in disp._finetune_threads)
 
 
+def test_local_dispatcher_deletes_embed_annotation_after_success():
+    """Как воркер: успешная задача векторов аннотации удаляется сразу."""
+    import numpy as np
+    from storage.models import ModelVersion
+
+    class Agent:
+        def embed_passage(self, text):
+            return np.ones(768, dtype=np.float32)
+
+    storage = MemoryStorage()
+    storage.models.register(ModelVersion(0, "base", "m0", True))
+    vid = storage.classifier.add_annotation("0001.0001.0001.0001", "пояснение", 0)
+    ok = storage.jobs.create("embed_annotation", {"vector_id": vid})
+    bad = storage.jobs.create("embed_annotation", {"vector_id": 999})
+    disp = LocalDispatcher(storage, agent_factory=Agent)
+    disp.send("embed_annotation", {"job_id": ok.id}, queue="classify")
+    disp.send("embed_annotation", {"job_id": bad.id}, queue="classify")
+    disp.shutdown(timeout=5)
+
+    assert storage.jobs.get(ok.id) is None
+    assert storage.classifier.pending_annotations(0) == []
+    assert storage.jobs.get(bad.id).status == "error"  # ошибка остаётся видна
+
+
 def test_local_dispatcher_unknown_task():
     disp = LocalDispatcher(MemoryStorage(), agent_factory=lambda: None)
     with pytest.raises(DispatchError):

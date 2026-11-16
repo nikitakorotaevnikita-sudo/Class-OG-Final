@@ -21,7 +21,8 @@ class _Result:
 
 
 class _FakeAgent:
-    def classify(self, text, llm_provider=None, llm_model=None, appeal_id=None, log_conn=None):
+    def classify(self, text, llm_provider=None, llm_model=None, appeal_id=None, log_conn=None,
+                 defer_card=False):
         return _Result(applicant_fio="Иванов И.И.", summary="суть",
                        questions=[_Q(code="0001.0002.0003.0004", name="вопрос текстом",
                                      reasoning="выбран по смыслу обращения")])
@@ -51,7 +52,8 @@ def test_classify_document_ok(monkeypatch):
 def test_reasoning_multi_question_continuous(monkeypatch):
     """Несколько вопросов -> один сплошной блок с префиксами кодов."""
     class _MultiAgent:
-        def classify(self, text, llm_provider=None, llm_model=None, appeal_id=None, log_conn=None):
+        def classify(self, text, llm_provider=None, llm_model=None, appeal_id=None, log_conn=None,
+                     defer_card=False):
             return _Result(applicant_fio=None, summary="суть",
                            questions=[
                                _Q(code="0001.0002.0003.0004", name="в1", reasoning="первое обоснование"),
@@ -69,7 +71,8 @@ def test_reasoning_clipped_to_1000(monkeypatch):
     long = "а" * 5000
 
     class _LongAgent:
-        def classify(self, text, llm_provider=None, llm_model=None, appeal_id=None, log_conn=None):
+        def classify(self, text, llm_provider=None, llm_model=None, appeal_id=None, log_conn=None,
+                     defer_card=False):
             return _Result(applicant_fio="Иванов И.И.", summary="суть",
                            questions=[_Q(code="0001.0002.0003.0004", name="в", reasoning=long)])
 

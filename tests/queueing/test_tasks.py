@@ -52,6 +52,8 @@ def test_classify_success_writes_result_and_notifies(storage, no_webhook):
     assert [q["code"] for q in done.result["questions"]] == [CODE]
     assert notified == [job.id]
     [call] = agent.calls
+    # LLM вызывается вне транзакции; карточку пишет задача, а не агент
+    assert call["log_conn"] is None and call["defer_card"] is True
     assert call["text"] == "текст обращения"
     assert (call["llm_provider"], call["llm_model"]) == ("groq", "llama")
     assert call["appeal_id"] == job.appeal_id
@@ -349,6 +351,55 @@ def test_run_finetune_failed_job_error(fake_training, no_webhook):
     assert [mv.version for mv in storage.models.list()] == [0]
 
 
+def test_run_finetune_finish_retried_on_db_error(fake_training, no_webhook, monkeypatch):
+    from finetune_helpers import seed
+
+    use, FakeTrain = fake_training
+    use(FakeTrain(before=0.3, after=0.5))
+    monkeypatch.setattr(tasks, "FINETUNE_FINISH_PAUSE_SEC", 0)
+    storage = seed(MemoryStorage())
+    job = _finetune_job(storage)
+    real_finish = storage.jobs.finish
+    fails = [psycopg.OperationalError("db down")] * 2
+
+    def flaky_finish(*a, **kw):
+        if fails:
+            raise fails.pop()
+        return real_finish(*a, **kw)
+
+    monkeypatch.setattr(storage.jobs, "finish", flaky_finish)
+
+    assert tasks.run_finetune(job, storage) is True
+    assert storage.jobs.get(job.id).status == "done"
+
+
+def test_run_finetune_finish_failure_logs_registered_version(fake_training, no_webhook,
+                                                             monkeypatch, caplog):
+    from finetune_helpers import seed
+
+    use, FakeTrain = fake_training
+    use(FakeTrain(before=0.3, after=0.5))
+    monkeypatch.setattr(tasks, "FINETUNE_FINISH_PAUSE_SEC", 0)
+    storage = seed(MemoryStorage())
+    job = _finetune_job(storage)
+    calls = []
+
+    def broken_finish(*a, **kw):
+        calls.append(1)
+        raise psycopg.OperationalError("db down")
+
+    monkeypatch.setattr(storage.jobs, "finish", broken_finish)
+
+    with caplog.at_level("ERROR", logger="queueing.tasks"):
+        with pytest.raises(tasks.RetryableError):
+            tasks.run_finetune(job, storage)
+
+    assert len(calls) == tasks.FINETUNE_FINISH_RETRIES
+    assert storage.models.get(1) is not None
+    text = caplog.text
+    assert "v1" in text and "ЗАРЕГИСТРИРОВАНА" in text and "пропал" in text
+
+
 def test_run_finetune_lost_ownership_registers_nothing(fake_training, no_webhook):
     """Пока шло обучение, задачу признали потерянной: версия не регистрируется."""
     from finetune_helpers import seed
@@ -454,11 +505,10 @@ def test_losing_ownership_mid_work_rolls_back_card_pg(pg_conn, no_webhook):
     job = _enqueue(storage, webhook_url="http://rx.local/hook")
 
     class Redelivered(FakeAgent):
-        def classify(self, *a, log_conn=None, **kw):
-            # та же сессия держит блокировку строки — имитируем захват через UPDATE
-            log_conn.execute("UPDATE jobs SET attempts = attempts + 1 WHERE id = %s",
-                             (job.id,))
-            return super().classify(*a, log_conn=log_conn, **kw)
+        def classify(self, *a, **kw):
+            # работа идёт вне транзакции: другой воркер может забрать задачу
+            storage.jobs.claim(job.id)
+            return super().classify(*a, **kw)
 
     tasks.run_classify_appeal(job, storage, Redelivered(storage))
     n = pg_conn.execute("SELECT count(*) FROM appeal_questions WHERE appeal_id = %s",

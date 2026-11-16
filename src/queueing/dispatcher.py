@@ -141,9 +141,10 @@ class LocalDispatcher:
             if job is None:
                 return  # задача уже завершена или не существует
             if with_agent:
-                fn(job, self._storage, self._agent_factory())
+                transitioned = fn(job, self._storage, self._agent_factory())
             else:
-                fn(job, self._storage)
+                transitioned = fn(job, self._storage)
+            tasks.delete_if_embed_done(self._storage, job, transitioned)
         except Exception as exc:  # noqa: BLE001 — в т.ч. RetryableError: повторов нет
             log.exception("Локальная задача %s (%s) упала", task_name, job_id)
             error = f"{type(exc).__name__}: {exc}"

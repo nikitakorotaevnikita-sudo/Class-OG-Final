@@ -36,7 +36,8 @@ class _Agent:
     def __init__(self, questions):
         self.questions = questions
 
-    def classify(self, text, llm_provider=None, llm_model=None, appeal_id=None, log_conn=None):
+    def classify(self, text, llm_provider=None, llm_model=None, appeal_id=None, log_conn=None,
+                 defer_card=False):
         return _Result(questions=self.questions)
 
 

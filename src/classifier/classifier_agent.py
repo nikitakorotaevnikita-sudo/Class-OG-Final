@@ -39,7 +39,7 @@ from google.genai import client as genai_client
 from google.genai.types import GenerateContentConfig
 from sentence_transformers import SentenceTransformer
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 from core.config import (
     LLM_TIMEOUT_SEC, LLM_MAX_RETRIES,
     GROQ_API_KEY, GROQ_MODEL,
@@ -266,6 +266,9 @@ class ClassificationResult:
     summary: str = field(default="")                    # краткая суть, ≤250 символов
     full_fallback_used: bool = field(default=False)     # сработал ли full-classifier fallback
     elapsed_seconds: float = field(default=0.0)         # время всего classify(), с
+    # defer_card=True: результат для карточки (AppealResult) — его пишет воркер
+    # в финальной транзакции задачи, только если всё ещё владеет задачей.
+    appeal_result: Optional[Any] = field(default=None, repr=False, compare=False)
 
 
 def extract_extra_fields(llm_result: dict, appeal_text: str = "") -> tuple[Optional[str], str]:
@@ -1994,23 +1997,27 @@ class ClassifierAgent:
         llm_model: str | None = None,
         appeal_id: str | None = None,
         log_conn=None,
+        defer_card: bool = False,
     ) -> ClassificationResult:
         """Основной метод классификации обращения с per-question retrieval.
 
-        appeal_id — карточка обращения уже создана (воркер): результат пишется в неё;
-        log_conn  — соединение транзакции воркера: ошибка записи результата тогда
-                    пробрасывается, чтобы задача не завершилась без карточки.
+        appeal_id  — карточка обращения уже создана (воркер): результат пишется в неё;
+        log_conn   — соединение внешней транзакции: ошибка записи результата тогда
+                     пробрасывается, чтобы задача не завершилась без карточки.
+        defer_card — карточку не писать: результат для неё кладётся в
+                     result.appeal_result (воркер пишет его сам, вне долгой транзакции);
+                     ошибка сборки результата пробрасывается.
         """
         classify_start = time.perf_counter()
         _REQUEST_CTX.appeal_id = appeal_id
         try:
             return self._classify(appeal_text, llm_provider, llm_model, appeal_id,
-                                  log_conn, classify_start)
+                                  log_conn, classify_start, defer_card)
         finally:
             _REQUEST_CTX.appeal_id = None
 
     def _classify(self, appeal_text, llm_provider, llm_model, appeal_id, log_conn,
-                  classify_start) -> ClassificationResult:
+                  classify_start, defer_card=False) -> ClassificationResult:
         provider, model = self._resolve_llm(llm_provider, llm_model)
 
         # Шаг 1: Сегментация обращения на отдельные вопросы
@@ -2401,6 +2408,10 @@ class ClassifierAgent:
                     for i, q in enumerate(classified_questions, 1)
                 ],
             )
+            if defer_card:
+                result.appeal_result = appeal_result
+                result.log_id = appeal_id
+                return result
             result.log_id = AppealsLogger(self.storage).log(
                 appeal_text=appeal_text,
                 candidates=log_candidates,
@@ -2411,7 +2422,7 @@ class ClassifierAgent:
                 conn=log_conn,
             )
         except Exception as e:
-            if log_conn is not None:
+            if log_conn is not None or defer_card:
                 raise
             print(f"  [logger] Ошибка записи в лог: {e}")
 

@@ -574,14 +574,14 @@ def test_finetune_not_registered_when_not_owner(store):
     storage = seed(store)
     checks = []
 
-    def still_owner():
-        checks.append(1)
+    def still_owner(conn):
+        checks.append(conn)
         return False
 
     result = finetune_model.run_training(storage, train_fn=FakeTrain(),
                                          still_owner=still_owner)
 
-    assert checks == [1]
+    assert len(checks) == 1  # один вызов — внутри транзакции регистрации
     assert result["status"] == "failed"
     assert "больше не принадлежит этому воркеру" in result["message"]
     assert [mv.version for mv in storage.models.list()] == [0]
@@ -593,7 +593,7 @@ def test_finetune_registered_when_still_owner(store):
     storage = seed(store)
 
     result = finetune_model.run_training(storage, train_fn=FakeTrain(),
-                                         still_owner=lambda: True)
+                                         still_owner=lambda conn: True)
 
     assert result["status"] == "completed"
     assert storage.models.get(1) is not None
