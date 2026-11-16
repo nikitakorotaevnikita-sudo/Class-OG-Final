@@ -98,8 +98,9 @@ def test_rabbitmq_consumer_timeout_covers_long_tasks():
     assert "consumer_timeout = 86400000" in lines
     assert ("./deploy/rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/20-classifier.conf:ro"
             in volumes_of("rabbitmq"))
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    assert "consumer_timeout = 86400000" in readme
+    # Заметка для своего (не из compose) RabbitMQ — в руководстве администратора.
+    setup = (ROOT / "instructions" / "Setup_instruction.md").read_text(encoding="utf-8")
+    assert "consumer_timeout = 86400000" in setup
 
 
 def test_env_example_disables_broker_heartbeat():
