@@ -99,6 +99,8 @@ JOB_QUEUES = ("classify_sync", "classify", "training")
 LOST_TRAINING_ERROR = "воркер дообучения пропал, запустите дообучение заново"
 # Префикс application_name соединения воркера: 'classifier-worker:<очереди через запятую>'.
 WORKER_APP_PREFIX = "classifier-worker:"
+# Воркер классификации без агента (модель не загрузилась): не считается живым воркером.
+IDLE_WORKER_APP_PREFIX = "classifier-worker-idle:"
 
 
 def worker_queues(application_name: str) -> list[str]:

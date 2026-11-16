@@ -229,6 +229,52 @@ def test_run_forever_registers_worker_in_memory(storage):
     assert storage.jobs.live_workers("classify") == []
 
 
+def _wait_until(cond, timeout=3.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline and not cond():
+        time.sleep(0.02)
+    return cond()
+
+
+def test_worker_without_agent_not_counted_until_agent_loads(storage, hooks):
+    """Нет агента — воркер не считается воркером классификации (agent_ready false);
+    агент загрузился — снова считается; при остановке снимается регистрация."""
+    state = {"agent": None}
+
+    def factory():
+        if state["agent"] is None:
+            raise FileNotFoundError("нет папки модели v3")
+        return state["agent"]
+
+    worker = _worker(storage, factory=factory, poll_sec=0.05)
+    stop = threading.Event()
+    t = threading.Thread(target=worker.run_forever, args=(stop,), daemon=True)
+    t.start()
+    try:
+        assert _wait_until(lambda: storage.jobs._workers ==
+                           ["classifier-worker-idle:classify_sync,classify"])
+        assert storage.jobs.live_workers("classify") == []
+        state["agent"] = FakeAgent(storage)
+        assert _wait_until(lambda: storage.jobs.live_workers("classify") ==
+                           ["classifier-worker:classify_sync,classify"])
+        assert storage.jobs._workers == ["classifier-worker:classify_sync,classify"]
+        state["agent"] = None  # агент снова не строится — снова «простаивающий»
+        assert _wait_until(lambda: storage.jobs.live_workers("classify") == [])
+    finally:
+        stop.set()
+        t.join(3)
+    assert not t.is_alive()
+    assert storage.jobs._workers == []
+
+
+def test_idle_application_name_is_not_a_worker():
+    from storage.models import worker_queues
+
+    name = worker_run.idle_application_name(["classify_sync", "classify"])
+    assert name == "classifier-worker-idle:classify_sync,classify"
+    assert worker_queues(name) == []
+
+
 def test_no_agent_does_not_claim(storage, hooks):
     job = _classify_job(storage)
     built = []
@@ -460,6 +506,62 @@ def test_listener_application_name_in_pg_stat_activity(listener, pg_conn, pg_sto
                           (pid,)).fetchone()
     assert row == ("classifier-worker:classify",)
     assert "classifier-worker:classify" in pg_storage.jobs.live_workers("classify")
+
+
+@pytest.mark.db
+def test_idle_worker_excluded_from_live_workers_on_postgres(storage, pg_url, pg_conn, pg_storage,
+                                                            hooks):
+    """Воркер без агента переименовывает соединение LISTEN и не виден как воркер
+    classify; после загрузки агента — виден (на том же соединении)."""
+    state = {"agent": None}
+
+    def factory():
+        if state["agent"] is None:
+            raise FileNotFoundError("нет папки модели v3")
+        return state["agent"]
+
+    worker = _worker(storage, factory=factory, poll_sec=0.1, listen_dsn=pg_url)
+    stop = threading.Event()
+    t = threading.Thread(target=worker.run_forever, args=(stop,), daemon=True)
+
+    def names():
+        return [r[0] for r in pg_conn.execute(
+            "SELECT application_name FROM pg_stat_activity "
+            "WHERE application_name LIKE 'classifier-worker%'").fetchall()]
+
+    live = "classifier-worker:classify_sync,classify"
+    idle = "classifier-worker-idle:classify_sync,classify"
+    t.start()
+    try:
+        assert _wait_until(lambda: idle in names(), timeout=5)
+        assert live not in pg_storage.jobs.live_workers("classify")
+        state["agent"] = FakeAgent(storage)
+        assert _wait_until(lambda: live in pg_storage.jobs.live_workers("classify"), timeout=5)
+        assert idle not in names()
+    finally:
+        stop.set()
+        t.join(5)
+    assert not t.is_alive()
+    assert _wait_until(lambda: live not in names() and idle not in names(), timeout=5)
+
+
+@pytest.mark.db
+def test_listener_reconnect_uses_current_name(pg_url, pg_conn):
+    lst = worker_run._Listener(pg_url, worker_run.application_name(["classify"]), ["classify"])
+    assert lst.connect()
+    try:
+        lst.set_app_name("classifier-worker-idle:classify")
+        pid = lst._conn.info.backend_pid
+        row = pg_conn.execute("SELECT application_name FROM pg_stat_activity WHERE pid = %s",
+                              (pid,)).fetchone()
+        assert row == ("classifier-worker-idle:classify",)
+        lst.close()
+        assert lst.connect()
+        row = pg_conn.execute("SELECT application_name FROM pg_stat_activity WHERE pid = %s",
+                              (lst._conn.info.backend_pid,)).fetchone()
+        assert row == ("classifier-worker-idle:classify",)
+    finally:
+        lst.close()
 
 
 def test_second_signal_restores_default_handler(monkeypatch):

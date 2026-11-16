@@ -21,6 +21,9 @@
    QUEUE_POLL_SEC (контрольный опрос: потерянный сигнал, отложенный повтор,
    истёкшие аренды). У соединения application_name
    'classifier-worker:<очереди>' — по нему /health видит живых воркеров.
+   Пока агент классификации не создан (модель ещё грузится или её нет),
+   соединение называется 'classifier-worker-idle:<очереди>' и воркером
+   классификации не считается (agent_ready false).
 
 Ctrl+C / SIGTERM: текущая задача доделывается, затем процесс выходит.
 Если процесс убит, задачу вернёт истечение аренды.
@@ -50,7 +53,7 @@ elif str(_SRC) not in sys.path:
 
 from core import config  # noqa: E402
 from queueing import tasks  # noqa: E402
-from storage.models import JOB_QUEUES, WORKER_APP_PREFIX  # noqa: E402
+from storage.models import IDLE_WORKER_APP_PREFIX, JOB_QUEUES, WORKER_APP_PREFIX  # noqa: E402
 
 log = logging.getLogger("worker.run")
 
@@ -86,6 +89,11 @@ def application_name(queues: list[str]) -> str:
     return WORKER_APP_PREFIX + ",".join(queues)
 
 
+def idle_application_name(queues: list[str]) -> str:
+    """Имя соединения воркера без агента: не совпадает с WORKER_APP_PREFIX."""
+    return IDLE_WORKER_APP_PREFIX + ",".join(queues)
+
+
 def retry_delay(attempts: int) -> float:
     """Пауза перед повтором после сбоя инфраструктуры: 5, 10, 20, 40, 60, 60… с."""
     return min(60, 5 * 2 ** max(0, attempts - 1))
@@ -115,6 +123,19 @@ class _Listener:
             return False
         self._conn = conn
         return True
+
+    def set_app_name(self, name: str) -> None:
+        """Сменить application_name; переподключение берёт уже новое имя."""
+        self._app_name = name
+        conn = self._conn
+        if conn is None or conn.closed:
+            return
+        try:
+            conn.execute("SELECT set_config('application_name', %s, false)", (name,))
+        except Exception as exc:  # noqa: BLE001 — переподключимся с новым именем
+            log.warning("LISTEN job_queued: сменить имя соединения не удалось (%s: %s)",
+                        type(exc).__name__, exc)
+            self.close()
 
     def wait(self, timeout: float, stop: threading.Event) -> None:
         """Ждать сигнала для своей очереди не дольше timeout секунд.
@@ -164,6 +185,31 @@ class Worker:
         self.listen_dsn = listen_dsn
         self.app_name = application_name(self.queues)
         self._next_cleanup = 0.0  # time.monotonic(): первая чистка — сразу
+        # Воркеру классификации до загрузки агента — имя «простаивающего»:
+        # /health не должен считать его готовым (агент мог не создаться).
+        self._needs_agent = any(q in CLASSIFY_QUEUES for q in self.queues)
+        self._ready = not self._needs_agent
+        self._listener: Optional[_Listener] = None
+        self._registered: Optional[str] = None  # memory: имя в register_worker
+
+    @property
+    def current_app_name(self) -> str:
+        return self.app_name if self._ready else idle_application_name(self.queues)
+
+    def _set_ready(self, ready: bool) -> None:
+        """Агент появился/пропал — переименовать соединение воркера."""
+        if ready == self._ready:
+            return
+        self._ready = ready
+        name = self.current_app_name
+        if ready:
+            log.info("Агент создан: воркер берёт задачи классификации (%s)", name)
+        if self._listener is not None:
+            self._listener.set_app_name(name)
+        elif self._registered is not None:
+            self.storage.jobs.unregister_worker(self._registered)
+            self.storage.jobs.register_worker(name)
+            self._registered = name
 
     # ── один шаг ─────────────────────────────────────────────────────────────
 
@@ -203,7 +249,9 @@ class Worker:
         except Exception as exc:  # noqa: BLE001 — задачи не валим, ждём модель
             log.error("Агент не создан, задачи классификации не берём: %s: %s",
                       type(exc).__name__, exc)
+            self._set_ready(False)
             return [q for q in queues if q not in CLASSIFY_QUEUES], None
+        self._set_ready(True)
         return queues, agent
 
     def _housekeeping(self) -> None:
@@ -288,14 +336,14 @@ class Worker:
 
     def run_forever(self, stop: threading.Event) -> None:
         listener: Optional[_Listener] = None
-        registered = False
         if self.listen_dsn:
-            listener = _Listener(self.listen_dsn, self.app_name, self.queues)
+            listener = _Listener(self.listen_dsn, self.current_app_name, self.queues)
             listener.connect()
+            self._listener = listener
         elif hasattr(self.storage.jobs, "register_worker"):
             # Без PostgreSQL (memory): эмуляция pg_stat_activity для /health.
-            self.storage.jobs.register_worker(self.app_name)
-            registered = True
+            self._registered = self.current_app_name
+            self.storage.jobs.register_worker(self._registered)
         log.info("Воркер %s слушает очереди: %s", self.worker_id, ", ".join(self.queues))
         try:
             while not stop.is_set():
@@ -313,8 +361,10 @@ class Worker:
         finally:
             if listener is not None:
                 listener.close()
-            if registered:
-                self.storage.jobs.unregister_worker(self.app_name)
+                self._listener = None
+            if self._registered is not None:
+                self.storage.jobs.unregister_worker(self._registered)
+                self._registered = None
             log.info("Воркер %s остановлен", self.worker_id)
 
 
