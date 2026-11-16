@@ -1,8 +1,13 @@
-"""Миграция файлового хранилища в слой Storage (синтетические фикстуры)."""
+"""Миграция файлового хранилища в слой Storage (синтетические фикстуры).
+
+Переносится только то, без чего сервис не работает: классификатор, векторы и
+реестр версии 0, плюс исторические обращения. Фикстуры нарочно содержат и
+прошлые обращения, журнал запросов, задачи, аннотации и дообученную модель —
+тесты проверяют, что миграция их не трогает.
+"""
 
 import importlib.util
 import shutil
-import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -19,16 +24,10 @@ mig = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(mig)
 
 CODE = "0001.0001.0001.0001"
-CARD_A = "11111111-2222-4333-8444-555555555555"
-CARD_B = str(uuid.uuid5(uuid.NAMESPACE_URL, "legacy-appeal:abc-123"))
-JOB_DONE = "a" * 32
-JOB_RUN = "b" * 32
 
 
-def run(storage):
-    return mig.migrate(
-        storage, FIX, FIX / "vector_db", FIX / "models", "intfloat/multilingual-e5-base"
-    )
+def run(storage, data=FIX, vdb=None):
+    return mig.migrate(storage, data, vdb or FIX / "vector_db", "intfloat/multilingual-e5-base")
 
 
 @pytest.fixture
@@ -66,56 +65,36 @@ def snapshot(s):
 def test_migration_counts(mem):
     rec = run(mem)
     assert all(a == b for a, b in rec.values()), rec
+    assert set(rec) == {"classifier_entries", "vectors_base", "model_registry", "historical"}
 
     assert mem.classifier.count_entries() == 3
     root = [e for e in mem.classifier.load_entries() if e.level == 1][0]
     assert root.parent_code is None
 
     vecs = mem.classifier.vectors_for_version(0)
-    assert len(vecs) == 4
-    assert sum(1 for v in vecs if v[1] == "base") == 3
-    assert mem.classifier.annotations_for(CODE) == ["note: x"]
-    assert mem.classifier.pending_annotations(0) != []
+    assert len(vecs) == 3 and all(v[1] == "base" for v in vecs)
 
-    entries = {e["id"]: e for e in mem.appeals.as_log_entries()}
-    assert set(entries) == {CARD_A, CARD_B}
-    assert len(entries[CARD_A]["agent_questions"]) == 1
-    assert len(entries[CARD_B]["agent_questions"]) == 2
-    assert entries[CARD_A]["verification"]["status"] == "confirmed"
-    assert entries[CARD_B]["verification"]["status"] == "corrected"
-    assert entries[CARD_B]["verification"]["operator_codes"] == [CODE]
-    assert entries[CARD_B]["verification"]["comment"] == "исправлено"
-    assert entries[CARD_B]["timestamp"] == "2026-04-23T09:00:00"
-    assert mem.appeals._cards[CARD_B]["ip_address"] == "10.0.0.7"
-    assert mem.appeals._cards[CARD_B]["elapsed_seconds"] == 3.2
-    assert mem.appeals._cards[CARD_A]["ip_address"] is None
-    assert mem.appeals.llm_log_count() == 1
+    v0 = mem.models.get(0)
+    assert v0.is_active and v0.adapter == {"kind": "v3_blend", "alpha": 0.5}
+    assert v0.base_model_name == "intfloat/multilingual-e5-base"
+    assert mem.models.active().version == 0
 
     assert mem.historical.count() == 1
     assert mem.historical.all()[0]["registration_date"] == "2025-01-10"
 
-    done, running = mem.jobs.get(JOB_DONE), mem.jobs.get(JOB_RUN)
-    assert done.status == "done" and done.result == {"ok": True} and done.document_id == 42
-    assert done.job_type == "classify" and done.payload == {"queue": "classify"}
-    assert running.status == "error"
-    assert running.error == "Сервис переведён на новую очередь, отправьте обращение заново"
-    assert mem.jobs.stats()["queued"] == 0
 
-    v0, v1 = mem.models.get(0), mem.models.get(1)
-    assert v0.is_active and v0.adapter == {"kind": "v3_blend", "alpha": 0.5}
-    assert v0.base_model_name == "intfloat/multilingual-e5-base"
-    assert not v1.is_active
-    assert (v1.recall5_before, v1.recall5_after) == (0.61, 0.66)
-    assert v1.model_path == str(FIX / "models" / "e5-finetuned-v1")
-    assert mem.models.active().version == 0
-
-
-def test_legacy_card_fields_are_null(mem):
+def test_history_and_extras_are_not_migrated(mem):
+    """Прошлые обращения, журнал, задачи, аннотации и дообученные версии не переносятся."""
+    for name in ("appeals_log.jsonl", "request_log.jsonl", "classifier_annotations.json",
+                 "jobs", "models"):
+        assert (FIX / name).exists(), f"фикстура {name} нужна, чтобы проверка что-то значила"
     run(mem)
-    r = mem.appeals._cards[CARD_A]["result"]
-    assert r.vid_obrascheniya is None and r.is_ustnoe is None
-    assert r.needs_verification is None and r.summary is None
-    assert r.overall_confidence == 0.9
+    assert mem.appeals.as_log_entries() == []
+    assert mem.appeals.llm_log_count() == 0
+    assert mem.jobs.list(limit=100) == []
+    assert mem.classifier.annotations_for(CODE) == []
+    assert mem.classifier.pending_annotations(0) == []
+    assert [m.version for m in mem.models.list()] == [0]
 
 
 def test_migration_is_idempotent(mem):
@@ -135,6 +114,7 @@ def test_migration_is_idempotent_pg(pg_storage):
     assert first == second
     assert snapshot(pg_storage) == before
     assert pg_storage.models.get(0).adapter == {"kind": "v3_blend", "alpha": 0.5}
+    assert pg_storage.appeals.as_log_entries() == []
 
 
 def test_mismatched_metadata_aborts(mem, tmp_path):
@@ -145,71 +125,49 @@ def test_mismatched_metadata_aborts(mem, tmp_path):
         encoding="utf-8",
     )
     with pytest.raises(SystemExit) as ei:
-        mig.migrate(mem, FIX, tmp_path / "vdb", FIX / "models", "m")
+        run(mem, vdb=tmp_path / "vdb")
     assert "0009.0009.0009.0009" in str(ei.value)
     assert mem.classifier.count_entries() == 0  # ничего не записано
 
 
-def test_skip_cases_are_reconciled(mem, tmp_path):
-    """Пустой log_id пропускается; дубль истории не раздувает счёт."""
+def test_duplicate_history_is_reconciled(mem, tmp_path):
+    """Дубль исторических записей не раздувает счёт."""
     data = tmp_path / "data"
     shutil.copytree(FIX, data, ignore=shutil.ignore_patterns("make_*"))
     hist = data / "historical_verified.jsonl"
     hist.write_text(hist.read_text(encoding="utf-8") * 2, encoding="utf-8")
-    rec = mig.migrate(mem, data, data / "vector_db", data / "models", "m")
+    rec = run(mem, data=data, vdb=data / "vector_db")
     assert all(a == b for a, b in rec.values()), rec
     assert mem.historical.count() == 1
-    assert rec["ip_records"] == (1, 1)
+
+
+def test_missing_history_file_is_fine(mem, tmp_path):
+    """Нового стенда без historical_verified.jsonl: переносится только необходимое."""
+    data = tmp_path / "data"
+    shutil.copytree(FIX, data)
+    (data / "historical_verified.jsonl").unlink()
+    rec = run(mem, data=data, vdb=data / "vector_db")
+    assert all(a == b for a, b in rec.values()), rec
+    assert rec["historical"] == (0, 0)
+    assert mem.classifier.count_entries() == 3
 
 
 def test_cli_exit_code(monkeypatch, capsys):
     monkeypatch.setattr(mig, "_get_storage", lambda: MemoryStorage())
-    code = mig.main([
-        "--data-dir", str(FIX), "--vector-db-dir", str(FIX / "vector_db"),
-        "--models-dir", str(FIX / "models"),
-    ])
+    code = mig.main(["--data-dir", str(FIX), "--vector-db-dir", str(FIX / "vector_db")])
     out = capsys.readouterr().out
     assert code == 0
     assert "OK" in out and "MISMATCH" not in out
 
 
-def _copy_data(tmp_path, old=None, new=None):
+def _copy_data(tmp_path):
     data = tmp_path / "data"
     shutil.copytree(FIX, data)
-    if old:
-        f = data / "appeals_log.jsonl"
-        f.write_text(f.read_text(encoding="utf-8").replace(old, new), encoding="utf-8")
     return data
 
 
 def _cli(data):
-    return ["--data-dir", str(data), "--vector-db-dir", str(data / "vector_db"),
-            "--models-dir", str(data / "models")]
-
-
-def test_rerun_after_live_activity_still_exits_zero(monkeypatch, tmp_path, capsys):
-    from storage.models import AppealResult
-
-    data = _copy_data(tmp_path, '"status": "confirmed"', '"status": "pending"')
-    mem = MemoryStorage()
-    monkeypatch.setattr(mig, "_get_storage", lambda: mem)
-    assert mig.main(_cli(data)) == 0
-
-    # живая работа между запусками
-    mem.appeals.set_verification(CARD_A, "confirmed", [CODE], None)  # оператор проверил pending
-    live = mem.appeals.create("живое обращение", ip_address="10.9.9.9")
-    mem.appeals.save_result(live, AppealResult(
-        summary=None, applicant_fio=None, applicant_email=None, vid_obrascheniya=None,
-        tip_obrascheniya=None, is_ustnoe=None, overall_confidence=0.9,
-        needs_verification=None, full_fallback_used=None, candidates=[],
-        llm_provider=None, llm_model=None, elapsed_seconds=None, questions=[]))
-    mem.appeals.log_llm_request(live, True, 1, 1.0, 0.9, None, 5)
-    capsys.readouterr()
-
-    assert mig.main(_cli(data) + ["--force"]) == 0
-    out = capsys.readouterr().out
-    assert "MISMATCH" not in out
-    assert "skipped (table not empty)" in out
+    return ["--data-dir", str(data), "--vector-db-dir", str(data / "vector_db")]
 
 
 # --- Отметка о выполненном переносе (schema_meta.files_migrated) ---------------------
@@ -222,8 +180,8 @@ def test_successful_run_writes_marker_and_rerun_is_noop(monkeypatch, tmp_path, c
     marker = mem.meta.get("files_migrated")
     assert marker
 
-    # оператор перепроверил перенесённую карточку, аннотация удалена
-    mem.appeals.set_verification(CARD_A, "rejected", None, "ошибка")
+    # живая работа после переноса: новое обращение
+    mem.appeals.create("живое обращение", ip_address="10.9.9.9")
     before = snapshot(mem)
     called = []
     monkeypatch.setattr(mig, "migrate", lambda *a, **k: called.append(a))
@@ -260,12 +218,13 @@ def test_mismatch_does_not_write_marker(monkeypatch, tmp_path):
     mem = MemoryStorage()
     monkeypatch.setattr(mig, "_get_storage", lambda: mem)
     rec = mig.Reconciliation()
-    rec["appeals"] = (2, 1)
+    rec["historical"] = (2, 1)
     monkeypatch.setattr(mig, "migrate", lambda *a, **k: rec)
     assert mig.main(_cli(data)) == 1
     assert mem.meta.get("files_migrated") is None
 
 
+@pytest.mark.db
 def test_marker_roundtrip_pg(pg_storage):
     assert pg_storage.meta.get("files_migrated") is None
     pg_storage.meta.set("files_migrated", "2026-11-11T10:00:00+00:00")
@@ -273,31 +232,8 @@ def test_marker_roundtrip_pg(pg_storage):
     assert pg_storage.meta.get("files_migrated") == "2026-11-11T11:00:00+00:00"
 
 
-def test_unknown_legacy_status_warns_and_imports_pending(mem, tmp_path):
-    data = _copy_data(tmp_path, '"status": "corrected"', '"status": "weird"')
-    rec = mig.migrate(mem, data, data / "vector_db", data / "models", "m")
-    assert rec.warnings == 1
-    assert all(a == b for a, b in rec.values()), rec
-    entry = {e["id"]: e for e in mem.appeals.as_log_entries()}[CARD_B]
-    assert entry["verification"]["status"] == "pending"
-    assert len(entry["agent_questions"]) == 2
-
-
-@pytest.mark.db
-def test_transaction_rolls_back_card_on_error_pg(pg_storage):
-    aid = str(uuid.uuid4())
-    with pytest.raises(RuntimeError):
-        with pg_storage.transaction() as tx:
-            pg_storage.appeals.create("t", appeal_id=aid, conn=tx)
-            raise RuntimeError("сбой после create")
-    assert pg_storage.appeals.get_text(aid) is None
-    with pg_storage.transaction() as tx:
-        pg_storage.appeals.create("t", appeal_id=aid, conn=tx)
-    assert pg_storage.appeals.get_text(aid) == "t"
-
-
-def test_entries_keep_flat_order_and_correct_name_is_honoured(mem, tmp_path, monkeypatch):
-    """Порядок classifier_flat.json сохраняется; correct_name пишется с префиксом."""
+def test_entries_keep_flat_order(mem, tmp_path):
+    """Порядок classifier_flat.json сохраняется."""
     import json
 
     data = tmp_path / "data"
@@ -306,29 +242,10 @@ def test_entries_keep_flat_order_and_correct_name_is_honoured(mem, tmp_path, mon
     flat = json.loads(flat_path.read_text(encoding="utf-8"))
     flat = [flat[2], flat[0], flat[1]]  # не по коду
     flat_path.write_text(json.dumps(flat, ensure_ascii=False), encoding="utf-8")
-    (data / "classifier_annotations.json").write_text(
-        json.dumps({CODE: {"correct_name": "Новое имя", "note": "x"}}, ensure_ascii=False),
-        encoding="utf-8")
 
-    mig.migrate(mem, data, FIX / "vector_db", FIX / "models", "intfloat/multilingual-e5-base")
+    run(mem, data=data)
 
     assert [e.code for e in mem.classifier.load_entries()] == [e["code"] for e in flat]
-    assert "correct_name: Новое имя" in mem.classifier.annotations_for(CODE)
-    from storage import annotations_storage
-    assert annotations_storage.build_search_text(CODE, "Старое", "путь", storage=mem) == (
-        "Новое имя. путь | Note: x")
-
-
-# --- WP3 ----------------------------------------------------------------------------------
-
-@pytest.mark.parametrize("raw", ['"status": null', '"status": ""'])
-def test_null_or_empty_status_reconciles_as_pending(mem, tmp_path, raw):
-    data = _copy_data(tmp_path, '"status": "confirmed"', raw)
-    rec = mig.migrate(mem, data, data / "vector_db", data / "models", "m")
-    assert all(a == b for a, b in rec.values()), rec
-    assert rec.warnings == 0
-    entry = {e["id"]: e for e in mem.appeals.as_log_entries()}[CARD_A]
-    assert entry["verification"]["status"] == "pending"
 
 
 def _vdb_copy(tmp_path):
@@ -356,7 +273,7 @@ def test_wrong_embedding_dim_aborts_before_writes(mem, tmp_path):
     vdb, meta, emb = _vdb_copy(tmp_path)
     _vdb_write(vdb, meta, emb[:, :384])
     with pytest.raises(SystemExit) as ei:
-        mig.migrate(mem, FIX, vdb, FIX / "models", "m")
+        run(mem, vdb=vdb)
     assert "768" in str(ei.value) and "384" in str(ei.value)
     assert mem.classifier.count_entries() == 0
 
@@ -365,7 +282,7 @@ def test_row_count_mismatch_aborts_with_clear_error(mem, tmp_path):
     vdb, meta, emb = _vdb_copy(tmp_path)
     _vdb_write(vdb, meta, emb[:2])
     with pytest.raises(SystemExit) as ei:
-        mig.migrate(mem, FIX, vdb, FIX / "models", "m")
+        run(mem, vdb=vdb)
     assert "2" in str(ei.value) and "3" in str(ei.value)
     assert mem.classifier.count_entries() == 0
 
@@ -377,7 +294,7 @@ def test_duplicate_metadata_codes_are_reported(mem, tmp_path, capsys):
     meta = meta + [dict(meta[2], search_text="passage: дубль")] * 2
     emb = np.vstack([emb, emb[2:3], emb[2:3]])
     _vdb_write(vdb, meta, emb)
-    rec = mig.migrate(mem, FIX, vdb, FIX / "models", "m")
+    rec = run(mem, vdb=vdb)
     out = capsys.readouterr().out
     assert rec.warnings == 1
     assert "дублир" in out and "2" in out
@@ -398,15 +315,3 @@ def test_vector_row_i_matches_metadata_row_i(mem):
     for i, m in enumerate(meta):
         (code, sim), *_ = mem.classifier.search(emb[i], 0, 1, False)
         assert code == m["code"] and sim == pytest.approx(1.0, abs=1e-5)
-
-
-def test_force_rerun_keeps_live_request_meta(monkeypatch, tmp_path):
-    data = _copy_data(tmp_path)
-    mem = MemoryStorage()
-    monkeypatch.setattr(mig, "_get_storage", lambda: mem)
-    assert mig.main(_cli(data)) == 0
-    assert mem.appeals._cards[CARD_B]["ip_address"] == "10.0.0.7"
-    mem.appeals.set_request_meta(CARD_B, "10.9.9.9", 9.5)  # живые значения после переноса
-    assert mig.main(_cli(data) + ["--force"]) == 0
-    assert mem.appeals._cards[CARD_B]["ip_address"] == "10.9.9.9"
-    assert mem.appeals._cards[CARD_B]["elapsed_seconds"] == 9.5

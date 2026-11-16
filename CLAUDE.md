@@ -25,7 +25,8 @@ launch.bat server               # = start.cmd local;     Linux: ./launch.sh serv
 ./start.sh local [--port N]     # Windows: start.cmd local (one window per process)
 ./stop.sh local                 # Windows: stop.cmd local
 
-# Schema + one-shot, idempotent import of file storage into PostgreSQL
+# Schema + one-shot, idempotent import into PostgreSQL: only what the service needs
+# (classifier, v0 vectors + registry row) and historical_appeals; no past appeals/logs/jobs
 python scripts/db/init_db.py
 python scripts/db/migrate_from_files.py         # exit 1 on reconciliation mismatch
 python scripts/db/verify_search_parity.py --queries data/ii25_test.jsonl --extra 20

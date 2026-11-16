@@ -442,3 +442,31 @@ def test_backoffice_stats_mixed_statuses_and_repeated_codes(storage):
     assert (h["0.0-0.1"], h["0.1-0.2"], h["0.3-0.4"], h["0.9-1.0"]) == (1, 1, 1, 1)
     assert r["avg_confidence"] == round((0.35 + 0.1 + 0.0 + 0.99) / 4, 2)
     assert [d["count"] for d in r["daily_usage"]] == [0, 0, 1, 0, 2]
+
+
+@pytest.mark.db
+def test_transaction_rolls_back_card_on_error_pg(pg_conn):
+    """Ошибка внутри storage.transaction() откатывает карточку целиком."""
+    import uuid
+    from contextlib import contextmanager
+
+    from pgvector.psycopg import register_vector
+    from storage.pg import PgStorage
+
+    register_vector(pg_conn)
+
+    @contextmanager
+    def connect():
+        with pg_conn.transaction():
+            yield pg_conn
+
+    st = PgStorage(connect)
+    aid = str(uuid.uuid4())
+    with pytest.raises(RuntimeError):
+        with st.transaction() as tx:
+            st.appeals.create("t", appeal_id=aid, conn=tx)
+            raise RuntimeError("сбой после create")
+    assert st.appeals.get_text(aid) is None
+    with st.transaction() as tx:
+        st.appeals.create("t", appeal_id=aid, conn=tx)
+    assert st.appeals.get_text(aid) == "t"
