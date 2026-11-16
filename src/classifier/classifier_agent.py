@@ -41,6 +41,7 @@ from sentence_transformers import SentenceTransformer
 from dataclasses import dataclass, field
 from typing import Any, Optional
 from core.config import (
+    resolve_model_path,
     LLM_TIMEOUT_SEC, LLM_MAX_RETRIES,
     GROQ_API_KEY, GROQ_MODEL,
     EMBEDDING_MODEL,  # тесты подменяют его, проверяя, что префикс запроса от него не зависит
@@ -686,8 +687,9 @@ class ClassifierAgent:
         self.metadata — те же ключи, что были в metadata.json (parent_code "" у корней):
         по ним работают лексический поиск, маршрутизация L2/L3 и code_index.
         """
-        print(f"  Загрузка модели эмбеддингов v{active.version}: {active.model_path}")
-        embedder = SentenceTransformer(active.model_path)
+        resolved = resolve_model_path(active.model_path, active.version)
+        print(f"  Загрузка модели эмбеддингов v{active.version}: {resolved}")
+        embedder = SentenceTransformer(resolved)
         metadata = [
             {
                 "code":           e.code,

@@ -75,6 +75,16 @@ def test_first_finetune_from_version_zero_is_never_auto_activated(store, tmp_pat
     assert FakeSentenceTransformer.loaded == [expected_path]
 
 
+def test_finetune_registers_folder_name(store):
+    storage = seed(store)
+
+    result = finetune_model.run_training(storage, train_fn=FakeTrain())
+
+    assert result["status"] == "completed", result
+    assert storage.models.get(1).model_path == "e5-finetuned-v1"
+    assert result["model_path"] == str(Path(config.MODELS_DIR) / "e5-finetuned-v1")
+
+
 def test_improved_model_from_finetuned_base_is_activated(store, tmp_path):
     storage = seed(store)
     finetune_model.run_training(storage, train_fn=FakeTrain(before=0.4, after=0.6))
@@ -86,7 +96,7 @@ def test_improved_model_from_finetuned_base_is_activated(store, tmp_path):
 
     assert result["status"] == "completed", result
     assert result["version"] == 2 and result["activated"] is True
-    assert train.calls[0]["base"] == v1_path
+    assert train.calls[0]["base"] == str(Path(config.MODELS_DIR) / v1_path)
     assert storage.models.active().version == 2
 
 

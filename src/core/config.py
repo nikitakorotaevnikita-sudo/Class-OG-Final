@@ -202,6 +202,30 @@ FINETUNE_THRESHOLD: int = int(os.getenv("FINETUNE_THRESHOLD", "50"))
 # Папка для дообученных моделей
 MODELS_DIR: str = os.getenv("MODELS_DIR", str(PROJECT_ROOT / "models"))
 
+
+def resolve_model_path(path: str, version: Optional[int] = None) -> str:
+    """Путь модели из реестра -> то, что можно загрузить на этой машине.
+
+    Реестр хранит имя папки (`e5-finetuned-v3`), а MODELS_DIR у каждого воркера свой.
+    Папка ищется как MODELS_DIR / последний компонент пути (так же разрешаются прежние
+    абсолютные пути и `models/...`). Имя модели Hugging Face (`org/name`) возвращается
+    как есть. Нет папки, а значение похоже на локальное -> RuntimeError.
+    """
+    normalized = path.strip().replace("\\", "/").rstrip("/")
+    name = normalized.split("/")[-1]
+    candidate = Path(MODELS_DIR) / name
+    if name and candidate.is_dir():
+        return str(candidate)
+    local = (normalized.startswith("/") or "/" not in normalized
+             or (len(normalized) > 1 and normalized[1] == ":")
+             or normalized.split("/")[0] in ("models", ".", ".."))
+    if not local:
+        return path  # имя модели Hugging Face
+    ver = f" v{version}" if version is not None else ""
+    raise RuntimeError(
+        f"нет папки модели{ver} в MODELS_DIR={MODELS_DIR}: ожидается {candidate} "
+        f"(в реестре: {path}). Скопируйте папку дообученной модели на эту машину.")
+
 # ── Бэк-офис (Basic Auth) ───────────────────────────────────────────────────────
 BACKOFFICE_USER:     str = os.getenv("BACKOFFICE_USER", "admin")
 BACKOFFICE_PASSWORD: str = os.getenv("BACKOFFICE_PASSWORD", "password")

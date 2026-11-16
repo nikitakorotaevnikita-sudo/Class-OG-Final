@@ -221,7 +221,8 @@ def _train_and_register(storage, active, version: int, output_path: Path, source
 
     Возвращает (recall@5 вырос, recall@5 до, recall@5 после).
     """
-    recall_before, recall_after = train_fn(active.model_path, train_examples,
+    base_path = config.resolve_model_path(active.model_path, active.version)
+    recall_before, recall_after = train_fn(base_path, train_examples,
                                            val_examples, output_path)
     recall_before, recall_after = float(recall_before), float(recall_after)
     improved = recall_after > recall_before
@@ -260,7 +261,7 @@ def _train_and_register(storage, active, version: int, output_path: Path, source
     mv = ModelVersion(
         version=version,
         base_model_name=active.model_path,
-        model_path=str(output_path),
+        model_path=output_path.name,  # имя папки: MODELS_DIR у каждого воркера свой
         is_active=False,
         recall5_before=recall_before,
         recall5_after=recall_after,

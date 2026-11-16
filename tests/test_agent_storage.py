@@ -200,12 +200,16 @@ def test_classify_defer_card_returns_result_without_writing(fake_st, monkeypatch
     assert any(r["appeal_id"] == appeal_id for r in storage.appeals._llm_log)
 
 
-def test_reload_model_if_changed(fake_st):
+def test_reload_model_if_changed(fake_st, monkeypatch, tmp_path):
+    from core import config
+
+    monkeypatch.setattr(config, "MODELS_DIR", str(tmp_path))
+    (tmp_path / "e5-finetuned-v1").mkdir()
     storage = _storage()
     agent = ClassifierAgent(storage=storage)
     assert agent.reload_model_if_changed() is False
 
-    storage.models.register(ModelVersion(1, "base-e5", "models/e5-finetuned-v1", False))
+    storage.models.register(ModelVersion(1, "base-e5", "e5-finetuned-v1", False))
     storage.classifier.add_vectors(1, [
         (e.code, "base", f"v1 {e.name}", _unit("v1:" + e.code)) for e in ENTRIES
     ])
@@ -213,7 +217,7 @@ def test_reload_model_if_changed(fake_st):
 
     assert agent.reload_model_if_changed() is True
     assert agent.model_version == 1
-    assert fake_st.loaded[-1] == "models/e5-finetuned-v1"
+    assert fake_st.loaded[-1] == str(tmp_path / "e5-finetuned-v1")
     assert agent.code_index["0001.0001.0001.0001"]["search_text"] == "v1 Вопрос"
 
 
@@ -304,7 +308,7 @@ def test_build_database_writes_base_and_annotation_rows(global_storage, monkeypa
     code = "0001.0001.0001.0001"
     ann.add_annotation(code, "комментарий")
     ann.save_annotation(code, "correct_name", "Иное")
-    global_storage.models.register(ModelVersion(1, "base-e5", "models/e5-finetuned-v1", False))
+    global_storage.models.register(ModelVersion(1, "base-e5", "e5-finetuned-v1", False))
 
     n = build_vectordb.build_database(global_storage, "models/e5-finetuned-v1", 1)
 
@@ -469,3 +473,18 @@ def test_compare_topk_detects_different_code_sets():
                                           {**np_all, "X": 0.5})
     # ничья на границе top-K (C и D по 0.4) — допустимое различие множеств
     assert mod.compare_topk(np_top, [("B", 0.5), ("A", 0.5), ("D", 0.4)], np_all) is None
+
+
+def test_missing_model_folder_raises_clear_error(fake_st, monkeypatch, tmp_path):
+    from core import config
+
+    monkeypatch.setattr(config, "MODELS_DIR", str(tmp_path))
+    storage = _storage()
+    agent = ClassifierAgent(storage=storage)
+    storage.models.register(ModelVersion(1, "base-e5", "e5-finetuned-v1", False))
+    storage.classifier.add_vectors(1, [
+        (e.code, "base", e.name, _unit("v1:" + e.code)) for e in ENTRIES])
+    storage.models.activate(1)
+
+    with pytest.raises(RuntimeError, match="нет папки модели v1"):
+        agent.reload_model_if_changed()
