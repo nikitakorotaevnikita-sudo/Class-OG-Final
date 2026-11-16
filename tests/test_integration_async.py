@@ -145,8 +145,8 @@ def test_unknown_job_id_gives_404():
 
 def test_queue_overflow_answers_429():
     """Переполнение — сигнал «повторите позже», а не внутренняя ошибка."""
-    class _Idle:  # брокер принимает, воркеров нет: задачи остаются queued
-        def send(self, task_name, msg, queue):
+    class _Idle:  # воркеров нет: задачи остаются queued
+        def send(self, job):
             pass
 
     api = make_client(_FakeAgent(), dispatcher=_Idle())
@@ -316,7 +316,7 @@ def test_queue_listing_worker_alive_follows_worker_readiness(monkeypatch):
     from api import job_api
 
     async def no_workers():
-        return False, True
+        return False
 
     monkeypatch.setattr(job_api, "worker_status", no_workers)
     stats = client(_FakeAgent()).get("/integration/jobs").json()["stats"]
@@ -344,21 +344,59 @@ def test_rx_endpoints_answer_503_when_db_down(monkeypatch, method, path, body, r
     assert resp.json() == {"detail": "База данных недоступна"}
 
 
-def test_rx_async_answers_503_when_broker_down():
-    from queueing.dispatcher import DispatchError
-
-    class _Down:
-        def send(self, task_name, msg, queue):
-            raise DispatchError("брокер недоступен: OSError: refused")
-
-    resp = make_client(_FakeAgent(), dispatcher=_Down()).post(
-        "/integration/classify-document-async", json={"appeal_text": "т"})
-    assert resp.status_code == 503
-    assert resp.json()["detail"].startswith("Брокер недоступен: ")
-
-
 def test_sync_failure_returns_500():
     resp = client(_FakeAgent(boom=True)).post("/integration/classify-document",
                                               json={"appeal_text": "текст"})
     assert resp.status_code == 500
     assert resp.json()["detail"].startswith("Ошибка классификации: ")
+
+
+# ── Забранный результат: delivered_at и удаление по JOB_DELIVERED_GRACE_SEC ──
+
+def test_integration_job_poll_marks_delivered_and_repeat_poll_same_result():
+    """Конечный статус в GET /integration/jobs/{id} помечает результат забранным;
+    повторный опрос (сетевой сбой у RX) до чистки отдаёт то же самое."""
+    from storage import get_storage
+    api = client(_FakeAgent())
+    job_id = api.post("/integration/classify-document-async",
+                      json={"appeal_text": "текст", "document_id": 26}).json()["job_id"]
+    jobs = get_storage().jobs
+    first = poll_until_done(api, job_id)
+    delivered = jobs.get(job_id).delivered_at
+    assert delivered is not None
+    again = api.get(f"/integration/jobs/{job_id}")
+    assert again.status_code == 200
+    assert again.json() == first
+    assert jobs.get(job_id).delivered_at == delivered  # метка не сдвигается
+
+
+def test_integration_job_poll_running_is_not_delivered():
+    from storage import get_storage
+    jobs = get_storage().jobs
+    job = jobs.create("classify", {"response_kind": "document"})
+    api = client(_FakeAgent())
+    assert api.get(f"/integration/jobs/{job.id}").json()["status"] == "queued"
+    jobs.claim(job.id)
+    assert api.get(f"/integration/jobs/{job.id}").json()["status"] == "running"
+    assert jobs.get(job.id).delivered_at is None
+
+
+def test_poll_after_grace_cleanup_returns_404():
+    from storage import get_storage
+    api = client(_FakeAgent())
+    job_id = api.post("/integration/classify-document-async",
+                      json={"appeal_text": "текст"}).json()["job_id"]
+    poll_until_done(api, job_id)
+    assert get_storage().jobs.cleanup_expired(24, delivered_grace_sec=0) == 1
+    resp = api.get(f"/integration/jobs/{job_id}")
+    assert resp.status_code == 404
+    assert "не найдена" in resp.json()["detail"]
+
+
+def test_sync_document_marks_delivered():
+    from storage import get_storage
+    api = client(_FakeAgent())
+    assert api.post("/integration/classify-document",
+                    json={"appeal_text": "текст"}).status_code == 200
+    job = get_storage().jobs.latest("classify")
+    assert job.status == "done" and job.delivered_at is not None

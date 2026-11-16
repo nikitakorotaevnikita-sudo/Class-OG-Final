@@ -4,7 +4,7 @@ FastAPI-сервер для агента классификации обраще
 
 Тонкий API: процесс не загружает классификатор (torch, sentence-transformers).
 Классификация и поиск по классификатору выполняются воркерами: API создаёт
-задачу в PostgreSQL, отправляет её в RabbitMQ и ждёт результата по
+задачу (строку jobs) в PostgreSQL и ждёт результата по
 LISTEN/NOTIFY (src/api/job_api.py). Статистика, верификация, исторические данные,
 дообучение и реестр моделей — через слой хранения (src/storage).
 
@@ -155,10 +155,11 @@ class FineTuneRequest(BaseModel):
 
 @app.get("/health")
 async def health_check():
-    """Проверка работоспособности: БД, брокер и воркеры классификации.
+    """Проверка работоспособности: БД и воркеры классификации.
 
-    agent_ready — очередь классификации слушает хотя бы один воркер (воркер
-    дообучения не считается); опрос брокера кэшируется ~2 с (job_api).
+    agent_ready — есть живой воркер очереди классификации: его соединение
+    `classifier-worker:<очереди>` в pg_stat_activity (воркер дообучения не
+    считается); проверка кэшируется ~2 с (job_api).
     """
     try:
         entries_count = await asyncio.to_thread(get_storage().classifier.count_entries)
@@ -166,13 +167,12 @@ async def health_check():
     except Exception as exc:  # noqa: BLE001 — /health не должен падать
         log.warning("/health: БД недоступна: %s", exc)
         entries_count, db_ok = 0, False
-    agent_ready, broker = await job_api.worker_status()
+    agent_ready = await job_api.worker_status()
     return {
         "status": "ok",
         "agent_ready": agent_ready,
         "classifier_entries": entries_count,
         "db": db_ok,
-        "broker": broker,
     }
 
 
@@ -221,7 +221,7 @@ async def _classify_via_job(text: str, req: Optional[Request], payload: dict) ->
     ip запроса пишется в карточку при её создании; elapsed_seconds карточки —
     время классификации, его записывает воркер (spec §7.1.5).
     """
-    sub = await job_api.run_sync_job("classify", "classify_appeal", payload,
+    sub = await job_api.run_sync_job("classify", payload,
                                      appeal_text=text, ip=_client_ip(req))
     return ClassifyResponse(**sub.job.result)
 
@@ -298,7 +298,7 @@ async def search_classifier(q: str, top_k: int = 5):
     Пример: /classifier/search?q=вывоз мусора&top_k=5
     """
     sub = await job_api.run_sync_job(
-        "search", "search_classifier", {"q": q, "top_k": top_k},
+        "search", {"q": q, "top_k": top_k},
         timeout=SEARCH_WAIT_TIMEOUT_SEC,
         timeout_text="Поиск по классификатору не завершился",
         error_prefix="Ошибка поиска",
@@ -316,8 +316,7 @@ async def _dispatch_embeddings(vector_ids: list[int]) -> None:
     """
     for vid in vector_ids:
         try:
-            await job_api.submit_job("embed_annotation", "embed_annotation", "classify",
-                                     {"vector_id": vid})
+            await job_api.submit_job("embed_annotation", "classify", {"vector_id": vid})
         except HTTPException as exc:
             log.warning("Эмбеддинг аннотации %s не поставлен в очередь: %s", vid, exc.detail)
 
@@ -608,6 +607,45 @@ def _iso(dt) -> Optional[str]:
     return dt.astimezone().replace(tzinfo=None).isoformat(timespec="seconds")
 
 
+def _registry_snapshot(mv) -> dict:
+    """Итог последней дообученной версии (ml_model_registry.report) — когда строки
+    finetune уже нет (удалена по JOB_TTL_HOURS). Формат — как у _finetune_snapshot."""
+    report = mv.report or {}
+    before = report.get("recall5_before", mv.recall5_before)
+    after = report.get("recall5_after", mv.recall5_after)
+    recall = (f" (recall@5 {before:.3f} → {after:.3f})"
+              if before is not None and after is not None else "")
+    state = "активна" if mv.is_active else "не активна"
+    return {
+        "job_id": None,
+        "status": "completed",
+        "source": report.get("source"),
+        "force": False,
+        "started_at": None,
+        "finished_at": _iso(mv.trained_at),
+        "message": f"Последнее дообучение: модель v{mv.version}{recall}, версия {state}",
+        "model_path": mv.model_path,
+        "returncode": 0,
+        "log_tail": "",
+    }
+
+
+def _latest_finetune_status(storage) -> dict:
+    """Последняя задача finetune; без неё — последняя версия реестра с report."""
+    job = storage.jobs.latest("finetune")
+    if job is not None:
+        if job.status in (STATUS_DONE, STATUS_ERROR):
+            try:  # строки finetune метка не удаляет (только JOB_TTL_HOURS)
+                storage.jobs.mark_delivered(job.id)
+            except Exception as exc:  # noqa: BLE001 — статус важнее метки
+                log.warning("Не удалось пометить задачу %s забранной: %s", job.id, exc)
+        return _finetune_snapshot(job)
+    reported = [mv for mv in storage.models.list() if mv.report]
+    if reported:
+        return _registry_snapshot(max(reported, key=lambda mv: mv.version))
+    return _finetune_snapshot(None)
+
+
 def _finetune_snapshot(job) -> dict:
     """Задача finetune → прежний формат статуса (/api/finetune/status)."""
     if job is None:
@@ -664,7 +702,7 @@ async def start_finetune(request: FineTuneRequest):
     # этот действующий флаг (payload.force), а не присланный в запросе.
     force = request.force or request.source in ("historical", "combined")
     try:
-        sub = await job_api.submit_job("finetune", "finetune", "training",
+        sub = await job_api.submit_job("finetune", "training",
                                        {"source": request.source, "force": force})
     except ActiveJobExists as exc:  # параллельный запрос успел создать задачу
         raise HTTPException(status_code=409, detail="Дообучение уже выполняется") from exc
@@ -674,9 +712,9 @@ async def start_finetune(request: FineTuneRequest):
 
 @app.get("/api/finetune/status")
 async def finetune_status():
-    """Статус последнего дообучения (последняя задача finetune)."""
-    job = await asyncio.to_thread(get_storage().jobs.latest, "finetune")
-    return _finetune_snapshot(job)
+    """Статус последнего дообучения: последняя задача finetune, а когда её строки
+    нет — итог последней версии из ml_model_registry.report."""
+    return await asyncio.to_thread(_latest_finetune_status, get_storage())
 
 
 # ── Реестр моделей ───────────────────────────────────────────────────────────

@@ -1,11 +1,12 @@
-"""Отправка задач воркерам (сторона API).
+"""Исполнение задач в процессе API — только для `STORAGE_BACKEND=memory` (тесты).
 
-- `CeleryDispatcher` — публикация в RabbitMQ (`send_task` по строковому имени;
-  модуль задач и модель API не импортирует).
-- `LocalDispatcher` — захват задачи (`jobs.claim`) и выполнение `tasks.run_*` в пуле
-  потоков этого же процесса (тесты и `STORAGE_BACKEND=memory`): `await waiter.wait(...)`
-  ведёт себя как в проде. Повторов нет — любой сбой завершает задачу ошибкой. Агент берётся из
-  `agent_factory()` на каждую задачу (кэширует и перезагружает его worker_main).
+В PostgreSQL постановка — это строка `jobs` (+ `NOTIFY job_queued`), её забирают
+воркеры (`worker.run`); диспетчера нет, `get_dispatcher()` возвращает None.
+
+`LocalDispatcher` — захват задачи (`jobs.claim`) и выполнение `tasks.run_*` в пуле
+потоков этого же процесса: `await waiter.wait(...)` ведёт себя как в проде. Повторов
+нет — любой сбой завершает задачу ошибкой. Агент берётся из `agent_factory()` на каждую
+задачу (кэширует и перезагружает его worker_main).
 
 Модуль импортирует API, поэтому classifier_agent/torch здесь не грузятся:
 `worker_main` и `queueing.tasks` импортируются лениво.
@@ -18,38 +19,20 @@ import time
 from queue import SimpleQueue
 from typing import Callable, Optional, Protocol
 
-from kombu.exceptions import OperationalError as KombuOperationalError
-
 from core import config
-from storage.models import STATUS_DONE, STATUS_ERROR
+from storage.models import STATUS_DONE, STATUS_ERROR, Job
 
 log = logging.getLogger(__name__)
 
 
-class DispatchError(Exception):
-    """Задачу не удалось отправить (брокер недоступен и т. п.)."""
-
-
 class Dispatcher(Protocol):
-    def send(self, task_name: str, msg: dict, queue: str) -> None: ...
+    def send(self, job: Job) -> None: ...
 
 
-class CeleryDispatcher:
-    """Публикация задачи в RabbitMQ через Celery."""
-
-    def send(self, task_name: str, msg: dict, queue: str) -> None:
-        from queueing.celery_app import app
-
-        try:
-            app.send_task(task_name, args=[msg], queue=queue)
-        except (KombuOperationalError, OSError) as exc:
-            raise DispatchError(f"брокер недоступен: {type(exc).__name__}: {exc}") from exc
-
-
-# имя задачи → (функция в queueing.tasks, нужен ли агент)
+# тип задачи (jobs.job_type) → (функция в queueing.tasks, нужен ли агент)
 _LOCAL_TASKS = {
-    "classify_appeal": ("run_classify_appeal", True),
-    "search_classifier": ("run_search_classifier", True),
+    "classify": ("run_classify_appeal", True),
+    "search": ("run_search_classifier", True),
     "embed_annotation": ("run_embed_annotation", True),
     "finetune": ("run_finetune", False),
 }
@@ -73,25 +56,27 @@ class LocalDispatcher:
         # модели после дообучения и применение .env живут в worker_main.get_agent.
         self._agent_factory = agent_factory
         self.max_workers = max(1, max_workers or config.CLASSIFY_CONCURRENCY or 2)
-        self._queue: "SimpleQueue[Optional[tuple[str, dict]]]" = SimpleQueue()
+        self._queue: "SimpleQueue[Optional[tuple[str, str]]]" = SimpleQueue()
         self._threads: list[threading.Thread] = []
         self._finetune_threads: list[threading.Thread] = []
         self._threads_lock = threading.Lock()
         self._closed = False
 
-    def send(self, task_name: str, msg: dict, queue: str) -> None:
-        if task_name not in _LOCAL_TASKS:
-            raise DispatchError(f"неизвестная задача: {task_name!r}")
+    def send(self, job: Job) -> None:
+        """Выполнить созданную задачу (строку jobs) в этом процессе."""
+        job_type, job_id = job.job_type, job.id
+        if job_type not in _LOCAL_TASKS:
+            raise ValueError(f"неизвестный тип задачи: {job_type!r}")
         with self._threads_lock:
             if self._closed:
-                raise DispatchError("локальный диспетчер остановлен")
-            if task_name == "finetune":
-                thread = threading.Thread(target=self._run_safe, args=(task_name, msg),
+                raise RuntimeError("локальный диспетчер остановлен")
+            if job_type == "finetune":
+                thread = threading.Thread(target=self._run_safe, args=(job_type, job_id),
                                           daemon=True, name="local-dispatcher-finetune")
                 self._finetune_threads.append(thread)
                 thread.start()
                 return
-            self._queue.put((task_name, msg))
+            self._queue.put((job_type, job_id))
             if len(self._threads) < self.max_workers:
                 thread = threading.Thread(
                     target=self._worker, daemon=True,
@@ -122,19 +107,18 @@ class LocalDispatcher:
         for thread in threads + finetune:
             thread.join(max(0.0, deadline - time.monotonic()))
 
-    def _run_safe(self, task_name: str, msg: dict) -> None:
+    def _run_safe(self, job_type: str, job_id: str) -> None:
         try:
-            self._run(task_name, msg)
+            self._run(job_type, job_id)
         except Exception:  # noqa: BLE001 — поток не должен умирать
-            log.exception("Локальный диспетчер: сбой задачи %s", task_name)
+            log.exception("Локальный диспетчер: сбой задачи %s", job_type)
 
-    def _run(self, task_name: str, msg: dict) -> None:
-        job_id = msg.get("job_id")
+    def _run(self, job_type: str, job_id: str) -> None:
         error: Optional[str] = None
         try:
             from queueing import tasks
 
-            fn_name, with_agent = _LOCAL_TASKS[task_name]
+            fn_name, with_agent = _LOCAL_TASKS[job_type]
             fn = getattr(tasks, fn_name)
             # run_* работают над уже захваченной задачей (как воркер после claim_next).
             job = self._storage.jobs.claim(job_id)
@@ -146,7 +130,7 @@ class LocalDispatcher:
                 transitioned = fn(job, self._storage)
             tasks.delete_if_embed_done(self._storage, job, transitioned)
         except Exception as exc:  # noqa: BLE001 — в т.ч. RetryableError: повторов нет
-            log.exception("Локальная задача %s (%s) упала", task_name, job_id)
+            log.exception("Локальная задача %s (%s) упала", job_type, job_id)
             error = f"{type(exc).__name__}: {exc}"
         if not job_id:
             return
@@ -172,18 +156,15 @@ _dispatcher: Optional[Dispatcher] = None
 _lock = threading.Lock()
 
 
-def get_dispatcher() -> Dispatcher:
-    """Singleton по STORAGE_BACKEND: memory → LocalDispatcher, иначе Celery."""
+def get_dispatcher() -> Optional[Dispatcher]:
+    """memory → singleton LocalDispatcher; PostgreSQL → None (задачи берут воркеры)."""
     global _dispatcher
-    if _dispatcher is None:
+    if _dispatcher is None and config.STORAGE_BACKEND == "memory":
         with _lock:
             if _dispatcher is None:
-                if config.STORAGE_BACKEND == "memory":
-                    from storage import get_storage
+                from storage import get_storage
 
-                    _dispatcher = LocalDispatcher(get_storage(), agent_factory=_worker_agent)
-                else:
-                    _dispatcher = CeleryDispatcher()
+                _dispatcher = LocalDispatcher(get_storage(), agent_factory=_worker_agent)
     return _dispatcher
 
 

@@ -15,7 +15,7 @@ PACKAGES = {
     "api": {"api_server", "integration_api", "job_api", "responses"},
     "classifier": {"classifier_agent", "hierarchy", "reranker", "section_router", "llm_schemas",
                    "llm_check", "fio_extractor", "email_extractor"},
-    "queueing": {"celery_app", "dispatcher", "tasks", "waiter", "webhook"},
+    "queueing": {"dispatcher", "tasks", "waiter", "webhook"},
     "worker": {"worker_main", "run"},
     "storage": {"appeals_logger", "annotations_storage"},
     "training": {"finetune_model", "auto_finetune", "build_vectordb", "historical_loader",

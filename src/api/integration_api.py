@@ -21,7 +21,7 @@ from api.responses import (ClassifyDocumentRequest, ClassifyDocumentResponse, Ac
                        JobStatusResponse, job_status_payload)
 from queueing import webhook
 from storage import get_storage
-from storage.models import QueueFull
+from storage.models import STATUS_DONE, STATUS_ERROR, QueueFull
 
 router = APIRouter(prefix="/integration", tags=["Интеграция RX"])
 
@@ -102,7 +102,7 @@ async def classify_document(body: ClassifyDocumentRequest):
     `/classify-document-async`.
     """
     text = await _resolve_text_async(body)
-    sub = await job_api.run_sync_job("classify", "classify_appeal", _document_payload(),
+    sub = await job_api.run_sync_job("classify", _document_payload(),
                                      appeal_text=text, document_id=body.document_id)
     return ClassifyDocumentResponse(**sub.job.result)
 
@@ -127,7 +127,7 @@ async def classify_document_async(body: ClassifyDocumentRequest, response: Respo
 
     try:
         sub = await job_api.submit_job(
-            _JOB_TYPE, "classify_appeal", "classify", _document_payload(),
+            _JOB_TYPE, "classify", _document_payload(),
             appeal_text=text, document_id=body.document_id,
             webhook_url=body.webhook_url or None, max_queued=config.JOB_MAX_QUEUED)
     except QueueFull as e:
@@ -151,6 +151,9 @@ async def get_job(job_id: str):
     Пока задача не завершена, `result` пустой — это не ошибка, а нормальное
     состояние: `queued` (ждёт) или `running` (обрабатывается). Здесь же
     забирается результат синхронного вызова, закончившегося 504.
+
+    Отданный конечный статус помечает результат забранным: строка удаляется через
+    JOB_DELIVERED_GRACE_SEC (повторный опрос до этого отдаёт то же), затем — 404.
     """
     jobs = get_storage().jobs
     job = await _db(jobs.get, job_id)
@@ -159,6 +162,8 @@ async def get_job(job_id: str):
                             detail=f"Задача {job_id} не найдена: неверный идентификатор "
                                    f"либо срок хранения результата истёк")
     position = await _db(jobs.position, job_id)
+    if job.status in (STATUS_DONE, STATUS_ERROR):
+        await job_api.mark_delivered(job_id)
     # Тело строится вручную: результат у задач /classify и /classify-document
     # разной формы, он отдаётся как сохранён воркером.
     return JSONResponse(job_status_payload(job, queue_position=position))
@@ -169,11 +174,11 @@ async def list_jobs(limit: int = 20):
     """Сводка по очереди — для диагностики на стенде.
 
     stats — только задачи классификации (как в прежней очереди RX), плюс
-    worker_alive: очередь классификации слушает хотя бы один воркер.
+    worker_alive: есть живой воркер очереди классификации (ключ сохранён для RX).
     """
     jobs = get_storage().jobs
     stats = await _db(jobs.stats, _JOB_TYPE)
-    stats["worker_alive"] = (await job_api.worker_status())[0]
+    stats["worker_alive"] = await job_api.worker_status()
     items = await _db(lambda: jobs.list(limit=limit, job_type=_JOB_TYPE))
     return {
         "stats": stats,

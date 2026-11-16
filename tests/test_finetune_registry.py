@@ -219,39 +219,31 @@ def test_cli_main_exit_codes(monkeypatch, capsys):
 # ── auto_finetune / auto_import_historical ───────────────────────────────────
 
 def test_auto_finetune_enqueues_training_job(monkeypatch):
+    """Постановка — строка jobs в очереди training (NOTIFY job_queued в PostgreSQL)."""
     from training import auto_finetune
-    from queueing import dispatcher
     from storage import get_storage
 
     storage = seed(get_storage())
-    sent = []
-    monkeypatch.setattr(dispatcher.CeleryDispatcher, "send",
-                        lambda self, name, msg, queue: sent.append((name, msg, queue)))
 
     job_id = auto_finetune.main(force=False)
 
     assert job_id is not None
-    assert sent == [("finetune", {"job_id": job_id, "appeal_id": None, "document_id": None},
-                     "training")]
     job = storage.jobs.get(job_id)
     assert job.job_type == "finetune" and job.status == "queued"
+    assert job.queue == "training"
     assert job.payload["source"] == "combined" and job.payload["force"] is False
     assert job.payload["queue"] == "training"
 
 
 def test_auto_finetune_below_threshold_enqueues_nothing(monkeypatch):
     from training import auto_finetune
-    from queueing import dispatcher
     from storage import get_storage
 
     monkeypatch.setattr(config, "FINETUNE_THRESHOLD", 100)
     storage = seed(get_storage())
-    sent = []
-    monkeypatch.setattr(dispatcher.CeleryDispatcher, "send",
-                        lambda self, name, msg, queue: sent.append(name))
 
     assert auto_finetune.main(force=False) is None
-    assert sent == [] and storage.jobs.latest("finetune") is None
+    assert storage.jobs.latest("finetune") is None
 
 
 def test_auto_import_saves_valid_records_to_db(monkeypatch, tmp_path):
@@ -430,18 +422,14 @@ def test_build_vectordb_cli_usage_without_args(capsys):
 
 def test_auto_finetune_race_with_active_job_exits_cleanly(monkeypatch, capsys):
     from training import auto_finetune
-    from queueing import dispatcher
     from storage import get_storage
 
     storage = seed(get_storage())
     storage.jobs.create("finetune", {}, queue_class="training")
     monkeypatch.setattr(storage.jobs, "has_active", lambda job_type: False)  # гонка
-    sent = []
-    monkeypatch.setattr(dispatcher.CeleryDispatcher, "send",
-                        lambda self, name, msg, queue: sent.append(name))
 
     assert auto_finetune._cli(["--force"]) == 0
-    assert sent == []
+    assert storage.jobs.stats("finetune")["queued"] == 1
     assert "уже в очереди или выполняется" in capsys.readouterr().out
 
 

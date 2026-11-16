@@ -12,11 +12,10 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
-from kombu.exceptions import OperationalError as KombuOperationalError
 
 from queueing import dispatcher as dispatcher_mod
 from queueing import waiter as waiter_mod
-from queueing.dispatcher import CeleryDispatcher, DispatchError, LocalDispatcher
+from queueing.dispatcher import LocalDispatcher
 from queueing.waiter import JobWaiter
 from storage.memory import MemoryStorage
 
@@ -210,37 +209,6 @@ def test_stop_removes_memory_listener():
 
 # ── диспетчеры ───────────────────────────────────────────────────────────────
 
-def test_celery_dispatcher_wraps_broker_error(monkeypatch):
-    from queueing.celery_app import app
-
-    def boom(*a, **kw):
-        raise KombuOperationalError("connection refused")
-
-    monkeypatch.setattr(app, "send_task", boom)
-    with pytest.raises(DispatchError):
-        CeleryDispatcher().send("classify_appeal", {"job_id": "x"}, queue="classify")
-
-
-def test_celery_dispatcher_wraps_oserror(monkeypatch):
-    from queueing.celery_app import app
-
-    def boom(*a, **kw):
-        raise ConnectionRefusedError("refused")
-
-    monkeypatch.setattr(app, "send_task", boom)
-    with pytest.raises(DispatchError):
-        CeleryDispatcher().send("classify_appeal", {"job_id": "x"}, queue="classify")
-
-
-def test_celery_dispatcher_sends_task(monkeypatch):
-    from queueing.celery_app import app
-
-    calls = []
-    monkeypatch.setattr(app, "send_task", lambda *a, **kw: calls.append((a, kw)))
-    CeleryDispatcher().send("finetune", {"job_id": "abc"}, queue="training")
-    assert calls == [(("finetune",), {"args": [{"job_id": "abc"}], "queue": "training"})]
-
-
 def test_local_dispatcher_runs_task_and_waiter_sees_result(monkeypatch):
     from queueing import tasks
 
@@ -263,7 +231,7 @@ def test_local_dispatcher_runs_task_and_waiter_sees_result(monkeypatch):
     waiter = JobWaiter(storage)
 
     async def scenario():
-        disp.send("classify_appeal", {"job_id": job.id}, queue="classify")
+        disp.send(job)
         return await waiter.wait(job.id, timeout=5, recheck_every=30)
 
     result = asyncio.run(_with_waiter(waiter, scenario))
@@ -272,7 +240,7 @@ def test_local_dispatcher_runs_task_and_waiter_sees_result(monkeypatch):
     # фабрика вызывается на каждую задачу: кэш и горячая перезагрузка модели
     # живут в worker_main.get_agent (reload_model_if_changed, настройки .env)
     job2 = _new_job(storage)
-    disp.send("classify_appeal", {"job_id": job2.id}, queue="classify")
+    disp.send(job2)
     asyncio.run(_with_waiter(waiter, lambda: waiter.wait(job2.id, timeout=5)))
     assert agents == [1, 1]
 
@@ -293,7 +261,7 @@ def test_local_dispatcher_finetune_has_no_agent(monkeypatch):
 
     disp = LocalDispatcher(storage, agent_factory=factory)
     waiter = JobWaiter(storage)
-    disp.send("finetune", {"job_id": job.id}, queue="training")
+    disp.send(job)
     result = asyncio.run(_with_waiter(waiter, lambda: waiter.wait(job.id, timeout=5)))
     assert result.status == "done"
 
@@ -311,7 +279,7 @@ def test_local_dispatcher_finishes_job_with_error_on_exception(monkeypatch, exc)
     monkeypatch.setattr(tasks, "run_classify_appeal", failing)
     disp = LocalDispatcher(storage, agent_factory=lambda: object())
     waiter = JobWaiter(storage)
-    disp.send("classify_appeal", {"job_id": job.id}, queue="classify")
+    disp.send(job)
     result = asyncio.run(_with_waiter(
         waiter, lambda: waiter.wait(job.id, timeout=5, recheck_every=30)))
     assert result is not None and result.status == "error"
@@ -328,7 +296,7 @@ def test_local_dispatcher_agent_factory_failure_finishes_job(monkeypatch):
 
     disp = LocalDispatcher(storage, agent_factory=factory)
     waiter = JobWaiter(storage)
-    disp.send("classify_appeal", {"job_id": job.id}, queue="classify")
+    disp.send(job)
     result = asyncio.run(_with_waiter(waiter, lambda: waiter.wait(job.id, timeout=5)))
     assert result.status == "error" and "нет активной модели" in result.error
 
@@ -356,7 +324,7 @@ def test_local_dispatcher_bounds_concurrency(monkeypatch):
     disp = LocalDispatcher(storage, agent_factory=lambda: "A", max_workers=2)
     before = threading.active_count()
     for job in jobs:
-        disp.send("classify_appeal", {"job_id": job.id}, queue="classify")
+        disp.send(job)
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline and state["now"] < 2:
         time.sleep(0.02)
@@ -396,7 +364,8 @@ def test_local_finetune_does_not_hold_classify_slot(monkeypatch):
     from queueing import tasks
 
     storage = MemoryStorage()
-    ft_job, cl_job = _new_job(storage), _new_job(storage)
+    ft_job = storage.jobs.create("finetune", {}, queue_class="training")
+    cl_job = _new_job(storage)
     gate = threading.Event()
     started = threading.Event()
 
@@ -412,9 +381,9 @@ def test_local_finetune_does_not_hold_classify_slot(monkeypatch):
     monkeypatch.setattr(tasks, "run_classify_appeal", fast_classify)
     disp = LocalDispatcher(storage, agent_factory=lambda: "A", max_workers=1)
     try:
-        disp.send("finetune", {"job_id": ft_job.id}, queue="training")
+        disp.send(ft_job)
         assert started.wait(5)
-        disp.send("classify_appeal", {"job_id": cl_job.id}, queue="classify")
+        disp.send(cl_job)
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline and storage.jobs.get(cl_job.id).status != "done":
             time.sleep(0.02)
@@ -443,7 +412,7 @@ def test_local_dispatcher_shutdown_stops_threads(monkeypatch):
     monkeypatch.setattr(tasks, "run_classify_appeal", slow)
     disp = LocalDispatcher(storage, agent_factory=lambda: "A", max_workers=2)
     for job in jobs:
-        disp.send("classify_appeal", {"job_id": job.id}, queue="classify")
+        disp.send(job)
     threads = list(disp._threads)
     assert threads
 
@@ -451,15 +420,15 @@ def test_local_dispatcher_shutdown_stops_threads(monkeypatch):
 
     assert not any(t.is_alive() for t in threads)
     assert all(storage.jobs.get(j.id).status == "done" for j in jobs)
-    with pytest.raises(DispatchError):
-        disp.send("classify_appeal", {"job_id": jobs[0].id}, queue="classify")
+    with pytest.raises(RuntimeError):
+        disp.send(jobs[0])
 
 
 def test_local_dispatcher_shutdown_waits_for_finetune_thread(monkeypatch):
     from queueing import tasks
 
     storage = MemoryStorage()
-    job = _new_job(storage)
+    job = storage.jobs.create("finetune", {}, queue_class="training")
 
     def slow_finetune(job, st):
         time.sleep(0.3)
@@ -467,7 +436,7 @@ def test_local_dispatcher_shutdown_waits_for_finetune_thread(monkeypatch):
 
     monkeypatch.setattr(tasks, "run_finetune", slow_finetune)
     disp = LocalDispatcher(storage, agent_factory=lambda: "A")
-    disp.send("finetune", {"job_id": job.id}, queue="training")
+    disp.send(job)
 
     disp.shutdown(timeout=5)
 
@@ -490,8 +459,8 @@ def test_local_dispatcher_deletes_embed_annotation_after_success():
     ok = storage.jobs.create("embed_annotation", {"vector_id": vid})
     bad = storage.jobs.create("embed_annotation", {"vector_id": 999})
     disp = LocalDispatcher(storage, agent_factory=Agent)
-    disp.send("embed_annotation", {"job_id": ok.id}, queue="classify")
-    disp.send("embed_annotation", {"job_id": bad.id}, queue="classify")
+    disp.send(ok)
+    disp.send(bad)
     disp.shutdown(timeout=5)
 
     assert storage.jobs.get(ok.id) is None
@@ -500,9 +469,11 @@ def test_local_dispatcher_deletes_embed_annotation_after_success():
 
 
 def test_local_dispatcher_unknown_task():
+    from types import SimpleNamespace
+
     disp = LocalDispatcher(MemoryStorage(), agent_factory=lambda: None)
-    with pytest.raises(DispatchError):
-        disp.send("no_such_task", {"job_id": "x"}, queue="classify")
+    with pytest.raises(ValueError):
+        disp.send(SimpleNamespace(id="x", job_type="no_such_task"))
 
 
 # ── синглтоны ────────────────────────────────────────────────────────────────
@@ -532,7 +503,8 @@ def test_singletons_postgres_backend(monkeypatch):
     dispatcher_mod.reset_dispatcher()
     waiter_mod.reset_waiter()
     try:
-        assert isinstance(dispatcher_mod.get_dispatcher(), CeleryDispatcher)
+        # PostgreSQL: строка jobs (NOTIFY job_queued) и есть постановка — диспетчера нет
+        assert dispatcher_mod.get_dispatcher() is None
         w = waiter_mod.get_waiter()  # пул не открывается: storage ленивый
         assert isinstance(w, JobWaiter) and not w._is_memory
         assert w._dsn == config.DATABASE_URL
@@ -545,7 +517,8 @@ def test_modules_do_not_import_model_stack():
     code = (
         "import sys; sys.path.insert(0, %r)\n"
         "import queueing.dispatcher, queueing.waiter\n"
-        "bad = [m for m in ('torch', 'classifier.classifier_agent', 'sentence_transformers', 'worker.worker_main')"
+        "bad = [m for m in ('torch', 'classifier.classifier_agent', 'sentence_transformers', 'worker.worker_main',"
+        " 'celery', 'kombu')"
         " if m in sys.modules]\n"
         "print('BAD', bad)\n"
         "sys.exit(1 if bad else 0)\n" % str(SRC)

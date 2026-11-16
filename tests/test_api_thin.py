@@ -1,7 +1,7 @@
-"""Тонкий API: классификация и поиск — через задачу (jobs) + диспетчер + ожидатель.
+"""Тонкий API: классификация и поиск — через задачу (jobs) + ожидатель.
 
-STORAGE_BACKEND=memory (conftest), LocalDispatcher с фейковым агентом — без
-модели и без брокера. TestClient запускается в `with`, чтобы отработал lifespan
+STORAGE_BACKEND=memory (conftest): строку jobs исполняет LocalDispatcher с фейковым
+агентом — без модели и без воркеров. TestClient запускается в `with`, чтобы отработал lifespan
 (старт ожидателя job_done).
 """
 import os
@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 from core import config
 from queueing import dispatcher as dispatcher_mod
 from queueing import waiter as waiter_mod
-from queueing.dispatcher import DispatchError, LocalDispatcher
+from queueing.dispatcher import LocalDispatcher
 from storage import get_storage
 from storage.models import AppealQuestionRow, AppealResult, ModelVersion
 
@@ -107,10 +107,12 @@ def client(env):
         yield c
 
 
-def test_api_does_not_import_heavy_modules():
+def test_api_process_does_not_import_celery_or_model():
+    """API без брокера и модели: ни celery/kombu, ни classifier_agent/torch."""
     code = (
         "import sys; sys.path.insert(0, r'%s'); import api.api_server; "
-        "heavy = [m for m in ('torch', 'classifier.classifier_agent', 'sentence_transformers') "
+        "heavy = [m for m in ('torch', 'classifier.classifier_agent', 'sentence_transformers', "
+        "'celery', 'kombu') "
         "if m in sys.modules]; print('HEAVY=' + ','.join(heavy))" % SRC
     )
     proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
@@ -184,19 +186,6 @@ def test_classify_job_error_returns_500(env, client):
     assert "LLM недоступна" in resp.json()["detail"]
 
 
-def test_classify_dispatch_failure_returns_503(env, client, monkeypatch):
-    class Down:
-        def send(self, task_name, msg, queue):
-            raise DispatchError("брокер недоступен: OSError: refused")
-
-    monkeypatch.setattr(dispatcher_mod, "_dispatcher", Down())
-    resp = client.post("/classify", json={"appeal_text": "Не вывозят мусор"})
-    assert resp.status_code == 503
-    job = env.storage.jobs.latest("classify")
-    assert job.status == "error"
-    assert job.error.startswith("Брокер недоступен: ")
-
-
 def test_classify_db_failure_returns_503(env, client, monkeypatch):
     import psycopg
 
@@ -221,10 +210,83 @@ def test_classifier_search_via_job(env, client):
 
 def test_health_shape(client):
     data = client.get("/health").json()
-    assert set(data) == {"status", "agent_ready", "classifier_entries", "db", "broker"}
+    assert set(data) == {"status", "agent_ready", "classifier_entries", "db"}
     assert data["status"] == "ok"
-    assert data["agent_ready"] is True and data["broker"] is True and data["db"] is True
+    assert data["agent_ready"] is True and data["db"] is True
     assert data["classifier_entries"] == 0
+
+
+def test_health_has_no_broker_and_agent_ready_from_workers(env, client):
+    """agent_ready — живой воркер очереди classify (pg_stat_activity; в memory —
+    register_worker). Memory без зарегистрированных воркеров: True (LocalDispatcher
+    выполняет задачи в процессе API)."""
+    jobs = env.storage.jobs
+    assert "broker" not in client.get("/health").json()
+    jobs.register_worker("classifier-worker:training")
+    assert client.get("/health").json()["agent_ready"] is False
+    assert client.get("/integration/jobs").json()["stats"]["worker_alive"] is False
+    jobs.register_worker("classifier-worker:classify_sync,classify")
+    assert client.get("/health").json()["agent_ready"] is True
+    assert client.get("/integration/jobs").json()["stats"]["worker_alive"] is True
+    jobs.unregister_worker("classifier-worker:classify_sync,classify")
+    assert client.get("/health").json()["agent_ready"] is False
+
+
+def test_sync_classify_marks_delivered(env, client):
+    resp = client.post("/classify", json={"appeal_text": "Не вывозят мусор"})
+    assert resp.status_code == 200, resp.text
+    job = env.storage.jobs.latest("classify")
+    assert job.status == "done" and job.delivered_at is not None
+    # забранная задача удаляется чисткой по JOB_DELIVERED_GRACE_SEC
+    assert env.storage.jobs.cleanup_expired(24, delivered_grace_sec=0) == 1
+    assert env.storage.jobs.get(job.id) is None
+
+
+def test_sync_classify_error_marks_delivered(env, client):
+    env.agent.error = RuntimeError("LLM недоступна")
+    assert client.post("/classify", json={"appeal_text": "т"}).status_code == 500
+    job = env.storage.jobs.latest("classify")
+    assert job.status == "error" and job.delivered_at is not None
+
+
+def test_sync_timeout_does_not_mark_delivered(env, client, monkeypatch):
+    env.agent.delay = 1.0
+    monkeypatch.setattr(config, "SYNC_WAIT_TIMEOUT_SEC", 0.2)
+    assert client.post("/classify", json={"appeal_text": "т"}).status_code == 504
+    job = env.storage.jobs.latest("classify")
+    assert job.delivered_at is None
+
+
+def test_finetune_status_falls_back_to_registry_report(env, client):
+    """Строки finetune нет (удалена по TTL) — итог последней версии из реестра."""
+    from datetime import datetime, timezone
+
+    _register_models(env.storage)
+    trained = datetime(2026, 11, 1, 10, 0, tzinfo=timezone.utc)
+    env.storage.models.register(ModelVersion(
+        version=2, base_model_name="models/e5-finetuned-v1",
+        model_path="models/e5-finetuned-v2", is_active=True, recall5_before=0.6,
+        recall5_after=0.7, training_samples_count=20, trained_at=trained,
+        report={"version": 2, "source": "historical", "recall5_before": 0.6,
+                "recall5_after": 0.7, "improved": True}))
+    data = client.get("/api/finetune/status").json()
+    assert set(data) == {"job_id", "status", "source", "force", "started_at", "finished_at",
+                         "message", "model_path", "returncode", "log_tail"}
+    assert data["status"] == "completed"
+    assert data["job_id"] is None
+    assert data["source"] == "historical"
+    assert data["model_path"] == "models/e5-finetuned-v2"
+    assert data["returncode"] == 0
+    assert "v2" in data["message"] and "0.600" in data["message"] and "0.700" in data["message"]
+    assert data["finished_at"] == trained.astimezone().replace(tzinfo=None).isoformat(
+        timespec="seconds")
+
+
+def test_finetune_status_idle_when_registry_has_no_report(env, client):
+    _register_models(env.storage)  # v0/v1 без report
+    data = client.get("/api/finetune/status").json()
+    assert data["status"] == "idle"
+    assert data["message"] == "Дообучение не запускалось"
 
 
 def test_health_db_down_never_raises(env, client, monkeypatch):
@@ -249,8 +311,8 @@ def test_finetune_start_and_status(env, client, monkeypatch):
     sent = []
 
     class Rec:
-        def send(self, task_name, msg, queue):
-            sent.append((task_name, msg, queue))
+        def send(self, job):
+            sent.append(job)
 
     monkeypatch.setattr(dispatcher_mod, "_dispatcher", Rec())
     idle = client.get("/api/finetune/status").json()
@@ -264,8 +326,8 @@ def test_finetune_start_and_status(env, client, monkeypatch):
     assert snap["source"] == "verified"
     assert set(snap) >= {"job_id", "status", "source", "force", "started_at", "finished_at",
                          "message", "model_path", "returncode", "log_tail"}
-    assert sent[0][0] == "finetune" and sent[0][2] == "training"
-    assert sent[0][1]["job_id"] == snap["job_id"]
+    assert sent[0].job_type == "finetune" and sent[0].queue == "training"
+    assert sent[0].id == snap["job_id"]
 
     env.storage.jobs.claim(snap["job_id"])
     assert client.get("/api/finetune/status").json()["status"] == "running"
@@ -324,8 +386,8 @@ def test_verify_correct_with_annotation_dispatches_embedding(env, client, monkey
     sent = []
 
     class Rec:
-        def send(self, task_name, msg, queue):
-            sent.append((task_name, msg, queue))
+        def send(self, job):
+            sent.append(job)
 
     _register_models(env.storage)
     aid = env.storage.appeals.create("текст")
@@ -335,8 +397,8 @@ def test_verify_correct_with_annotation_dispatches_embedding(env, client, monkey
     assert resp.status_code == 200, resp.text
     assert resp.json()["annotation_count"] == 1
     assert env.storage.classifier.annotations_for(CODE) == ["про мусор"]
-    assert [(t, q) for t, _, q in sent] == [("embed_annotation", "classify")]
-    job = env.storage.jobs.get(sent[0][1]["job_id"])
+    assert [(j.job_type, j.queue) for j in sent] == [("embed_annotation", "classify")]
+    job = env.storage.jobs.get(sent[0].id)
     assert job.job_type == "embed_annotation"
     assert job.payload["vector_id"] == env.storage.classifier.pending_annotations(0)[0][0]
 
@@ -424,8 +486,8 @@ def test_verify_enqueues_exactly_inserted_annotation_ids(env, client, monkeypatc
     sent = []
 
     class Rec:
-        def send(self, task_name, msg, queue):
-            sent.append(env.storage.jobs.get(msg["job_id"]).payload["vector_id"])
+        def send(self, job):
+            sent.append(env.storage.jobs.get(job.id).payload["vector_id"])
 
     _register_models(env.storage)
     aid = env.storage.appeals.create("текст")
@@ -523,63 +585,57 @@ def test_finetune_force_reports_effective_flag(env, client, monkeypatch, source,
 
 
 def test_health_probe_is_single_flight_and_cached(monkeypatch):
-    """Параллельные /health ждут одну проверку брокера; результат кэшируется ~2 с."""
+    """Параллельные /health ждут одну проверку воркеров; результат кэшируется ~2 с."""
     import asyncio
     from api import job_api
 
     monkeypatch.setattr(config, "STORAGE_BACKEND", "postgres")
-    monkeypatch.setattr(job_api, "_ping_cache", {"at": None, "value": (False, False),
-                                                 "task": None})
+    monkeypatch.setattr(job_api, "_ping_cache", {"at": None, "value": False, "task": None})
     calls = []
 
-    def slow_ping():
+    def slow_probe():
         calls.append(1)
         time.sleep(0.2)
-        return True, True
+        return True
 
-    monkeypatch.setattr(job_api, "_ping_workers", slow_ping)
+    monkeypatch.setattr(job_api, "_classify_workers_alive", slow_probe)
 
     async def burst():
         return await asyncio.gather(*(job_api.worker_status() for _ in range(5)))
 
-    assert asyncio.run(burst()) == [(True, True)] * 5
+    assert asyncio.run(burst()) == [True] * 5
     assert len(calls) == 1
-    assert asyncio.run(job_api.worker_status()) == (True, True)
-    assert len(calls) == 1, "в пределах кэша брокер не опрашивается"
+    assert asyncio.run(job_api.worker_status()) is True
+    assert len(calls) == 1, "в пределах кэша воркеры не опрашиваются"
     assert job_api._PING_CACHE_SEC <= 2.5
     job_api._ping_cache["at"] -= job_api._PING_CACHE_SEC + 0.1
     asyncio.run(job_api.worker_status())
     assert len(calls) == 2
 
 
-@pytest.mark.parametrize("replies, expected", [
-    ({"classify1@h": [{"name": "classify_sync"}, {"name": "classify"}]}, (True, True)),
-    ({"training@h": [{"name": "training"}]}, (False, True)),
-    ({"training@h": [{"name": "training"}], "celery@abc": [{"name": "classify"}]},
-     (True, True)),
-    (None, (False, True)),
+@pytest.mark.parametrize("names, expected", [
+    (["classifier-worker:classify_sync,classify"], True),
+    (["classifier-worker:training"], False),
+    (["classifier-worker:training", "classifier-worker:classify"], True),
+    ([], False),
 ])
-def test_ping_counts_only_classify_workers(monkeypatch, replies, expected):
+def test_workers_alive_counts_only_classify_workers(env, names, expected):
     from api import job_api
-    from queueing import celery_app as celery_mod
 
-    class Inspect:
-        def active_queues(self):
-            return replies
-
-    monkeypatch.setattr(celery_mod.app.control, "inspect", lambda timeout=1: Inspect())
-    assert job_api._ping_workers() == expected
+    for name in names:
+        env.storage.jobs.register_worker(name)
+    assert job_api._classify_workers_alive() is expected
 
 
-def test_ping_broker_down(monkeypatch):
+def test_workers_probe_db_down_is_false(env, monkeypatch):
+    import psycopg
     from api import job_api
-    from queueing import celery_app as celery_mod
 
-    def down(timeout=1):
-        raise OSError("connection refused")
+    def down(queue):
+        raise psycopg.OperationalError("connection refused")
 
-    monkeypatch.setattr(celery_mod.app.control, "inspect", down)
-    assert job_api._ping_workers() == (False, False)
+    monkeypatch.setattr(env.storage.jobs, "live_workers", down)
+    assert job_api._classify_workers_alive() is False
 
 
 def _off_loop() -> bool:
