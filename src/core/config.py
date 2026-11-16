@@ -209,13 +209,19 @@ def resolve_model_path(path: str, version: Optional[int] = None) -> str:
     Реестр хранит имя папки (`e5-finetuned-v3`), а MODELS_DIR у каждого воркера свой.
     Папка ищется как MODELS_DIR / последний компонент пути (так же разрешаются прежние
     абсолютные пути и `models/...`). Имя модели Hugging Face (`org/name`) возвращается
-    как есть. Нет папки, а значение похоже на локальное -> RuntimeError.
+    как есть. Порядок: 1) MODELS_DIR/<последний компонент>; 2) сам путь, если это
+    существующая папка (офлайн-модель вне MODELS_DIR); 3) имя HF (`org/name`) и любое
+    значение версии 0; 4) иначе RuntimeError.
     """
     normalized = path.strip().replace("\\", "/").rstrip("/")
     name = normalized.split("/")[-1]
     candidate = Path(MODELS_DIR) / name
     if name and candidate.is_dir():
         return str(candidate)
+    if normalized and Path(path.strip()).is_dir():
+        return path.strip()
+    if version == 0:
+        return path  # базовая модель v0: имя HF или внешний путь — как зарегистрировано
     local = (normalized.startswith("/") or "/" not in normalized
              or (len(normalized) > 1 and normalized[1] == ":")
              or normalized.split("/")[0] in ("models", ".", ".."))
