@@ -279,6 +279,8 @@ class PgModelStore(_PgBase):
                 raise KeyError(version)
             c.execute("UPDATE ml_model_registry SET is_active = false WHERE is_active")
             c.execute("UPDATE ml_model_registry SET is_active = true WHERE version = %s", (version,))
+            # Сигнал для внешних систем (мониторинг). Воркеры его не слушают: они
+            # сверяют активную версию в реестре перед каждой задачей.
             c.execute("SELECT pg_notify('model_changed', %s)", (str(version),))
 
     def next_version(self, conn=None):

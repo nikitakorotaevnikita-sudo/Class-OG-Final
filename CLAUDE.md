@@ -172,7 +172,10 @@ Operator verifications (DB) accumulate training signal:
 
 Trigger threshold: `FINETUNE_THRESHOLD` (default 50) — applies to every source (verified,
 historical, combined) unless `force`. Jobs go to the `training` queue; the training worker
-registers the new version and classify workers switch to it without restart (`NOTIFY model_changed`).
+registers the new version; classify workers switch to the active version without restart — before
+every task `worker_main.get_agent()` calls `ClassifierAgent.reload_model_if_changed()`, which
+compares the registry's active version with the loaded one. `NOTIFY model_changed` is still sent
+on activation as a signal for external tools; no project process listens to it.
 
 ## Configuration (`.env`)
 

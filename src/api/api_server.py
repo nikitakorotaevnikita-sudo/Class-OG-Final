@@ -704,7 +704,7 @@ async def list_models():
 @app.post("/api/models/{version}/activate", tags=["Бэк-офис"])
 async def activate_model(version: int, _username: str = Depends(get_current_user)):
     """Сделать версию активной (ручная активация и откат). Воркеры подхватят её
-    перед следующей задачей (NOTIFY model_changed)."""
+    перед следующей задачей: get_agent() сверяет активную версию в реестре."""
     storage = get_storage()
     try:
         await asyncio.to_thread(storage.models.activate, version)
