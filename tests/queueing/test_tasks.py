@@ -1,82 +1,21 @@
-"""Задачи воркера: classify_appeal, search_classifier, embed_annotation (без модели)."""
+"""Задачи воркера: run_*(job, storage, agent) над уже захваченной задачей (без модели)."""
 from contextlib import contextmanager
-from types import SimpleNamespace
 
-import numpy as np
 import psycopg
 import pytest
 
 from core import config
+from fake_agent import CODE, CODE2, FakeAgent
 from queueing import tasks
 from storage.memory import MemoryStorage
-from storage.models import AppealQuestionRow, AppealResult
-
-CODE = "0005.0005.0051.1103"
-CODE2 = "0001.0001.0001.0001"
-
-
-def _question(code=CODE, name="Вывоз мусора"):
-    return SimpleNamespace(
-        question_text="вопрос", code=code, name=name, level=4, full_path="путь",
-        predmet_vedeniya="", confidence=0.9, reasoning="потому что", alternatives=[],
-    )
-
-
-class FakeAgent:
-    """Агент без модели: пишет карточку через storage на log_conn, как настоящий."""
-
-    model_version = 0
-
-    def __init__(self, storage, codes=(CODE,), error=None):
-        self.storage = storage
-        self.codes = list(codes)
-        self.error = error
-        self.calls = []
-
-    def classify(self, text, llm_provider=None, llm_model=None, appeal_id=None, log_conn=None):
-        self.calls.append(dict(text=text, llm_provider=llm_provider, llm_model=llm_model,
-                               appeal_id=appeal_id, log_conn=log_conn))
-        if self.error is not None:
-            raise self.error
-        questions = [_question(c) for c in self.codes]
-        self.storage.appeals.save_result(appeal_id, AppealResult(
-            summary="суть", applicant_fio="Иванов И.И.", applicant_email=None,
-            vid_obrascheniya="Заявление", tip_obrascheniya="Письменное", is_ustnoe=False,
-            overall_confidence=0.9, needs_verification=False, full_fallback_used=False,
-            candidates=[], llm_provider=llm_provider or "ario", llm_model=llm_model or "qwen",
-            elapsed_seconds=1.0,
-            questions=[
-                AppealQuestionRow(ordinal=i, question_text=q.question_text,
-                                  selected_code=q.code, confidence=q.confidence,
-                                  alternative_codes=[])
-                for i, q in enumerate(questions, 1)
-            ],
-        ), conn=log_conn)
-        return SimpleNamespace(
-            questions=questions, log_id=appeal_id, vid_obrascheniya="Заявление",
-            tip_obrascheniya="Письменное", is_ustное=False, overall_confidence=0.9,
-            needs_verification=False, llm_provider=llm_provider or "ario",
-            llm_model=llm_model or "qwen", full_fallback_used=False,
-            applicant_fio="Иванов И.И.", applicant_email=None, summary="суть",
-        )
-
-    def format_for_operator(self, result):
-        return "карточка"
-
-    def _search_candidates(self, q, top_k=None):
-        return [{"code": f"{i:04d}.0000.0000.0000", "similarity": 1 - i / 10} for i in range(10)]
-
-    def embed_passage(self, text):
-        v = np.zeros(768, dtype=np.float32)
-        v[len(text) % 768] = 1.0
-        return v
 
 
 def _enqueue(storage, payload=None, webhook_url=None, document_id=None, text="текст обращения"):
+    """Задача classify, уже захваченная воркером (как после claim_next)."""
     aid = storage.appeals.create(text, document_id=document_id)
     job = storage.jobs.create("classify", payload or {}, appeal_id=aid,
                               document_id=document_id, webhook_url=webhook_url)
-    return {"job_id": job.id, "appeal_id": aid, "document_id": document_id}
+    return storage.jobs.claim(job.id)
 
 
 @pytest.fixture
@@ -99,79 +38,64 @@ def _questions(storage, aid):
 def test_classify_success_writes_result_and_notifies(storage, no_webhook):
     notified = []
     storage.jobs.add_listener(notified.append)
-    msg = _enqueue(storage, {"llm_provider": "groq", "llm_model": "llama",
+    job = _enqueue(storage, {"llm_provider": "groq", "llm_model": "llama",
                              "client_appeal_id": "RX-1", "was_truncated": True})
     agent = FakeAgent(storage)
 
-    tasks.run_classify_appeal(msg, storage, agent)
+    assert tasks.run_classify_appeal(job, storage, agent) is True
 
-    job = storage.jobs.get(msg["job_id"])
-    assert job.status == "done" and job.error is None
-    assert job.result["appeal_id"] == "RX-1"
-    assert job.result["was_truncated"] is True
-    assert job.result["operator_card"] == "карточка"
-    assert [q["code"] for q in job.result["questions"]] == [CODE]
-    assert notified == [msg["job_id"]]
+    done = storage.jobs.get(job.id)
+    assert done.status == "done" and done.error is None
+    assert done.result["appeal_id"] == "RX-1"
+    assert done.result["was_truncated"] is True
+    assert done.result["operator_card"] == "карточка"
+    assert [q["code"] for q in done.result["questions"]] == [CODE]
+    assert notified == [job.id]
     [call] = agent.calls
     assert call["text"] == "текст обращения"
     assert (call["llm_provider"], call["llm_model"]) == ("groq", "llama")
-    assert call["appeal_id"] == msg["appeal_id"]
-    assert [q["selected_code"] for q in _questions(storage, msg["appeal_id"])] == [CODE]
+    assert call["appeal_id"] == job.appeal_id
+    assert [q["selected_code"] for q in _questions(storage, job.appeal_id)] == [CODE]
 
 
 def test_classify_llm_error_marks_error(storage, no_webhook):
     notified = []
     storage.jobs.add_listener(notified.append)
-    msg = _enqueue(storage)
+    job = _enqueue(storage)
 
-    tasks.run_classify_appeal(msg, storage, FakeAgent(storage, error=RuntimeError("LLM недоступна")))
+    tasks.run_classify_appeal(job, storage, FakeAgent(storage, error=RuntimeError("LLM недоступна")))
 
-    job = storage.jobs.get(msg["job_id"])
-    assert job.status == "error"
-    assert job.error == "RuntimeError: LLM недоступна"
-    assert job.result is None
-    assert notified == [msg["job_id"]]
+    failed = storage.jobs.get(job.id)
+    assert failed.status == "error"
+    assert failed.error == "RuntimeError: LLM недоступна"
+    assert failed.result is None
+    assert notified == [job.id]
 
 
 def test_classify_missing_text_marks_error(storage, no_webhook):
-    job = storage.jobs.create("classify", {})
-    msg = {"job_id": job.id, "appeal_id": "11111111-2222-3333-4444-555555555555",
-           "document_id": None}
+    created = storage.jobs.create("classify", {},
+                                  appeal_id="11111111-2222-3333-4444-555555555555")
+    job = storage.jobs.claim(created.id)
     agent = FakeAgent(storage)
 
-    tasks.run_classify_appeal(msg, storage, agent)
+    tasks.run_classify_appeal(job, storage, agent)
 
-    job = storage.jobs.get(msg["job_id"])
-    assert job.status == "error" and "11111111-2222-3333-4444-555555555555" in job.error
+    failed = storage.jobs.get(job.id)
+    assert failed.status == "error" and "11111111-2222-3333-4444-555555555555" in failed.error
     assert agent.calls == []
 
 
-def test_redelivered_done_job_is_skipped(storage, no_webhook):
-    msg = _enqueue(storage, webhook_url="http://rx.local/hook")
-    agent = FakeAgent(storage)
-    tasks.run_classify_appeal(msg, storage, agent)
-    assert len(agent.calls) == 1
-    assert len(no_webhook) == 1
-
-    tasks.run_classify_appeal(msg, storage, agent)  # повторная доставка
-
-    assert len(agent.calls) == 1
-    assert len(no_webhook) == 1
-    assert storage.jobs.get(msg["job_id"]).status == "done"
-
-
 def test_rerun_replaces_questions(storage, no_webhook):
-    msg = _enqueue(storage)
+    job = _enqueue(storage)
     # Первый прогон записал карточку, но воркер упал до finish (задача осталась running).
-    storage.jobs.claim(msg["job_id"])
-    FakeAgent(storage, codes=(CODE, CODE2)).classify(
-        "текст обращения", appeal_id=msg["appeal_id"])
-    assert len(_questions(storage, msg["appeal_id"])) == 2
+    FakeAgent(storage, codes=(CODE, CODE2)).classify("текст обращения", appeal_id=job.appeal_id)
+    assert len(_questions(storage, job.appeal_id)) == 2
+    retry = storage.jobs.claim(job.id)  # аренда истекла, задачу взяли заново
 
-    tasks.run_classify_appeal(msg, storage, FakeAgent(storage, codes=(CODE2,)))
+    tasks.run_classify_appeal(retry, storage, FakeAgent(storage, codes=(CODE2,)))
 
-    assert [q["selected_code"] for q in _questions(storage, msg["appeal_id"])] == [CODE2]
-    assert storage.jobs.get(msg["job_id"]).status == "done"
+    assert [q["selected_code"] for q in _questions(storage, job.appeal_id)] == [CODE2]
+    assert storage.jobs.get(job.id).status == "done"
 
 
 @pytest.mark.parametrize("exc", [
@@ -181,63 +105,71 @@ def test_rerun_replaces_questions(storage, no_webhook):
 ])
 def test_infra_error_reraised_until_max_attempts(storage, no_webhook, monkeypatch, exc):
     monkeypatch.setattr(config, "JOB_MAX_ATTEMPTS", 2)
-    msg = _enqueue(storage, webhook_url="http://rx.local/hook")
+    job = _enqueue(storage, webhook_url="http://rx.local/hook")
     agent = FakeAgent(storage, error=exc)
 
     with pytest.raises(tasks.RetryableError):
-        tasks.run_classify_appeal(msg, storage, agent)
-    job = storage.jobs.get(msg["job_id"])
-    assert job.status == "running" and job.attempts == 1
+        tasks.run_classify_appeal(job, storage, agent)
+    running = storage.jobs.get(job.id)
+    assert running.status == "running" and running.attempts == 1
     assert no_webhook == []
 
-    tasks.run_classify_appeal(msg, storage, agent)  # вторая попытка — последняя
+    second = storage.jobs.claim(job.id)  # вторая попытка — последняя
+    tasks.run_classify_appeal(second, storage, agent)
 
-    job = storage.jobs.get(msg["job_id"])
-    assert job.status == "error" and job.attempts == 2
-    assert job.error == f"{type(exc).__name__}: {exc}"
+    failed = storage.jobs.get(job.id)
+    assert failed.status == "error" and failed.attempts == 2
+    assert failed.error == f"{type(exc).__name__}: {exc}"
     assert len(no_webhook) == 1 and no_webhook[0][1]["status"] == "error"
 
 
-def test_kombu_error_is_retryable(storage, no_webhook, monkeypatch):
-    from kombu.exceptions import OperationalError as KombuOperationalError
-
-    monkeypatch.setattr(config, "JOB_MAX_ATTEMPTS", 2)
-    msg = _enqueue(storage)
-    with pytest.raises(tasks.RetryableError):
-        tasks.run_classify_appeal(msg, storage, FakeAgent(storage, error=KombuOperationalError("x")))
+def test_infra_errors_do_not_mention_broker():
+    assert set(tasks.INFRA_ERRORS) == {psycopg.OperationalError, psycopg.InterfaceError,
+                                       ConnectionError}
 
 
 def test_webhook_sent_after_finish(storage, no_webhook):
-    msg = _enqueue(storage, {"response_kind": "document"}, webhook_url="http://rx.local/hook",
+    job = _enqueue(storage, {"response_kind": "document"}, webhook_url="http://rx.local/hook",
                    document_id=42)
 
-    tasks.run_classify_appeal(msg, storage, FakeAgent(storage))
+    tasks.run_classify_appeal(job, storage, FakeAgent(storage))
 
     [(url, payload)] = no_webhook
     assert url == "http://rx.local/hook"
     assert payload["status"] == "done"
-    assert payload["job_id"] == msg["job_id"]
+    assert payload["job_id"] == job.id
     assert payload["document_id"] == 42
     assert payload["error"] is None
     assert payload["result"]["document_id"] == 42
     assert payload["result"]["questions"] == [{"code": CODE, "question": "Вывоз мусора"}]
+    assert storage.jobs.get(job.id).delivered_at is not None
+
+
+def test_webhook_failure_leaves_job_undelivered(storage, monkeypatch):
+    monkeypatch.setattr(tasks.webhook, "deliver", lambda url, payload: False)
+    job = _enqueue(storage, webhook_url="http://rx.local/hook")
+
+    tasks.run_classify_appeal(job, storage, FakeAgent(storage))
+
+    done = storage.jobs.get(job.id)
+    assert done.status == "done" and done.delivered_at is None
 
 
 def test_webhook_not_sent_when_finish_does_not_transition(storage, no_webhook, monkeypatch):
-    msg = _enqueue(storage, webhook_url="http://rx.local/hook")
+    job = _enqueue(storage, webhook_url="http://rx.local/hook")
     monkeypatch.setattr(storage.jobs, "finish", lambda *a, **kw: False)
 
-    tasks.run_classify_appeal(msg, storage, FakeAgent(storage))
+    tasks.run_classify_appeal(job, storage, FakeAgent(storage))
 
     assert no_webhook == []
 
 
 def test_document_response_kind_uses_build_document_response(storage, no_webhook):
-    msg = _enqueue(storage, {"response_kind": "document"}, document_id=7)
+    job = _enqueue(storage, {"response_kind": "document"}, document_id=7)
 
-    tasks.run_classify_appeal(msg, storage, FakeAgent(storage, codes=(CODE, CODE)))
+    tasks.run_classify_appeal(job, storage, FakeAgent(storage, codes=(CODE, CODE)))
 
-    result = storage.jobs.get(msg["job_id"]).result
+    result = storage.jobs.get(job.id).result
     assert set(result) == {"document_id", "applicant_fio", "applicant_email", "summary",
                            "reasoning", "questions"}
     assert result["document_id"] == 7
@@ -245,15 +177,16 @@ def test_document_response_kind_uses_build_document_response(storage, no_webhook
 
 
 def test_search_classifier_finishes_with_results(storage):
-    job = storage.jobs.create("search", {"q": "мусор", "top_k": 3}, queue_class="classify_sync")
+    created = storage.jobs.create("search", {"q": "мусор", "top_k": 3},
+                                  queue_class="classify_sync")
+    job = storage.jobs.claim(created.id)
 
-    tasks.run_search_classifier({"job_id": job.id, "appeal_id": None, "document_id": None},
-                                storage, FakeAgent(storage))
+    tasks.run_search_classifier(job, storage, FakeAgent(storage))
 
-    job = storage.jobs.get(job.id)
-    assert job.status == "done"
-    assert job.result["query"] == "мусор"
-    assert [r["code"] for r in job.result["results"]] == [
+    done = storage.jobs.get(job.id)
+    assert done.status == "done"
+    assert done.result["query"] == "мусор"
+    assert [r["code"] for r in done.result["results"]] == [
         "0000.0000.0000.0000", "0001.0000.0000.0000", "0002.0000.0000.0000"]
 
 
@@ -262,31 +195,27 @@ def test_embed_annotation_sets_embedding(storage):
 
     storage.models.register(ModelVersion(0, "base", "m0", True))
     vid = storage.classifier.add_annotation(CODE, "пояснение", 0)
-    job = storage.jobs.create("embed_annotation", {"vector_id": vid})
+    job = storage.jobs.claim(storage.jobs.create("embed_annotation", {"vector_id": vid}).id)
 
-    tasks.run_embed_annotation({"job_id": job.id, "appeal_id": None, "document_id": None},
-                               storage, FakeAgent(storage))
+    tasks.run_embed_annotation(job, storage, FakeAgent(storage))
 
     assert storage.jobs.get(job.id).status == "done"
     assert storage.classifier.pending_annotations(0) == []
 
 
 def test_embed_annotation_missing_vector_marks_error(storage):
-    job = storage.jobs.create("embed_annotation", {"vector_id": 999})
+    job = storage.jobs.claim(storage.jobs.create("embed_annotation", {"vector_id": 999}).id)
 
-    tasks.run_embed_annotation({"job_id": job.id, "appeal_id": None, "document_id": None},
-                               storage, FakeAgent(storage))
+    tasks.run_embed_annotation(job, storage, FakeAgent(storage))
 
-    job = storage.jobs.get(job.id)
-    assert job.status == "error" and "999" in job.error
+    failed = storage.jobs.get(job.id)
+    assert failed.status == "error" and "999" in failed.error
 
 
-def test_celery_tasks_registered():
-    from queueing.celery_app import app
-
-    assert "queueing.tasks" in (app.conf.include or ())
-    for name in ("classify_appeal", "search_classifier", "embed_annotation", "finetune"):
-        assert name in app.tasks
+def test_tasks_module_has_no_celery_wrappers():
+    for name in ("classify_appeal", "search_classifier", "embed_annotation", "finetune",
+                 "INFRA_MAX_RETRIES"):
+        assert not hasattr(tasks, name), name
 
 
 @pytest.mark.db
@@ -300,7 +229,7 @@ def test_card_and_job_status_commit_atomically(pg_conn, monkeypatch, no_webhook)
             yield pg_conn
 
     storage = PgStorage(connect)
-    msg = _enqueue(storage)
+    job = _enqueue(storage)
     real_finish = storage.jobs.finish
 
     def finish(job_id, result, error, conn=None, attempts=None):
@@ -310,166 +239,57 @@ def test_card_and_job_status_commit_atomically(pg_conn, monkeypatch, no_webhook)
 
     monkeypatch.setattr(storage.jobs, "finish", finish)
 
-    tasks.run_classify_appeal(msg, storage, FakeAgent(storage))
+    tasks.run_classify_appeal(job, storage, FakeAgent(storage))
 
     n = pg_conn.execute("SELECT count(*) FROM appeal_questions WHERE appeal_id = %s",
-                        (msg["appeal_id"],)).fetchone()[0]
+                        (job.appeal_id,)).fetchone()[0]
     assert n == 0
-    job = storage.jobs.get(msg["job_id"])
-    assert job.status == "error"
-    assert job.error == "RuntimeError: сбой записи статуса"
-
-
-def test_celery_wrapper_converts_retryable_error_into_retry(monkeypatch):
-    from celery.exceptions import Retry
-
-    monkeypatch.setattr(tasks, "_agent", lambda: "agent")
-    monkeypatch.setattr(tasks, "get_storage", lambda: "storage")
-
-    def boom(msg, storage, agent):
-        assert (storage, agent) == ("storage", "agent")
-        raise tasks.RetryableError("db down")
-
-    monkeypatch.setattr(tasks, "run_classify_appeal", boom)
-    captured = {}
-
-    def fake_retry(**kw):
-        captured.update(kw)
-        return Retry("retry")
-
-    monkeypatch.setattr(tasks.classify_appeal, "retry", fake_retry)
-    with pytest.raises(Retry):
-        tasks.classify_appeal.run({"job_id": "x", "appeal_id": None, "document_id": None})
-    assert captured["countdown"] == 5
-    assert captured["max_retries"] == tasks.INFRA_MAX_RETRIES == 10
+    failed = storage.jobs.get(job.id)
+    assert failed.status == "error"
+    assert failed.error == "RuntimeError: сбой записи статуса"
 
 
 def test_crash_redeliveries_capped_by_attempts(storage, no_webhook, monkeypatch):
-    """Воркер падал дважды (claim без finish) → третья доставка: ошибка, агент не вызван."""
+    """Воркер падал дважды (захват без finish) → третий захват: ошибка, агент не вызван."""
     monkeypatch.setattr(config, "JOB_MAX_ATTEMPTS", 2)
-    msg = _enqueue(storage, webhook_url="http://rx.local/hook")
-    storage.jobs.claim(msg["job_id"])
-    storage.jobs.claim(msg["job_id"])
+    job = _enqueue(storage, webhook_url="http://rx.local/hook")
+    storage.jobs.claim(job.id)
+    third = storage.jobs.claim(job.id)
     agent = FakeAgent(storage)
 
-    tasks.run_classify_appeal(msg, storage, agent)
+    assert tasks.run_classify_appeal(third, storage, agent) is True
 
     assert agent.calls == []
-    job = storage.jobs.get(msg["job_id"])
-    assert job.status == "error"
-    assert "Превышено число попыток" in job.error
+    failed = storage.jobs.get(job.id)
+    assert failed.status == "error"
+    assert "Превышено число попыток" in failed.error
     assert len(no_webhook) == 1 and no_webhook[0][1]["status"] == "error"
 
 
 def test_finetune_crash_redeliveries_capped(storage, monkeypatch):
     monkeypatch.setattr(config, "JOB_MAX_ATTEMPTS", 1)
-    job = storage.jobs.create("finetune", {}, queue_class="training")
-    storage.jobs.claim(job.id)
+    created = storage.jobs.create("finetune", {}, queue_class="training")
+    storage.jobs.claim(created.id)
+    job = storage.jobs.claim(created.id)
 
-    tasks.run_finetune({"job_id": job.id, "appeal_id": None, "document_id": None}, storage)
+    tasks.run_finetune(job, storage)
 
-    job = storage.jobs.get(job.id)
-    assert job.status == "error" and "Превышено число попыток" in job.error
+    failed = storage.jobs.get(job.id)
+    assert failed.status == "error" and "Превышено число попыток" in failed.error
 
 
 def test_finish_error_infra_failure_is_retryable(storage, monkeypatch):
-    msg = _enqueue(storage)
+    job = _enqueue(storage)
 
     def broken_finish(*a, **kw):
         raise psycopg.OperationalError("db down")
 
     monkeypatch.setattr(storage.jobs, "finish", broken_finish)
     with pytest.raises(tasks.RetryableError):
-        tasks._finish_error(storage, msg["job_id"], "RuntimeError: x")
+        tasks._finish_error(storage, job.id, "RuntimeError: x")
     # и в полном потоке: ошибка LLM, но записать её некуда → повтор, а не сырой psycopg
     with pytest.raises(tasks.RetryableError):
-        tasks.run_classify_appeal(msg, storage, FakeAgent(storage, error=RuntimeError("llm")))
-
-
-def test_claim_infra_failure_is_retryable(storage, monkeypatch):
-    msg = _enqueue(storage)
-
-    def broken_claim(job_id):
-        raise psycopg.OperationalError("db down")
-
-    monkeypatch.setattr(storage.jobs, "claim", broken_claim)
-    agent = FakeAgent(storage)
-    with pytest.raises(tasks.RetryableError):
-        tasks.run_classify_appeal(msg, storage, agent)
-    assert agent.calls == []
-
-
-@pytest.mark.parametrize("retries, countdown", [(0, 5), (1, 10), (3, 40), (4, 60), (9, 60)])
-def test_wrapper_backoff_and_storage_failure_retry(monkeypatch, retries, countdown):
-    """Сбой БД при сборке storage тоже уходит в retry; пауза растёт экспоненциально."""
-    from celery.exceptions import Retry
-
-    def broken_storage():
-        raise psycopg.OperationalError("db down")
-
-    monkeypatch.setattr(tasks, "get_storage", broken_storage)
-    captured = {}
-
-    def fake_retry(**kw):
-        captured.update(kw)
-        return Retry("retry")
-
-    monkeypatch.setattr(tasks.search_classifier, "retry", fake_retry)
-    tasks.search_classifier.push_request(retries=retries)
-    try:
-        with pytest.raises(Retry):
-            tasks.search_classifier.run({"job_id": "x", "appeal_id": None, "document_id": None})
-    finally:
-        tasks.search_classifier.pop_request()
-    assert captured["countdown"] == countdown
-    assert captured["max_retries"] == 10
-    assert isinstance(captured["exc"], psycopg.OperationalError)
-
-
-def test_agent_build_failure_marks_error_and_is_not_cached(storage, no_webhook, monkeypatch):
-    """Нет активной модели → задача error с текстом исключения; следующая строит агента заново."""
-    from worker import worker_main
-
-    msg = _enqueue(storage, {"response_kind": "document"}, webhook_url="http://rx.local/hook")
-    monkeypatch.setattr(tasks, "get_storage", lambda: storage)
-    monkeypatch.setattr(worker_main, "_agent", None)
-    monkeypatch.setattr(worker_main, "embed_pending_annotations", lambda a: 0)
-    built = []
-
-    def broken_agent(st):
-        built.append(1)
-        raise RuntimeError("Нет активной модели в ml_model_registry")
-
-    monkeypatch.setattr(worker_main, "ClassifierAgent", broken_agent)
-
-    tasks.classify_appeal.run(msg)
-
-    job = storage.jobs.get(msg["job_id"])
-    assert job.status == "error" and job.attempts == 1 and job.started_at is not None
-    assert job.error == "RuntimeError: Нет активной модели в ml_model_registry"
-    assert len(no_webhook) == 1 and no_webhook[0][1]["status"] == "error"
-    assert worker_main._agent is None
-
-    msg2 = _enqueue(storage)
-    tasks.classify_appeal.run(msg2)
-    assert len(built) == 2  # неудачный агент не закэширован
-    assert storage.jobs.get(msg2["job_id"]).status == "error"
-
-
-def test_agent_build_infra_failure_retries(storage, monkeypatch):
-    from celery.exceptions import Retry
-
-    msg = _enqueue(storage)
-    monkeypatch.setattr(tasks, "get_storage", lambda: storage)
-
-    def broken():
-        raise psycopg.OperationalError("db down")
-
-    monkeypatch.setattr(tasks, "_agent", broken)
-    monkeypatch.setattr(tasks.classify_appeal, "retry", lambda **kw: Retry("retry"))
-    with pytest.raises(Retry):
-        tasks.classify_appeal.run(msg)
-    assert storage.jobs.get(msg["job_id"]).status == "queued"
+        tasks.run_classify_appeal(job, storage, FakeAgent(storage, error=RuntimeError("llm")))
 
 
 # ── finetune: run_training целиком (MemoryStorage, фейковые обучение и модель) ──
@@ -493,7 +313,7 @@ def fake_training(monkeypatch, tmp_path):
 def _finetune_job(storage):
     job = storage.jobs.create("finetune", {"source": "combined", "force": False},
                               queue_class="training")
-    return {"job_id": job.id, "appeal_id": None, "document_id": None}
+    return storage.jobs.claim(job.id)
 
 
 def test_run_finetune_completed_job_done(fake_training, no_webhook):
@@ -502,14 +322,14 @@ def test_run_finetune_completed_job_done(fake_training, no_webhook):
     use, FakeTrain = fake_training
     use(FakeTrain(before=0.3, after=0.5))
     storage = seed(MemoryStorage())
-    msg = _finetune_job(storage)
+    job = _finetune_job(storage)
 
-    tasks.run_finetune(msg, storage)
+    tasks.run_finetune(job, storage)
 
-    job = storage.jobs.get(msg["job_id"])
-    assert job.status == "done" and job.error is None
+    done = storage.jobs.get(job.id)
+    assert done.status == "done" and done.error is None
     # база — v0 (адаптер): первая дообученная версия активируется только вручную
-    assert job.result["status"] == "completed" and job.result["activated"] is False
+    assert done.result["status"] == "completed" and done.result["activated"] is False
     assert storage.models.get(1) is not None and storage.models.active().version == 0
 
 
@@ -519,78 +339,89 @@ def test_run_finetune_failed_job_error(fake_training, no_webhook):
     use, FakeTrain = fake_training
     use(FakeTrain(error=RuntimeError("нет памяти")))
     storage = seed(MemoryStorage())
-    msg = _finetune_job(storage)
+    job = _finetune_job(storage)
 
-    tasks.run_finetune(msg, storage)
+    tasks.run_finetune(job, storage)
 
-    job = storage.jobs.get(msg["job_id"])
-    assert job.status == "error" and "нет памяти" in job.error
-    assert job.result["status"] == "failed"
+    failed = storage.jobs.get(job.id)
+    assert failed.status == "error" and "нет памяти" in failed.error
+    assert failed.result["status"] == "failed"
     assert [mv.version for mv in storage.models.list()] == [0]
+
+
+def test_run_finetune_lost_ownership_registers_nothing(fake_training, no_webhook):
+    """Пока шло обучение, задачу признали потерянной: версия не регистрируется."""
+    from finetune_helpers import seed
+
+    use, FakeTrain = fake_training
+    storage = seed(MemoryStorage())
+    job = _finetune_job(storage)
+
+    class LosingTrain(FakeTrain):
+        def __call__(self, *a, **kw):
+            storage.jobs.finish(job.id, result=None, error="воркер дообучения пропал")
+            return super().__call__(*a, **kw)
+
+    use(LosingTrain(before=0.3, after=0.5))
+
+    tasks.run_finetune(job, storage)
+
+    assert [mv.version for mv in storage.models.list()] == [0]
+    after = storage.jobs.get(job.id)
+    assert after.status == "error" and after.error == "воркер дообучения пропал"
 
 
 # ── Владение задачей: устаревшая попытка не пишет карточку и не завершает задачу ──
 
-def _stale_claim(storage, monkeypatch):
-    """claim отдаёт попытку 1, но задачу тут же забирает повторная доставка (попытка 2)."""
-    real_claim = storage.jobs.claim
-
-    def claim(job_id, *a, **kw):
-        mine = real_claim(job_id, *a, **kw)
-        real_claim(job_id)  # RabbitMQ отдал сообщение второму воркеру
-        return mine
-
-    monkeypatch.setattr(storage.jobs, "claim", claim)
-
-
-def _run_stale(storage, monkeypatch, no_webhook):
-    msg = _enqueue(storage, webhook_url="http://rx.local/hook")
-    _stale_claim(storage, monkeypatch)
+def _run_stale(storage, no_webhook):
+    """Попытка 1 работает, но задачу уже забрал другой воркер (попытка 2)."""
+    job = _enqueue(storage, webhook_url="http://rx.local/hook")
+    storage.jobs.claim(job.id)  # аренда истекла, задачу взял другой воркер
     agent = FakeAgent(storage)
-    tasks.run_classify_appeal(msg, storage, agent)
-    return msg, agent
+    assert tasks.run_classify_appeal(job, storage, agent) is None
+    return job, agent
 
 
-def test_stale_attempt_does_not_overwrite_card_or_finish(storage, no_webhook, monkeypatch):
-    msg, agent = _run_stale(storage, monkeypatch, no_webhook)
+def test_stale_attempt_does_not_overwrite_card_or_finish(storage, no_webhook):
+    job, agent = _run_stale(storage, no_webhook)
     assert agent.calls == []
-    assert _questions(storage, msg["appeal_id"]) == []
-    job = storage.jobs.get(msg["job_id"])
-    assert job.status == "running" and job.attempts == 2 and job.result is None
+    assert _questions(storage, job.appeal_id) == []
+    after = storage.jobs.get(job.id)
+    assert after.status == "running" and after.attempts == 2 and after.result is None
     assert no_webhook == []
 
 
-def test_attempt_losing_ownership_mid_work_does_not_finish(storage, no_webhook, monkeypatch):
-    """Пока шла классификация, задачу забрала повторная доставка: finish не происходит."""
-    msg = _enqueue(storage, webhook_url="http://rx.local/hook")
+def test_attempt_losing_ownership_mid_work_does_not_finish(storage, no_webhook):
+    """Пока шла классификация, задачу забрал другой воркер: finish не происходит."""
+    job = _enqueue(storage, webhook_url="http://rx.local/hook")
 
     class Redelivered(FakeAgent):
         def classify(self, *a, **kw):
-            storage.jobs.claim(msg["job_id"])
+            storage.jobs.claim(job.id)
             return super().classify(*a, **kw)
 
-    tasks.run_classify_appeal(msg, storage, Redelivered(storage))
-    job = storage.jobs.get(msg["job_id"])
-    assert job.status == "running" and job.result is None
+    tasks.run_classify_appeal(job, storage, Redelivered(storage))
+    after = storage.jobs.get(job.id)
+    assert after.status == "running" and after.result is None
     assert no_webhook == []
 
 
-def test_stale_attempt_error_does_not_finish_job(storage, no_webhook, monkeypatch):
-    msg = _enqueue(storage, webhook_url="http://rx.local/hook")
+def test_stale_attempt_error_does_not_finish_job(storage, no_webhook):
+    job = _enqueue(storage, webhook_url="http://rx.local/hook")
 
     class Failing(FakeAgent):
         def classify(self, *a, **kw):
-            storage.jobs.claim(msg["job_id"])  # повторная доставка
+            storage.jobs.claim(job.id)  # задачу забрал другой воркер
             raise RuntimeError("LLM упал")
 
-    tasks.run_classify_appeal(msg, storage, Failing(storage))
-    job = storage.jobs.get(msg["job_id"])
-    assert job.status == "running" and job.error is None
+    tasks.run_classify_appeal(job, storage, Failing(storage))
+    after = storage.jobs.get(job.id)
+    assert after.status == "running" and after.error is None
     assert no_webhook == []
 
 
 @pytest.mark.db
-def test_stale_attempt_does_not_overwrite_card_pg(pg_conn, monkeypatch, no_webhook):
+def test_stale_attempt_does_not_overwrite_card_pg(pg_conn, no_webhook):
     from storage.pg import PgStorage
 
     @contextmanager
@@ -599,18 +430,18 @@ def test_stale_attempt_does_not_overwrite_card_pg(pg_conn, monkeypatch, no_webho
             yield pg_conn
 
     storage = PgStorage(connect)
-    msg, agent = _run_stale(storage, monkeypatch, no_webhook)
+    job, agent = _run_stale(storage, no_webhook)
     assert agent.calls == []
     n = pg_conn.execute("SELECT count(*) FROM appeal_questions WHERE appeal_id = %s",
-                        (msg["appeal_id"],)).fetchone()[0]
+                        (job.appeal_id,)).fetchone()[0]
     assert n == 0
-    job = storage.jobs.get(msg["job_id"])
-    assert job.status == "running" and job.attempts == 2
+    after = storage.jobs.get(job.id)
+    assert after.status == "running" and after.attempts == 2
     assert no_webhook == []
 
 
 @pytest.mark.db
-def test_losing_ownership_mid_work_rolls_back_card_pg(pg_conn, monkeypatch, no_webhook):
+def test_losing_ownership_mid_work_rolls_back_card_pg(pg_conn, no_webhook):
     """Условный finish (attempts) не прошёл → карточка устаревшей попытки откатывается."""
     from storage.pg import PgStorage
 
@@ -620,19 +451,19 @@ def test_losing_ownership_mid_work_rolls_back_card_pg(pg_conn, monkeypatch, no_w
             yield pg_conn
 
     storage = PgStorage(connect)
-    msg = _enqueue(storage, webhook_url="http://rx.local/hook")
+    job = _enqueue(storage, webhook_url="http://rx.local/hook")
 
     class Redelivered(FakeAgent):
         def classify(self, *a, log_conn=None, **kw):
             # та же сессия держит блокировку строки — имитируем захват через UPDATE
             log_conn.execute("UPDATE jobs SET attempts = attempts + 1 WHERE id = %s",
-                             (msg["job_id"],))
+                             (job.id,))
             return super().classify(*a, log_conn=log_conn, **kw)
 
-    tasks.run_classify_appeal(msg, storage, Redelivered(storage))
+    tasks.run_classify_appeal(job, storage, Redelivered(storage))
     n = pg_conn.execute("SELECT count(*) FROM appeal_questions WHERE appeal_id = %s",
-                        (msg["appeal_id"],)).fetchone()[0]
+                        (job.appeal_id,)).fetchone()[0]
     assert n == 0
-    job = storage.jobs.get(msg["job_id"])
-    assert job.status == "running" and job.result is None
+    after = storage.jobs.get(job.id)
+    assert after.status == "running" and after.result is None
     assert no_webhook == []

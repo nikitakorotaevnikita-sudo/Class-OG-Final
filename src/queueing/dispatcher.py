@@ -2,9 +2,9 @@
 
 - `CeleryDispatcher` — публикация в RabbitMQ (`send_task` по строковому имени;
   модуль задач и модель API не импортирует).
-- `LocalDispatcher` — выполнение `tasks.run_*` в пуле потоков этого же процесса
-  (тесты и `STORAGE_BACKEND=memory`): `await waiter.wait(...)` ведёт себя как в
-  проде. Повторов нет — любой сбой завершает задачу ошибкой. Агент берётся из
+- `LocalDispatcher` — захват задачи (`jobs.claim`) и выполнение `tasks.run_*` в пуле
+  потоков этого же процесса (тесты и `STORAGE_BACKEND=memory`): `await waiter.wait(...)`
+  ведёт себя как в проде. Повторов нет — любой сбой завершает задачу ошибкой. Агент берётся из
   `agent_factory()` на каждую задачу (кэширует и перезагружает его worker_main).
 
 Модуль импортирует API, поэтому classifier_agent/torch здесь не грузятся:
@@ -136,10 +136,14 @@ class LocalDispatcher:
 
             fn_name, with_agent = _LOCAL_TASKS[task_name]
             fn = getattr(tasks, fn_name)
+            # run_* работают над уже захваченной задачей (как воркер после claim_next).
+            job = self._storage.jobs.claim(job_id)
+            if job is None:
+                return  # задача уже завершена или не существует
             if with_agent:
-                fn(msg, self._storage, self._agent_factory())
+                fn(job, self._storage, self._agent_factory())
             else:
-                fn(msg, self._storage)
+                fn(job, self._storage)
         except Exception as exc:  # noqa: BLE001 — в т.ч. RetryableError: повторов нет
             log.exception("Локальная задача %s (%s) упала", task_name, job_id)
             error = f"{type(exc).__name__}: {exc}"

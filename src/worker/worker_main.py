@@ -1,9 +1,9 @@
 """Процесс воркера: singleton ClassifierAgent с горячей перезагрузкой.
 
-Celery запускается как `celery -A queueing.celery_app worker ...` с `src`
-в PYTHONPATH. Агент создаётся лениво (get_agent); прогрев по сигналам
-Celery подключает queueing.warmup (импортируется вместе с queueing.tasks и
-тянет этот модуль лишь в процессе, который выполняет задачи).
+Воркер очереди (`python -m worker.run --queues ...`, `src` в PYTHONPATH) прогревает
+агента при старте и вызывает get_agent() перед каждым захватом задачи: смена
+активной модели и правки `.env` подхватываются без перезапуска. Неудачный агент
+не кэшируется — следующий вызов пробует снова.
 """
 import logging
 import threading

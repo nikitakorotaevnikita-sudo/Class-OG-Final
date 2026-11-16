@@ -15,8 +15,8 @@ PACKAGES = {
     "api": {"api_server", "integration_api", "job_api", "responses"},
     "classifier": {"classifier_agent", "hierarchy", "reranker", "section_router", "llm_schemas",
                    "llm_check", "fio_extractor", "email_extractor"},
-    "queueing": {"celery_app", "dispatcher", "tasks", "waiter", "warmup", "webhook"},
-    "worker": {"worker_main"},
+    "queueing": {"celery_app", "dispatcher", "tasks", "waiter", "webhook"},
+    "worker": {"worker_main", "run"},
     "storage": {"appeals_logger", "annotations_storage"},
     "training": {"finetune_model", "auto_finetune", "build_vectordb", "historical_loader",
                  "auto_import_historical"},
@@ -127,7 +127,8 @@ def test_no_leftover_top_level_imports_of_moved_modules():
 @pytest.mark.parametrize("script", ["cli/operator_cli.py", "cli/classify_manual.py",
                                     "cli/test_agent.py", "training/auto_finetune.py",
                                     "training/auto_import_historical.py",
-                                    "training/build_vectordb.py", "training/finetune_model.py"])
+                                    "training/build_vectordb.py", "training/finetune_model.py",
+                                    "worker/run.py"])
 def test_entry_script_bootstraps_src_root(script):
     """`python src/<пакет>/x.py`: папка скрипта в sys.path заменяется на src."""
     text = (SRC / script).read_text(encoding="utf-8")

@@ -248,10 +248,10 @@ def test_local_dispatcher_runs_task_and_waiter_sees_result(monkeypatch):
     job = _new_job(storage)
     agents = []
 
-    def fake_run(msg, st, agent):
+    def fake_run(job, st, agent):
         assert st is storage
         time.sleep(0.05)
-        st.jobs.finish(msg["job_id"], result={"agent": agent}, error=None)
+        st.jobs.finish(job.id, result={"agent": agent}, error=None)
 
     monkeypatch.setattr(tasks, "run_classify_appeal", fake_run)
 
@@ -283,8 +283,8 @@ def test_local_dispatcher_finetune_has_no_agent(monkeypatch):
     storage = MemoryStorage()
     job = storage.jobs.create("finetune", {})
 
-    def fake_finetune(msg, st):
-        st.jobs.finish(msg["job_id"], result={"v": 1}, error=None)
+    def fake_finetune(job, st):
+        st.jobs.finish(job.id, result={"v": 1}, error=None)
 
     monkeypatch.setattr(tasks, "run_finetune", fake_finetune)
 
@@ -305,7 +305,7 @@ def test_local_dispatcher_finishes_job_with_error_on_exception(monkeypatch, exc)
     storage = MemoryStorage()
     job = _new_job(storage)
 
-    def failing(msg, st, agent):
+    def failing(job, st, agent):
         raise exc if exc is not None else tasks.RetryableError("БД недоступна")
 
     monkeypatch.setattr(tasks, "run_classify_appeal", failing)
@@ -343,14 +343,14 @@ def test_local_dispatcher_bounds_concurrency(monkeypatch):
     state = {"now": 0, "max": 0}
     gate = threading.Event()
 
-    def slow(msg, st, agent):
+    def slow(job, st, agent):
         with lock:
             state["now"] += 1
             state["max"] = max(state["max"], state["now"])
         gate.wait(5)
         with lock:
             state["now"] -= 1
-        st.jobs.finish(msg["job_id"], result={"ok": 1}, error=None)
+        st.jobs.finish(job.id, result={"ok": 1}, error=None)
 
     monkeypatch.setattr(tasks, "run_classify_appeal", slow)
     disp = LocalDispatcher(storage, agent_factory=lambda: "A", max_workers=2)
@@ -400,13 +400,13 @@ def test_local_finetune_does_not_hold_classify_slot(monkeypatch):
     gate = threading.Event()
     started = threading.Event()
 
-    def slow_finetune(msg, st):
+    def slow_finetune(job, st):
         started.set()
         gate.wait(10)
-        st.jobs.finish(msg["job_id"], result={"ok": 1}, error=None)
+        st.jobs.finish(job.id, result={"ok": 1}, error=None)
 
-    def fast_classify(msg, st, agent):
-        st.jobs.finish(msg["job_id"], result={"ok": 1}, error=None)
+    def fast_classify(job, st, agent):
+        st.jobs.finish(job.id, result={"ok": 1}, error=None)
 
     monkeypatch.setattr(tasks, "run_finetune", slow_finetune)
     monkeypatch.setattr(tasks, "run_classify_appeal", fast_classify)
@@ -436,9 +436,9 @@ def test_local_dispatcher_shutdown_stops_threads(monkeypatch):
     storage = MemoryStorage()
     jobs = [_new_job(storage) for _ in range(3)]
 
-    def slow(msg, st, agent):
+    def slow(job, st, agent):
         time.sleep(0.3)
-        st.jobs.finish(msg["job_id"], result={"ok": 1}, error=None)
+        st.jobs.finish(job.id, result={"ok": 1}, error=None)
 
     monkeypatch.setattr(tasks, "run_classify_appeal", slow)
     disp = LocalDispatcher(storage, agent_factory=lambda: "A", max_workers=2)
@@ -461,9 +461,9 @@ def test_local_dispatcher_shutdown_waits_for_finetune_thread(monkeypatch):
     storage = MemoryStorage()
     job = _new_job(storage)
 
-    def slow_finetune(msg, st):
+    def slow_finetune(job, st):
         time.sleep(0.3)
-        st.jobs.finish(msg["job_id"], result={"ok": 1}, error=None)
+        st.jobs.finish(job.id, result={"ok": 1}, error=None)
 
     monkeypatch.setattr(tasks, "run_finetune", slow_finetune)
     disp = LocalDispatcher(storage, agent_factory=lambda: "A")

@@ -56,6 +56,7 @@ SOURCES = ("verified", "historical", "combined")
 HISTORICAL_WEIGHT = 3   # исторические пары размечены экспертами — вес 3x в "combined"
 MIN_TRAINING_PAIRS = 10
 LOG_TAIL_CHARS = 4000
+NOT_OWNER_MESSAGE = "задача дообучения больше не принадлежит этому воркеру"
 
 
 class TrainingPair:
@@ -213,7 +214,9 @@ def model_dir_name(base_model: str, version: int) -> str:
 def _train_and_register(storage, active, version: int, output_path: Path, source: str,
                         train_fn: TrainFn, train_examples: list, val_examples: list,
                         annotated_codes: int, total_pairs: int, verified_pairs: int,
-                        historical_pairs: int, say) -> tuple[bool, float, float]:
+                        historical_pairs: int, say,
+                        still_owner: Optional[Callable[[], bool]] = None,
+                        ) -> tuple[bool, float, float]:
     """Обучение в output_path, векторы версии N, регистрация (одна транзакция).
 
     Возвращает (recall@5 вырос, recall@5 до, recall@5 после).
@@ -266,6 +269,10 @@ def _train_and_register(storage, active, version: int, output_path: Path, source
         report=report,
         adapter=None,
     )
+    if still_owner is not None and not still_owner():
+        # Аренда задачи истекла (воркер дообучения признан пропавшим): версию
+        # регистрирует только владелец задачи.
+        raise RuntimeError(NOT_OWNER_MESSAGE)
     with storage.transaction() as conn:
         kw = {} if conn is None else {"conn": conn}
         try:
@@ -280,13 +287,18 @@ def _train_and_register(storage, active, version: int, output_path: Path, source
 
 
 def run_training(storage, source: str = "combined", force: bool = False,
-                 train_fn: Optional[TrainFn] = None) -> dict:
+                 train_fn: Optional[TrainFn] = None,
+                 still_owner: Optional[Callable[[], bool]] = None) -> dict:
     """Дообучение с регистрацией версии в ml_model_registry.
 
     Возвращает {status: completed|failed|skipped, message, model_path, version,
     recall5_before, recall5_after, activated, log_tail}. Исключения не
     пробрасываются (status "failed"); версия регистрируется только после того,
     как построены её векторы.
+
+    still_owner — проверка владения задачей дообучения (воркер очереди): вызывается
+    непосредственно перед регистрацией версии; False → версия не регистрируется,
+    папка модели удаляется, status "failed".
     """
     log: list[str] = []
 
@@ -299,7 +311,8 @@ def run_training(storage, source: str = "combined", force: bool = False,
         "recall5_before": None, "recall5_after": None, "activated": False, "log_tail": "",
     }
     try:
-        _train(storage, source, force, train_fn or sentence_transformers_train, result, say)
+        _train(storage, source, force, train_fn or sentence_transformers_train, result, say,
+               still_owner)
     except Exception as exc:  # noqa: BLE001 — любой сбой → status failed
         tb = traceback.format_exc()
         say(f"  Ошибка дообучения: {type(exc).__name__}: {exc}")
@@ -311,7 +324,8 @@ def run_training(storage, source: str = "combined", force: bool = False,
     return result
 
 
-def _train(storage, source: str, force: bool, train_fn: TrainFn, result: dict, say) -> None:
+def _train(storage, source: str, force: bool, train_fn: TrainFn, result: dict, say,
+           still_owner: Optional[Callable[[], bool]] = None) -> None:
     if source not in SOURCES:
         raise ValueError(f"Неизвестный источник данных: {source!r} (ожидается {', '.join(SOURCES)})")
 
@@ -385,7 +399,7 @@ def _train(storage, source: str, force: bool, train_fn: TrainFn, result: dict, s
         improved, recall_before, recall_after = _train_and_register(
             storage, active, version, output_path, source, train_fn, train_examples,
             val_examples, len(texts.annotations), len(all_examples),
-            len(verified_examples), len(historical_examples), say)
+            len(verified_examples), len(historical_examples), say, still_owner)
     except BaseException:
         # Папку создал этот запуск, а версии в реестре нет: удаляем, иначе сирота
         # (модель + training_report.json) повторно зарегистрировалась бы миграцией.

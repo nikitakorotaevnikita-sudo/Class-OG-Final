@@ -564,3 +564,36 @@ def test_non_e5_base_gets_own_dir_name():
 
     assert result["status"] == "completed", result
     assert result["model_path"] == str(Path(config.MODELS_DIR) / "bge-m3-finetuned-v1")
+
+
+# ── Владение задачей дообучения: регистрирует версию только владелец ──────────
+
+def test_finetune_not_registered_when_not_owner(store):
+    """Аренда задачи потеряна (still_owner → False): версия не регистрируется,
+    папка модели удаляется, статус failed с понятной причиной."""
+    storage = seed(store)
+    checks = []
+
+    def still_owner():
+        checks.append(1)
+        return False
+
+    result = finetune_model.run_training(storage, train_fn=FakeTrain(),
+                                         still_owner=still_owner)
+
+    assert checks == [1]
+    assert result["status"] == "failed"
+    assert "больше не принадлежит этому воркеру" in result["message"]
+    assert [mv.version for mv in storage.models.list()] == [0]
+    assert storage.classifier.vectors_for_version(1) == []
+    assert not (Path(config.MODELS_DIR) / "e5-finetuned-v1").exists()
+
+
+def test_finetune_registered_when_still_owner(store):
+    storage = seed(store)
+
+    result = finetune_model.run_training(storage, train_fn=FakeTrain(),
+                                         still_owner=lambda: True)
+
+    assert result["status"] == "completed"
+    assert storage.models.get(1) is not None
