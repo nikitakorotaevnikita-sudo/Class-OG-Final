@@ -129,10 +129,23 @@ ALTER TABLE jobs ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMPTZ;
 UPDATE jobs SET queue = CASE WHEN payload->>'queue' IN ('classify_sync','classify','training')
                              THEN payload->>'queue' ELSE 'classify' END
   WHERE queue IS NULL;
-ALTER TABLE jobs ALTER COLUMN queue SET DEFAULT 'classify';
-ALTER TABLE jobs ALTER COLUMN queue SET NOT NULL;
+-- running без аренды (взяты прежним claim() до обновления) - аренда считается истёкшей:
+-- claim_next перехватит такие задачи, а дообучение закроет fail_lost_training (иначе строка
+-- навсегда осталась бы running и держала one_active_finetune).
+UPDATE jobs SET locked_until = now() WHERE status = 'running' AND locked_until IS NULL;
+-- DEFAULT / NOT NULL / CHECK - только если их ещё нет: ALTER берёт ACCESS EXCLUSIVE,
+-- SET NOT NULL ещё и сканирует таблицу.
 DO $$
 BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_attrdef d
+                 JOIN pg_attribute a ON a.attrelid = d.adrelid AND a.attnum = d.adnum
+                 WHERE a.attrelid = 'jobs'::regclass AND a.attname = 'queue') THEN
+    ALTER TABLE jobs ALTER COLUMN queue SET DEFAULT 'classify';
+  END IF;
+  IF NOT (SELECT attnotnull FROM pg_attribute
+          WHERE attrelid = 'jobs'::regclass AND attname = 'queue') THEN
+    ALTER TABLE jobs ALTER COLUMN queue SET NOT NULL;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                  WHERE conname = 'jobs_queue_check' AND conrelid = 'jobs'::regclass) THEN
     ALTER TABLE jobs ADD CONSTRAINT jobs_queue_check

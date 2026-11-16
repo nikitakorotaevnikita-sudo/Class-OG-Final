@@ -308,11 +308,8 @@ def test_live_workers_from_pg_stat_activity(pg_conn):
         worker.close()
 
 
-@pytest.mark.db
-def test_schema_upgrade_existing_jobs(pg_conn):
-    """Старая форма jobs (без новых колонок): схема добавляет их и берёт queue из payload."""
-    from storage import db
-
+def _old_jobs_table(pg_conn):
+    """Форма jobs до очереди в БД (без queue/available_at/locked_until/...)."""
     pg_conn.execute("DROP TABLE jobs")
     pg_conn.execute(
         """CREATE TABLE jobs (
@@ -324,6 +321,14 @@ def test_schema_upgrade_existing_jobs(pg_conn):
              attempts INT NOT NULL DEFAULT 0,
              created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
              started_at TIMESTAMPTZ, finished_at TIMESTAMPTZ)""")
+
+
+@pytest.mark.db
+def test_schema_upgrade_existing_jobs(pg_conn):
+    """Старая форма jobs (без новых колонок): схема добавляет их и берёт queue из payload."""
+    from storage import db
+
+    _old_jobs_table(pg_conn)
     rows = (("a" * 32, "finetune", '{"queue": "training"}'),
             ("b" * 32, "search", '{"queue": "classify_sync"}'),
             ("c" * 32, "classify", '{}'),
@@ -348,3 +353,43 @@ def test_schema_upgrade_existing_jobs(pg_conn):
         pg_conn.execute(
             "INSERT INTO jobs (id, job_type, status, queue) VALUES (%s, 'classify', 'queued', 'x')",
             ("f" * 32,))
+
+
+@pytest.mark.db
+def test_schema_upgrade_running_rows_without_lease(pg_conn):
+    """running-строки прежнего claim() (locked_until NULL) после обновления схемы не зависают:
+    classify перехватывается, finetune закрывается fail_lost_training и освобождает
+    one_active_finetune; queued остаётся доступной."""
+    from storage import db
+    from storage.pg import PgStorage
+
+    _old_jobs_table(pg_conn)
+    for jid, jt, status, payload, attempts, minutes in (
+            ("a" * 32, "classify", "running", '{"queue": "classify"}', 1, 30),
+            ("b" * 32, "finetune", "running", '{"queue": "training"}', 1, 20),
+            ("c" * 32, "classify", "queued", '{"queue": "classify"}', 0, 10)):
+        pg_conn.execute(
+            """INSERT INTO jobs (id, job_type, status, payload, attempts, created_at, started_at)
+               VALUES (%s, %s, %s, %s, %s, now() - make_interval(mins => %s),
+                       CASE WHEN %s = 'running' THEN now() END)""",
+            (jid, jt, status, payload, attempts, minutes, status))
+    db.apply_schema(pg_conn)
+    db.apply_schema(pg_conn)  # повторно — без изменений
+    assert pg_conn.execute(
+        "SELECT count(*) FROM jobs WHERE status = 'running' AND locked_until IS NULL"
+    ).fetchone()[0] == 0
+    time.sleep(0.02)
+
+    jobs = PgStorage(_connect_factory(pg_conn)).jobs
+    first = jobs.claim_next(["classify_sync", "classify"], W, 60)
+    assert first.id == "a" * 32 and first.attempts == 2 and first.worker_id == W
+    second = jobs.claim_next(["classify_sync", "classify"], W, 60)
+    assert second.id == "c" * 32 and second.attempts == 1
+    assert jobs.claim_next(["classify_sync", "classify"], W, 60) is None
+
+    assert jobs.claim_next(["training"], W, 60) is None  # дообучение не перезапускается
+    lost = jobs.fail_lost_training()
+    assert [j.id for j in lost] == ["b" * 32]
+    assert jobs.get("b" * 32).error == LOST_TRAINING_ERROR
+    # one_active_finetune свободен: новое дообучение ставится без ActiveJobExists
+    assert jobs.create("finetune", {}, queue_class="training").status == STATUS_QUEUED
