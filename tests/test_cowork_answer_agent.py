@@ -2,7 +2,8 @@
 
 Держит то, что ломалось в прогоне из LibreChat 05.11.2026: переклассификация при
 кодах в карточке, плавающий формат (то md, то docx), срок «+30 рабочих дней»,
-несуществующий навык, нормы из памяти. Проект — спецификация
+несуществующий навык, нормы из памяти; с 12.11.2026 — ответ текстом для сотрудника
+без JSON и отладки и мягкий порядок шагов. Проект — спецификация
 docs/superpowers/specs/2026-11-05-cowork-answer-agent-design.md.
 """
 
@@ -44,7 +45,6 @@ def test_instruction_drops_what_broke_the_run():
 def test_codes_come_from_the_card():
     text = _text(INSTRUCTION)
     assert "без переклассификации" in text
-    assert '"codes_source"' in text and '"card' in text
 
 
 def test_deadline_comes_from_the_card():
@@ -56,20 +56,21 @@ def test_deadline_comes_from_the_card():
 def test_one_output_format():
     text = _text(INSTRUCTION)
     assert "Не создавай файлы" in text
-    assert "answer_text" in text and "без markdown" in text
+    assert "без таблиц и markdown внутри письма" in text
 
 
-def test_instruction_has_the_pipeline_and_the_contract():
+def test_soft_pipeline_and_plain_answer():
     text = _text(INSTRUCTION)
-    assert "БЕТОННОЕ ПРАВИЛО" in text
-    assert "=== ОТЛАДКА ===" in text
-    for key in ["document_id", "deadline", "questions", "practice", "legal_basis",
-                "answer_text", "summary", "reasoning", "check", "pipeline"]:
-        assert f'"{key}"' in text, key
+    assert "не повод" in text and "остановиться" in text
+    assert "не больше одного раза" in text and "двух кругов проверки не делай" in text
+    assert "без JSON" in text and "Проект ответа на обращение" in text
+    assert "Коротко по вопросам" in text and "Что учесть" in text
+    for gone in ["БЕТОННОЕ", "=== ОТЛАДКА ===", '"answer_text"', '"check"', "pipeline"]:
+        assert gone not in text, gone
 
 
-def test_no_personal_data_in_debug_rule():
-    assert "без ФИО" in _text(INSTRUCTION)
+def test_no_personal_data_in_summary_rule():
+    assert "без email, адресов и цитат" in _text(INSTRUCTION)
 
 
 @pytest.mark.parametrize("name", NEW_SKILLS)
@@ -85,12 +86,12 @@ def test_new_skills_have_valid_frontmatter(name):
 def test_practice_skill_widens_the_search_and_drops_boilerplate():
     text = _skill("answer-practice")
     for marker in ["list_citizen_request_answers", "limit=5", "skip", "XXXX.XXXX.XXXX",
-                   "12 месяцев", "og-answer-review", "searched_by", "от сегодняшней даты"]:
+                   "12 месяцев", "og-answer-review", "на чём нашлось", "от сегодняшней даты"]:
         assert marker in text, marker
 
 
 def test_legal_basis_skill_cites_only_what_was_found():
     text = _skill("answer-legal-basis")
     for marker in ["mcp-pravo", "search_documents", "только нормы, найденные",
-                   "needs_verification", "legal_basis", "из памяти"]:
+                   "нормы не найдены", "правовым отделом", "из памяти"]:
         assert marker in text, marker

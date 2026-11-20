@@ -1,8 +1,9 @@
 """Тексты агента-классификатора для ArioCowork: системная инструкция и навыки.
 
 Оператор вставляет их в интерфейс платформы как есть, поэтому тесты держат то,
-без чего агент сломается: имена тулов и навыков, контракт ответа для RX,
-правила разграничения кодов и корректный frontmatter навыков.
+без чего агент сломается: имена тулов и навыков, текстовый ответ для сотрудника
+(без JSON и отладки), мягкий порядок шагов, правила разграничения кодов и
+корректный frontmatter навыков.
 """
 
 import re
@@ -39,12 +40,25 @@ def test_instruction_names_every_tool_and_skill():
         assert name in text, name
 
 
-def test_instruction_has_the_rx_contract():
-    text = _instruction()
-    for key in ["document_id", "applicant_fio", "applicant_email", "summary", "reasoning",
-                "questions", "check"]:
-        assert f'"{key}"' in text, key
+def _answers_in_plain_text(text: str) -> None:
+    assert "без JSON" in text
+    assert "Вопросы и коды" in text and "Требует проверки" in text
     assert "250" in text and "1000" in text
+    for gone in ["=== ОТЛАДКА ===", "БЕТОННОЕ", '"document_id"', '"check"', "pipeline"]:
+        assert gone not in text, gone
+
+
+def _soft_pipeline(text: str) -> None:
+    assert "не повод" in text and "остановиться" in text
+    assert "не больше одного раза" in text
+
+
+def test_instruction_answers_in_plain_text():
+    _answers_in_plain_text(_instruction())
+
+
+def test_instruction_pipeline_is_soft():
+    _soft_pipeline(_instruction())
 
 
 @pytest.mark.parametrize("name", SKILLS)
@@ -80,9 +94,8 @@ def test_variant_b_has_its_own_instruction():
     assert "classifier_full.txt" in text
     assert "classifier-code" not in text
     assert "classifier_search" not in text
-    for key in ["document_id", "applicant_fio", "applicant_email", "summary", "reasoning",
-                "questions", "check"]:
-        assert f'"{key}"' in text, key
+    _answers_in_plain_text(text)
+    _soft_pipeline(text)
 
 
 def test_variant_b_skill_carries_the_disambiguations():
